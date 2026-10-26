@@ -79,7 +79,7 @@ def _uid(t):
     return uid
 
 
-NAMES = {"light": "ライトプラン（月額1,480円・月20枚）", "unlimited": "使い放題プラン（月額2,980円）",
+NAMES = {"light": "ライトプラン（月額1,480円（税込）・月20枚）", "unlimited": "使い放題プラン（月額2,980円（税別））",
          "fax": "FAXオプション（月額500円）"}
 
 
@@ -93,7 +93,7 @@ def pay(plan: str, t: str = ""):
         cur = u.get("plan")
         if plan == cur or (plan == "fax" and u.get("fax_option")):
             return page("ご契約中です", f"<p>すでに{NAMES[plan]}をご利用中です。</p>")
-        return page("ご契約内容の変更", f"""<p>{NAMES[plan]}に変更します。差額は日割りで次回のご請求に反映されます（価格は税別）。</p>
+        return page("ご契約内容の変更", f"""<p>{NAMES[plan]}に変更します。差額は日割りで次回のご請求に反映されます。</p>
 <form method=post action="/pay/{plan}/change?t={html.escape(t)}"><button>変更する</button></form>""")
     if plan == "fax":
         return page("FAXオプション", f"""<p>FAXオプションは、ライトプランか使い放題プランに追加してお申し込みいただけます。</p>
@@ -129,8 +129,8 @@ def portal(t: str = ""):
     url = billing.portal(uid)
     if not url:
         return page("料金プラン", f"""<p>まだ有料プランのお申し込みはありません。</p>
-<a class=btn href="/pay/light?t={html.escape(t)}">ライトプラン（月額1,480円・月20枚）</a>
-<a class=btn href="/pay/unlimited?t={html.escape(t)}">使い放題プラン（月額2,980円）</a><p><small>価格は税別です。</small></p>""")
+<a class=btn href="/pay/light?t={html.escape(t)}">ライトプラン（月額1,480円（税込）・月20枚）</a>
+<a class=btn href="/pay/unlimited?t={html.escape(t)}">使い放題プラン（月額2,980円（税別））</a>""")
     return RedirectResponse(url, status_code=303)
 
 

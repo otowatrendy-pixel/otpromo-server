@@ -1,5 +1,5 @@
 {
- "version": "2026-10-27 第3版（ライト月額1,480円に変更）",
+ "version": "2026-10-27 第6版（内見申込書FAXを追加・ライトは税込1,480円）",
  "note": "{ }は差し込み。送り方は reply=応答（通数に数えない）／push=プッシュ（月200通の無料枠から1通）。ボタンはクイックリプライ（ラベル20文字以内）またはFlexのボタン。",
  "common": {
   "disclaimer": "参考資料です。最終確認はご担当者様が行ってください。",
@@ -16,7 +16,7 @@
      "id": "follow",
      "when": "友だち追加されたとき（followイベント）",
      "send": "reply",
-     "text": "{表示名}さん、友だち追加ありがとうございます！\n\nこちらは「1分資料」です。\nマイソクの写真かPDFを送るだけで、接客に使える資料が5つ届きます。\n\n届く資料\n①帯替え図面\n②おすすめポイント\n③初期費用の概算書\n④ポータル掲載文\n⑤想定Q&A\n\n居住用の賃貸物件に対応しています。最初の5枚は無料でお試しいただけます。\n\nはじめに、資料の帯に入れる会社情報を登録します（2〜3分ほどで終わります）。\nご利用の前に、利用規約をご確認ください。\nhttps://otpromo.com/terms-maisoku.html",
+     "text": "{表示名}さん、友だち追加ありがとうございます！\n\nこちらは「1分資料」です。\nマイソクの写真かPDFを送るだけで、接客に使える資料が5つ届きます。\n\n届く資料\n①帯替え図面\n②おすすめポイント\n③初期費用の概算書\n④内見申込書（FAX用）\n⑤想定Q&A\n\n居住用の賃貸物件に対応しています。最初の5枚は無料でお試しいただけます。\n\nはじめに、資料の帯に入れる会社情報を登録します（2〜3分ほどで終わります）。\nご利用の前に、利用規約をご確認ください。\nhttps://otpromo.com/terms-maisoku.html",
      "buttons": [
       {
        "label": "同意して登録をはじめる",
@@ -361,6 +361,10 @@
        "action": "postback edit=obi"
       },
       {
+       "label": "名刺の情報",
+       "action": "postback edit=card"
+      },
+      {
        "label": "受け取り方",
        "action": "postback edit=recv"
       }
@@ -422,6 +426,10 @@
      "text": "資料ができました！\n\n物件：{物件名}\n\n▼5つの資料（PDF）\n{リンク}\n※リンクは{有効期限}まで開けます。\n\n参考資料です。最終確認はご担当者様が行ってください。\n\n{のこり枚数の案内}",
      "buttons": [
       {
+       "label": "この物件で内見FAX",
+       "action": "postback naiken=from_last"
+      },
+      {
        "label": "メールにも送る",
        "action": "postback send=mail"
       },
@@ -450,6 +458,10 @@
      "text": "資料ができました！\n{メールアドレス}あてにお送りしました。\n\n物件：{物件名}\n\n参考資料です。最終確認はご担当者様が行ってください。\n\n{のこり枚数の案内}",
      "buttons": [
       {
+       "label": "この物件で内見FAX",
+       "action": "postback naiken=from_last"
+      },
+      {
        "label": "LINEでも見る",
        "action": "postback send=line"
       },
@@ -465,6 +477,10 @@
      "send": "reply（間に合わなければpush）",
      "text": "資料ができました！\n{FAX番号}あてにFAXでお送りしています。数分で届きます。\n\n物件：{物件名}\n\n参考資料です。最終確認はご担当者様が行ってください。\n\n{のこり枚数の案内}",
      "buttons": [
+      {
+       "label": "この物件で内見FAX",
+       "action": "postback naiken=from_last"
+      },
       {
        "label": "LINEでも見る",
        "action": "postback send=line"
@@ -526,7 +542,7 @@
      "send": "reply",
      "text": "お客様に送るときは、帯替え図面の画像やリンクを長押しして「転送」を押し、お客様のトークを選んでください。\n\n※おすすめポイントと想定Q&Aは、ご担当者様の接客準備用です。お客様にお送りする前に、内容をご確認ください。",
      "buttons": [],
-     "note": "【要決定】お客様向け（帯替え図面・概算書・掲載文）と社内向け（おすすめポイント・Q&A）でPDFを分けるか。"
+     "note": "【要決定】お客様向け（帯替え図面・概算書）と社内向け（おすすめポイント・Q&A）でPDFを分けるか。内見申込書は管理会社にFAXするもので、お客様には送らない。"
     }
    ]
   },
@@ -545,7 +561,7 @@
      "id": "remain_free_last",
      "when": "無料お試しののこり1枚",
      "send": "（追記）",
-     "text": "無料のこり1枚です。\n続けてお使いいただく場合は、ライトプラン（月額1,480円・月20枚）か使い放題（月額2,980円）をご検討ください。",
+     "text": "無料のこり1枚です。\n続けてお使いいただく場合は、ライトプラン（月額1,480円・税込・月20枚）か使い放題（月額2,980円）をご検討ください。",
      "buttons": [
       {
        "label": "料金プランを見る",
@@ -601,7 +617,7 @@
      "id": "plan_show",
      "when": "「料金プランを見る」・メニューから",
      "send": "reply",
-     "text": "料金プランのご案内です。\n\n■ライト　月額1,480円\n　月20枚まで\n\n■使い放題　月額2,980円\n　枚数の上限なし\n\n■FAXオプション　月額＋500円\n　資料をFAXでもお届け\n\n（価格は税別です）\nお申し込みはボタンから。クレジットカードでお支払いいただけます。いつでも解約できます。",
+     "text": "料金プランのご案内です。\n\n■ライト　月額1,480円（税込）\n　月20枚まで\n\n■使い放題　月額2,980円（税別）\n　枚数の上限なし\n\n■FAXオプション　月額＋500円（税別）\n　資料をFAXでもお届け\n\nお申し込みはボタンから。クレジットカードでお支払いいただけます。いつでも解約できます。",
      "buttons": [
       {
        "label": "ライトを申し込む",
@@ -799,7 +815,8 @@
        "label": "お問い合わせ",
        "action": "postback help=contact"
       }
-     ]
+     ],
+     "note": "文頭が「内見」「内見FAX」のときは、この文ではなく内見申込FAXの流れ（naiken_parse）に回す。"
     },
     {
      "id": "err_other",
@@ -831,10 +848,30 @@
    "title": "7. 使い方・お問い合わせ",
    "messages": [
     {
+     "id": "help_menu",
+     "when": "メニューの「使い方・お問い合わせ」",
+     "send": "reply",
+     "text": "どちらをご覧になりますか？",
+     "buttons": [
+      {
+       "label": "使い方",
+       "action": "postback help=usage"
+      },
+      {
+       "label": "お問い合わせ",
+       "action": "postback help=contact"
+      },
+      {
+       "label": "よくある質問",
+       "action": "uri https://otpromo.com/maisoku.html#faq"
+      }
+     ]
+    },
+    {
      "id": "help_usage",
      "when": "メニューの「使い方」",
      "send": "reply",
-     "text": "「1分資料」の使い方はかんたんです。\n\n①マイソクを撮る\n　全体が入るように、横向きで\n　（PDFのままでもOK。1ページ目を使います）\n②このトークに送る\n③1分ほどで、資料が5つ届く\n\n届いた資料は、長押しして「転送」でお客様に送れます。\n\n届く資料\n①帯替え図面\n②おすすめポイント\n③初期費用の概算書\n④ポータル掲載文\n⑤想定Q&A\n\nマイソクに書いてあることだけで作ります。書いていないことは「要確認」と入ります。",
+     "text": "「1分資料」の使い方はかんたんです。\n\n①マイソクを撮る\n　全体が入るように、横向きで\n　（PDFのままでもOK。1ページ目を使います）\n②このトークに送る\n③1分ほどで、資料が5つ届く\n\n届いた資料は、長押しして「転送」でお客様に送れます。\n\n届く資料\n①帯替え図面\n②おすすめポイント\n③初期費用の概算書\n④内見申込書（FAX用）\n⑤想定Q&A\n\nマイソクに書いてあることだけで作ります。書いていないことは「要確認」と入ります。\n\n内見の申込書を管理会社にFAXすることもできます。メニューの「内見申込FAX」からどうぞ。",
      "buttons": [
       {
        "label": "カメラを開く",
@@ -860,6 +897,260 @@
      "note": "HPにFAQの見出し（#faq）があるか要確認。"
     }
    ]
+  },
+  {
+   "id": "naiken",
+   "title": "8. 内見申込書FAX",
+   "messages": [
+    {
+     "id": "naiken_start",
+     "when": "メニューの「内見申込FAX」",
+     "send": "reply",
+     "text": "管理会社に、内見の申込書をFAXでお送りします。\n\n次の内容を、1通にまとめて送ってください。順番や書き方は自由です。足りないところは、こちらからお聞きします。\n\n・物件名と号室\n・内見の希望日時（3つまで）\n・管理会社の名前とFAX番号\n・お客様の人数（あれば）\n\n例）\n内見FAX\nグリーンヒル阿佐谷 301\n10/29 14時、10/30 11時\nひかり不動産管理 03-0000-1111\nお客様2名",
+     "buttons": [
+      {
+       "label": "最近の物件から選ぶ",
+       "action": "postback naiken=recent"
+      },
+      {
+       "label": "よく使う宛先から選ぶ",
+       "action": "postback naiken=history"
+      },
+      {
+       "label": "やめる",
+       "action": "postback cancel"
+      }
+     ],
+     "note": "例の会社名・番号は架空。マイソクの写真を送ってもらえれば、物件名・管理会社・FAX番号をマイソクから読み取る。"
+    },
+    {
+     "id": "naiken_from_last",
+     "when": "資料の下の「この物件で内見FAX」",
+     "send": "reply",
+     "text": "{物件名}の内見申込書をお作りします。\n管理会社とFAX番号は、マイソクから読み取りました。\n\n宛先：{管理会社}\nFAX：{FAX番号}\n\n内見の希望日時を教えてください。3つまで書けます。\n（例：10/29 14時、明日の午前）",
+     "buttons": [
+      {
+       "label": "宛先を直す",
+       "action": "postback naiken=edit_to"
+      },
+      {
+       "label": "やめる",
+       "action": "postback cancel"
+      }
+     ],
+     "note": "マイソクに管理会社のFAX番号がないときは「宛先が読み取れませんでした」として naiken_ask_to へ。"
+    },
+    {
+     "id": "naiken_ask_dates",
+     "when": "希望日時がわからないとき",
+     "send": "reply",
+     "text": "内見の希望日時を教えてください。3つまで書けます。\n（例：10/29 14時、10/30 11時）\n\n「明日の午後」「土曜の午前」のような書き方でも大丈夫です。",
+     "buttons": []
+    },
+    {
+     "id": "naiken_ask_property",
+     "when": "物件名・号室がわからないとき",
+     "send": "reply",
+     "text": "物件名と号室を教えてください。\n（例：グリーンヒル阿佐谷 301）\n\nマイソクの写真を送っていただければ、そこから読み取ります。",
+     "buttons": [
+      {
+       "label": "最近の物件から選ぶ",
+       "action": "postback naiken=recent"
+      }
+     ]
+    },
+    {
+     "id": "naiken_ask_to",
+     "when": "宛先（管理会社・FAX番号）がわからないとき",
+     "send": "reply",
+     "text": "送り先の管理会社の名前と、FAX番号を教えてください。\n（例：ひかり不動産管理 賃貸管理部 03-0000-1111）",
+     "buttons": [
+      {
+       "label": "よく使う宛先から選ぶ",
+       "action": "postback naiken=history"
+      }
+     ]
+    },
+    {
+     "id": "naiken_fax_invalid",
+     "when": "FAX番号の形がおかしい・携帯やフリーダイヤルのとき",
+     "send": "reply",
+     "text": "すみません、「{入力された番号}」にはお送りできません。\n携帯電話・0120・0570・海外の番号には、FAXをお送りしていません。\n\nお手数ですが、管理会社のFAX番号をもう一度ご確認のうえ、送ってください。",
+     "buttons": []
+    },
+    {
+     "id": "naiken_card_intro",
+     "when": "はじめて内見FAXを使うとき（名刺の情報が未登録）",
+     "send": "reply",
+     "text": "はじめての内見FAXですね。ありがとうございます！\n申込書の下半分に、名刺のような形でご担当者様の情報が入ります。最初の1回だけ、いくつか教えてください（1分ほど）。\n\nまず、ご担当者様のお名前を教えてください。\n（例：山田 花子）",
+     "buttons": []
+    },
+    {
+     "id": "naiken_card_roman",
+     "when": "名刺：お名前の次",
+     "send": "reply",
+     "text": "お名前のローマ字を教えてください。\n（例：Hanako Yamada）\nなければ「なし」を押してください。",
+     "buttons": [
+      {
+       "label": "なし",
+       "action": "postback card_roman=none"
+      }
+     ]
+    },
+    {
+     "id": "naiken_card_role",
+     "when": "名刺：ローマ字の次",
+     "send": "reply",
+     "text": "部署・役職・資格があれば教えてください。\n（例：賃貸営業課 宅地建物取引士）\nなければ「なし」を押してください。",
+     "buttons": [
+      {
+       "label": "なし",
+       "action": "postback card_role=none"
+      }
+     ]
+    },
+    {
+     "id": "naiken_card_contact",
+     "when": "名刺：役職の次",
+     "send": "reply",
+     "text": "携帯電話の番号とメールアドレスがあれば教えてください。名刺の部分に入ります。\n（例：090-0000-4444 yamada@example.jp）\nなければ「なし」を押してください。",
+     "buttons": [
+      {
+       "label": "なし",
+       "action": "postback card_contact=none"
+      }
+     ]
+    },
+    {
+     "id": "naiken_card_fax",
+     "when": "名刺：会社のFAX番号が未登録のとき",
+     "send": "reply",
+     "text": "管理会社からのご回答は、御社のFAXに届きます。\n御社のFAX番号を教えてください。",
+     "buttons": [],
+     "note": "返信先として必須。初回登録で「FAXなし」を選んだ方だけに聞く。"
+    },
+    {
+     "id": "naiken_card_done",
+     "when": "名刺の情報がそろったとき",
+     "send": "reply",
+     "text": "ありがとうございます。名刺の情報を登録しました。次回からはお聞きしません。\n変えたいときは、メニューの「登録内容の変更」→「名刺の情報」からどうぞ。",
+     "buttons": [],
+     "note": "このあと続けて naiken_confirm を送る（1回の応答にまとめる）。"
+    },
+    {
+     "id": "naiken_confirm",
+     "when": "内容がそろったとき（申込書の画像を1枚添える）",
+     "send": "reply",
+     "text": "この内容でFAXをお送りします。ご確認ください。\n\n■送り先\n{管理会社} 御中\nFAX：{FAX番号}{読み取り元}\n\n■物件\n{物件名} {号室}号室\n\n■内見の希望日時\n第1希望：{日時1}\n第2希望：{日時2}\n第3希望：{日時3}\n\n■お客様：{人数}名\n■ご案内：{ご案内担当}\n\nまだ送っていません。「この内容で送信」を押すとお送りします。",
+     "buttons": [
+      {
+       "label": "この内容で送信",
+       "action": "postback naiken=send"
+      },
+      {
+       "label": "直す",
+       "action": "postback naiken=edit"
+      },
+      {
+       "label": "やめる",
+       "action": "postback cancel"
+      }
+     ],
+     "note": "FAX番号は必ず表示。マイソクから読んだときは {読み取り元}＝「（マイソクから読み取りました）」。日時は必ず日付と曜日に直して表示（日本時間）。入っていない希望日時・人数の行は出さない。"
+    },
+    {
+     "id": "naiken_edit",
+     "when": "「直す」を押したとき",
+     "send": "reply",
+     "text": "直したい項目を選んでください。",
+     "buttons": [
+      {
+       "label": "送り先",
+       "action": "postback naiken=edit_to"
+      },
+      {
+       "label": "FAX番号",
+       "action": "postback naiken=edit_fax"
+      },
+      {
+       "label": "物件・号室",
+       "action": "postback naiken=edit_prop"
+      },
+      {
+       "label": "希望日時",
+       "action": "postback naiken=edit_dates"
+      },
+      {
+       "label": "お客様の人数",
+       "action": "postback naiken=edit_guests"
+      },
+      {
+       "label": "ご案内担当",
+       "action": "postback naiken=edit_guide"
+      }
+     ]
+    },
+    {
+     "id": "naiken_sending",
+     "when": "「この内容で送信」を押したとき",
+     "send": "reply",
+     "text": "送信をはじめました。\n結果は、届きしだいこちらでお知らせします（数分かかることがあります）。",
+     "buttons": []
+    },
+    {
+     "id": "naiken_sent",
+     "when": "送信が完了したとき",
+     "send": "push",
+     "text": "内見申込書のFAXを送信しました。\n\n送り先：{管理会社}（{FAX番号}）\n物件：{物件名} {号室}号室\n\nご回答は、御社のFAX（{自社FAX}）に届きます。\n送った申込書は、こちらから7日間見られます。\n{リンク}",
+     "buttons": [
+      {
+       "label": "同じ物件でもう一度",
+       "action": "postback naiken=again"
+      }
+     ],
+     "note": "送信結果はFAX会社からの通知を受けてから送るため、push（1通）になる。"
+    },
+    {
+     "id": "naiken_retrying",
+     "when": "相手が話し中・応答なしで再送しているとき",
+     "send": "push",
+     "text": "送り先のFAXが話し中のため、まだ届いていません。\n少し時間をおいて、自動でもう一度お送りします。届いたら、あらためてお知らせします。",
+     "buttons": [],
+     "note": "【要確認】faximoSilverの再送の回数・間隔と、再送分の料金。通数を節約するなら、この通知はやめて成功か失敗だけを送る。"
+    },
+    {
+     "id": "naiken_failed",
+     "when": "送信できなかったとき",
+     "send": "push",
+     "text": "申し訳ありません。内見申込書のFAXを送ることができませんでした。\n\n送り先：{管理会社}（{FAX番号}）\n理由：{理由}\n\nFAX番号が合っているかご確認のうえ、もう一度お試しください。今回の分は、回数に数えていません。",
+     "buttons": [
+      {
+       "label": "番号を直して送る",
+       "action": "postback naiken=edit_fax"
+      },
+      {
+       "label": "もう一度送る",
+       "action": "postback naiken=send"
+      }
+     ],
+     "note": "{理由}の例：「相手のFAXが応答しませんでした」「番号が使われていないようでした」"
+    },
+    {
+     "id": "naiken_canceled",
+     "when": "「やめる」を押したとき",
+     "send": "reply",
+     "text": "内見申込書の送信をやめました。FAXはお送りしていません。",
+     "buttons": []
+    },
+    {
+     "id": "naiken_limit",
+     "when": "内見FAXの回数・料金の上限に達したとき",
+     "send": "reply",
+     "text": "（料金の扱いが決まりしだい作ります）",
+     "buttons": [],
+     "note": "【要決定】内見FAXを各プランに何回まで含めるか（FAXオプションの枠に1ページとして数える案あり）。無料お試し中に使えるか。"
+    }
+   ]
   }
  ],
  "richmenu": {
@@ -881,9 +1172,9 @@
     },
     {
      "pos": "右上",
-     "label": "使い方",
-     "sub": "",
-     "action": "postback help=usage"
+     "label": "内見申込FAX",
+     "sub": "管理会社へ申込書",
+     "action": "postback naiken=start"
     },
     {
      "pos": "左下",
@@ -899,9 +1190,9 @@
     },
     {
      "pos": "右下",
-     "label": "お問い合わせ",
+     "label": "使い方・お問い合わせ",
      "sub": "",
-     "action": "postback help=contact"
+     "action": "postback help=menu"
     }
    ]
   },

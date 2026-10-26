@@ -1,6 +1,6 @@
 """Stripe の支払い（Checkout）・お客様ページ・Webhook。
 
-月額はすべて税別（外税）。消費税10%の税率（txr_）を Checkout に付ける。
+ライトは税込1,480円、使い放題・FAXオプションは税別。消費税10%の税率（txr_）を項目ごとに付ける。
 """
 import base64
 import hashlib
@@ -56,27 +56,34 @@ def portal_url(uid):
 
 
 # ---------- 税率 ----------
+# ライトは税込価格（1,480円）、使い放題・FAXオプションは税別価格。項目ごとに税込・税別の消費税10%を付ける
 
-_tax = None
+_tax = {}
 
 
-def tax_rate():
-    """消費税10%（外税）の税率。設定がなければStripeから探し、なければ作る。"""
-    global _tax
-    if config.TAX_RATE:
+def tax_rate(inclusive=False):
+    """消費税10%の税率（txr_）。Stripeから探し、なければ作る。"""
+    if not inclusive and config.TAX_RATE:
         return config.TAX_RATE
-    if _tax:
-        return _tax
+    if inclusive in _tax:
+        return _tax[inclusive]
     s = _stripe()
+    tag = "jct10-in" if inclusive else "jct10"
     for r in s.TaxRate.list(active=True, limit=100).auto_paging_iter():
         r = plain(r)
-        if r.percentage == 10 and not r.inclusive and r.get("metadata", {}).get("otpromo") == "jct10":
-            _tax = r["id"]
-            return _tax
-    r = s.TaxRate.create(display_name="消費税", percentage=10, inclusive=False, country="JP",
-                         jurisdiction="JP", description="消費税10%", metadata={"otpromo": "jct10"})
-    _tax = r.id
-    return _tax
+        if r.get("metadata", {}).get("otpromo") == tag:
+            _tax[inclusive] = r["id"]
+            return r["id"]
+    r = s.TaxRate.create(display_name="消費税", percentage=10, inclusive=inclusive, country="JP",
+                         jurisdiction="JP", description="消費税10%" + ("（内税）" if inclusive else ""),
+                         metadata={"otpromo": tag})
+    _tax[inclusive] = r["id"]
+    return r["id"]
+
+
+def item_tax(price):
+    """その価格に付ける税率。ライトだけ税込。"""
+    return [tax_rate(inclusive=(price == config.PRICE_LIGHT))]
 
 
 # ---------- 申し込み ----------
@@ -86,13 +93,13 @@ def checkout(uid, plan, fax=False):
     s = _stripe()
     u = store.get_user(uid)
     price = {"light": config.PRICE_LIGHT, "unlimited": config.PRICE_UNLIMITED}[plan]
-    items = [{"price": price, "quantity": 1}]
+    items = [{"price": price, "quantity": 1, "tax_rates": item_tax(price)}]
     if fax:
-        items.append({"price": config.PRICE_FAX, "quantity": 1})
+        items.append({"price": config.PRICE_FAX, "quantity": 1, "tax_rates": item_tax(config.PRICE_FAX)})
     company = (u.get("company") or {}).get("会社名") or ""
     params = dict(
         mode="subscription", line_items=items, client_reference_id=uid,
-        subscription_data={"default_tax_rates": [tax_rate()], "metadata": {"uid": uid}},
+        subscription_data={"metadata": {"uid": uid}},
         metadata={"uid": uid, "plan": plan},
         success_url=f"{config.BASE_URL}/paid?t={sign(uid)}",
         cancel_url=f"{config.BASE_URL}/canceled",
@@ -116,9 +123,10 @@ def change_plan(uid, plan=None, fax=None):
     for it in sub["items"]["data"]:
         pid = it["price"]["id"]
         if plan and pid in (config.PRICE_LIGHT, config.PRICE_UNLIMITED):
-            items.append({"id": it["id"], "price": config.PRICE_UNLIMITED if plan == "unlimited" else config.PRICE_LIGHT})
+            new = config.PRICE_UNLIMITED if plan == "unlimited" else config.PRICE_LIGHT
+            items.append({"id": it["id"], "price": new, "tax_rates": item_tax(new)})
     if fax and not any(it["price"]["id"] == config.PRICE_FAX for it in sub["items"]["data"]):
-        items.append({"price": config.PRICE_FAX, "quantity": 1})
+        items.append({"price": config.PRICE_FAX, "quantity": 1, "tax_rates": item_tax(config.PRICE_FAX)})
     if items:
         s.Subscription.modify(sub["id"], items=items, proration_behavior="create_prorations")
     sync_subscription(s.Subscription.retrieve(sub["id"]))
