@@ -62,7 +62,7 @@ class CompanyIn(BaseModel):
     ローマ字: str = ""
     役職: str = ""
     携帯: str = ""
-    メール: str = ""
+    担当者メール: str = ""
     受け取り方: str = "app"
     メール: str = ""
     FAX送り先: str = ""
@@ -73,6 +73,7 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     uid, u = _me(authorization)
     co = body.model_dump()
     delivery = {"method": co.pop("受け取り方"), "email": co.pop("メール"), "fax": co.pop("FAX送り先")}
+    co["メール"] = co.pop("担当者メール")  # 名刺に載せるメール（受け取り用とは別）
     co["帯画像"] = (u.get("company") or {}).get("帯画像")
     co["名刺済み"] = bool(co.get("担当者名"))
     store.update_user(uid, {"company": co, "delivery": delivery, "registered": True})
