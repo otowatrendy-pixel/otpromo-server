@@ -366,15 +366,16 @@ def plan_status(c):
     month, packs, _ = naiken.remaining(c.u)
     live_packs = sorted([p for p in (c.u.get("fax_packs") or []) if p["exp"] > store.now() and p["used"] < p["n"]],
                         key=lambda p: p["exp"])
-    soon = sorted(store._live_grants(c.u), key=lambda g: g["exp"]) if q["plan"] == "light" else []
     text = texts.raw("plan_status", プラン名=billing.PLAN_NAMES[q["plan"]],
                      n="上限なし" if q["remaining"] is None else q["remaining"],
-                     失効の案内=f"（うち{soon[0]['n'] - soon[0]['used']}枚は{_md(soon[0]['exp'])}まで）" if len(soon) > 1 else "",
+                     失効の案内="",
                      内見残=month, 追加FAXの案内=f"＋追加分{packs}回（{_md(live_packs[0]['exp'])}まで）" if packs else "",
                      更新日=store.renew_date(c.u),
                      受け取り方={"line": "LINE", "email": "メール", "fax": "FAX"}.get(d.get("method"), "LINE"))
     if q["plan"] == "unlimited":
-        text = text.replace("資料のこり：上限なし枚", f"資料：枚数の上限なし（今月{q['month_used']}枚）")
+        text = text.replace("資料のこり：今月上限なし枚", f"資料：枚数の上限なし（今月{q['month_used']}枚）")
+    elif q["plan"] == "free":
+        text = text.replace("資料のこり：今月", "資料のこり：")  # お試しの枚数は月ごとではない
     return texts.build("plan_status", urls=plan_urls(c), text=text)
 
 
@@ -412,15 +413,6 @@ def _md(dt):
     return f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）"
 
 
-def expiry_note(u):
-    """ライトの繰り越し分で、30日以内に失効する分の案内。"""
-    soon = [g for g in store._live_grants(u) if (g["exp"] - store.now()).days < 30]
-    if not soon:
-        return ""
-    g = sorted(soon, key=lambda g: g["exp"])[0]
-    return f"うち{g['n'] - g['used']}枚は{_md(g['exp'])}までにお使いください。"
-
-
 def remain_note(u):
     q = store.quota(u)
     if q["plan"] == "unlimited":
@@ -429,10 +421,8 @@ def remain_note(u):
         return ""
     n = q["remaining"]
     if q["plan"] == "light":
-        mid = "remain_light_low" if n <= 3 else "remain_light"
-        t = texts.note(mid, n=n, 更新日=store.renew_date(u))
-        exp = expiry_note(u)
-        return t + ("\n" + exp if exp else "")
+        mid = "remain_light_low" if n <= 5 else "remain_light"
+        return texts.note(mid, n=n, 更新日=store.renew_date(u))
     if n == 0:
         return texts.note("remain_free_zero")
     if n == 1:

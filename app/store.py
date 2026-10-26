@@ -215,15 +215,12 @@ def renew_date(u):
     return f"{d.month}月{d.day}日"
 
 
-# ライトのAI資料は「付与」単位で持つ：毎期20枚を付与、付与から3か月で失効、残高は最大40枚（繰り越し可）
-GRANT_DAYS = int(config.env("AI_GRANT_DAYS", "90"))
-AI_CAP = int(config.env("AI_BALANCE_CAP", "40"))
+# ライトのAI資料は毎期50枚。繰り越しなし（期が変わると残りは消えて、新しい50枚に入れ替わる）
 UNLIMITED_SOFT_CAP = int(config.env("UNLIMITED_SOFT_CAP", "300"))  # 規約上の目安。超えたらログに残す
 
 
 def _live_grants(u):
-    t = now()
-    return [g for g in (u.get("ai_grants") or []) if g["exp"] > t and g["used"] < g["n"]]
+    return [g for g in (u.get("ai_grants") or []) if g["used"] < g["n"]]
 
 
 def ai_balance(u):
@@ -235,14 +232,9 @@ def _roll_month(u):
         return
     u["month_key"], u["month_used"] = period_key(u), 0
     if (u.get("plan") or "free") == "light":
-        import monitor
-        grant = config.LIGHT_SHEETS + monitor.bonus_sheets(u)
-        room = max(0, AI_CAP + monitor.bonus_sheets(u) - ai_balance(u))
-        n = min(grant, room)
-        live = _live_grants(u)
-        if n > 0:
-            live.append({"n": n, "used": 0, "at": now(), "exp": now() + timedelta(days=GRANT_DAYS)})
-        u["ai_grants"] = live
+        u["ai_grants"] = [{"n": config.LIGHT_SHEETS, "used": 0, "at": now()}]
+    else:
+        u["ai_grants"] = []
 
 
 def quota(u):
@@ -253,9 +245,7 @@ def quota(u):
     if plan == "unlimited":
         return {"plan": plan, "remaining": None, "free_left": 0, "month_used": u["month_used"]}
     if plan == "light":
-        live = sorted(_live_grants(u), key=lambda g: g["exp"])
-        return {"plan": plan, "remaining": ai_balance(u), "free_left": 0, "month_used": u["month_used"],
-                "next_expiry": live[0]["exp"] if live else None}
+        return {"plan": plan, "remaining": ai_balance(u), "free_left": 0, "month_used": u["month_used"]}
     left = max(0, u.get("free_limit", config.FREE_SHEETS) - u.get("free_used", 0))
     return {"plan": "free", "remaining": left, "free_left": left, "month_used": u["month_used"]}
 
@@ -268,8 +258,7 @@ def try_consume(uid):
         if q["remaining"] is not None and q["remaining"] <= 0:
             return False
         if q["plan"] == "light":
-            g = sorted(_live_grants(u), key=lambda g: g["exp"])[0]  # 期限の近い分から使う
-            g["used"] += 1
+            _live_grants(u)[0]["used"] += 1
         u["month_used"] = u.get("month_used", 0) + 1
         u["total_docs"] = u.get("total_docs", 0) + 1
         if q["plan"] == "free":
@@ -292,7 +281,7 @@ def refund(uid):
         if plan == "light":
             used = [g for g in (u.get("ai_grants") or []) if g["used"] > 0]
             if used:
-                sorted(used, key=lambda g: g["exp"])[0]["used"] -= 1
+                used[0]["used"] -= 1
     db().update_tx("users", uid, fn)
 
 

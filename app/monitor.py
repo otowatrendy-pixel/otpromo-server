@@ -2,7 +2,7 @@
 
 - 申し込み：LINEで合言葉（MONITOR_CODE、既定「モニター」）→ Stripe でカードなしの無料期間つき契約を作る
   （無料期間が終わってカードがなければ自動で終わる：trial_settings.end_behavior.missing_payment_method=cancel）
-- カード登録：Checkout（mode=setup）→ 契約の支払い方法に設定。有料の最初の期間だけ 20→30 枚
+- カード登録：Checkout（mode=setup）→ 契約の支払い方法に設定。有料の最初の期間だけ内見FAXが 20→30 回
 - お知らせ：毎日の定期実行（/cron/daily）で、終了7日前・前日（カード未登録）・終了翌日（カード未登録）に push
 """
 import calendar
@@ -103,7 +103,7 @@ def card_checkout(uid):
 
 
 def on_setup_completed(obj):
-    """カード登録（mode=setup）が済んだとき。契約の支払い方法にして、最初の有料期間を30枚にする。"""
+    """カード登録（mode=setup）が済んだとき。契約の支払い方法にして、最初の有料期間の内見FAXを30回にする。"""
     s = billing._stripe()
     uid = obj.get("client_reference_id")
     u = store.get_user(uid) if uid else None
@@ -123,7 +123,7 @@ def on_setup_completed(obj):
 
 
 def bonus_sheets(u):
-    """カード登録したモニターの、有料の最初の期間だけ足す枚数。"""
+    """カード登録したモニターの、有料の最初の期間だけ足す内見FAXの回数（資料の枚数は増やさない）。"""
     bp, ps = u.get("bonus_period"), u.get("period_start")
     if bp and ps and abs((ps - bp).total_seconds()) < 3 * 86400 and (u.get("plan") == "light"):
         return BONUS

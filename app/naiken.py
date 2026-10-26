@@ -223,10 +223,16 @@ def pack_left(u):
     return sum(p["n"] - p["used"] for p in (u.get("fax_packs") or []) if p["exp"] > t)
 
 
+def month_limit(u):
+    """今月の内見FAXの上限。モニターからカード登録で続けた方は、最初の有料期間だけ＋10回。"""
+    import monitor
+    return LIMITS.get(u.get("plan") or "free", LIMITS["free"])[0] + monitor.bonus_sheets(u)
+
+
 def remaining(u):
     """(今月の残り, 追加購入分の残り, 本日の残り)"""
     m, d = usage(u)
-    lim_m, lim_d = LIMITS.get(u.get("plan") or "free", LIMITS["free"])
+    lim_m, lim_d = month_limit(u), LIMITS.get(u.get("plan") or "free", LIMITS["free"])[1]
     return max(0, lim_m - m), pack_left(u), max(0, lim_d - d)
 
 
@@ -238,7 +244,7 @@ def can_send(u):
 def limit_info(u):
     """上限に達したときの案内用。(期間, 上限, 次に使える日)"""
     month, packs, day = remaining(u)
-    lim_m, lim_d = LIMITS.get(u.get("plan") or "free", LIMITS["free"])
+    lim_m, lim_d = month_limit(u), LIMITS.get(u.get("plan") or "free", LIMITS["free"])[1]
     if day <= 0 and (month > 0 or packs > 0):
         return "本日", lim_d, "明日"
     now = datetime.now(store.JST)
@@ -254,7 +260,7 @@ def count(uid, delta=1):
     def fn(u):
         c = u.get("naiken_count") or {}
         m = c.get("m", {}).get(mk, 0)
-        lim_m = LIMITS.get(u.get("plan") or "free", LIMITS["free"])[0]
+        lim_m = month_limit(u)
         if delta > 0 and m >= lim_m:
             # 今月の枠を使い切っている → 期限の近い追加購入分から使う
             packs = sorted([p for p in (u.get("fax_packs") or []) if p["exp"] > store.now() and p["used"] < p["n"]],

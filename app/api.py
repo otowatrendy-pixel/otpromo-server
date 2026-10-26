@@ -46,7 +46,7 @@ def me(authorization: str = Header("")):
     q = store.quota(u)
     month, packs, day = naiken.remaining(u)
     return {"plan": q["plan"], "plan_source": u.get("plan_source"), "remaining": q["remaining"],
-            "next_expiry": q.get("next_expiry"), "naiken_month_left": month, "naiken_pack_left": packs,
+            "naiken_month_left": month, "naiken_pack_left": packs,
             "naiken_day_left": day,
             "free_left": q["free_left"], "registered": u.get("registered", False),
             "company": u.get("company") or {}, "delivery": u.get("delivery") or {}}

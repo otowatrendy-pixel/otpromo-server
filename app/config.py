@@ -42,5 +42,5 @@ FIREBASE_PROJECT = env("FIREBASE_PROJECT", "otpromo-maisoku")
 
 # 料金と枚数
 FREE_SHEETS = int(env("FREE_SHEETS", "5"))       # 最初の無料枚数（通算）
-LIGHT_SHEETS = int(env("LIGHT_SHEETS", "20"))    # ライトの月の枚数
+LIGHT_SHEETS = int(env("LIGHT_SHEETS", "50"))    # ライトの月の枚数（繰り越しなし）
 FILE_DAYS = int(env("FILE_DAYS", "7"))           # PDFのリンクの有効日数
