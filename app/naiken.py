@@ -222,6 +222,17 @@ def can_send(u):
     return m < lim_m and d < lim_d
 
 
+def limit_info(u):
+    """上限に達したときの案内用。(期間, 上限, 次に使える日)"""
+    m, d = usage(u)
+    lim_m, lim_d = LIMITS.get(u.get("plan") or "free", LIMITS["free"])
+    if d >= lim_d and m < lim_m:
+        return "本日", lim_d, "明日"
+    now = datetime.now(store.JST)
+    nxt = datetime(now.year + (now.month == 12), now.month % 12 + 1, 1)
+    return "今月", lim_m, f"{nxt.month}月{nxt.day}日"
+
+
 def count(uid, delta=1):
     now = datetime.now(store.JST)
     mk, dk = now.strftime("%Y-%m"), now.strftime("%Y-%m-%d")

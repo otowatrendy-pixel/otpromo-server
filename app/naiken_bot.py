@@ -254,7 +254,11 @@ def on_postback(c, v):
             _set(c, nk_step=None, last_naiken=fid)
             return c.send(texts.build("naiken_sending"))
         if status == "limit":
-            return c.send(line.text("今月の内見FAXの回数の上限に達しました。"))
+            period, limit, nxt = naiken.limit_info(c.u)
+            msg = texts.build("naiken_limit", 期間=period, 上限=limit, 次に使える日=nxt)
+            if (c.u.get("plan") or "free") == "unlimited":
+                msg.pop("quickReply", None)
+            return c.send(msg)
         if status == "fax_invalid":
             return next_step(c)
         if status == "not_ready":
