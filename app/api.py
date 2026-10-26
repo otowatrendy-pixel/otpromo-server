@@ -8,7 +8,7 @@ POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課�
 """
 import logging
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 import bot
@@ -145,13 +145,29 @@ def get_job(jid: str, authorization: str = Header("")):
     return res
 
 
+class PlayIn(BaseModel):
+    productId: str
+    purchaseToken: str
+
+
 @router.post("/billing/google/verify")
-def google_verify():
-    raise HTTPException(501, "Google Play の課金はまだ準備中です")
+def google_verify(body: PlayIn, authorization: str = Header("")):
+    import play
+    uid, u = _me(authorization)
+    res = play.verify(uid, body.productId, body.purchaseToken)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "確認できませんでした"))
+    return res
 
 
 @router.post("/billing/google/rtdn")
-def google_rtdn():
+async def google_rtdn(request: Request, token: str = ""):
+    """Pub/Sub の push。URL に ?token= を付けて登録し、合わないものは捨てる。"""
+    import hmac as _hmac
+    import play
+    if not _hmac.compare_digest(token, config.env("PUBSUB_TOKEN") or config.APP_SECRET):
+        raise HTTPException(403)
+    play.rtdn(await request.json())
     return {"ok": True}
 
 
