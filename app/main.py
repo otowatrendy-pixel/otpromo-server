@@ -86,6 +86,8 @@ NAMES = {"light": "ライトプラン（月額1,480円（税込）・月20枚）
 @app.get("/pay/{plan}")
 def pay(plan: str, t: str = ""):
     uid = _uid(t)
+    if plan == "faxpack":
+        return RedirectResponse(billing.fax_pack_checkout(uid), status_code=303)
     if plan not in NAMES:
         raise HTTPException(404)
     u = store.get_user(uid)

@@ -53,7 +53,7 @@ def _action(b, urls):
         return {"type": "postback", "label": label[:20], "data": data, "displayText": label}
     if a.startswith("uri "):
         target = a.split(" ", 1)[1]
-        url = urls.get(label) or (target if target.startswith("http") else None)
+        url = urls.get(label) or urls.get(target) or (target if target.startswith("http") else None)
         if not url:
             return None
         return {"type": "uri", "label": label[:40], "uri": url}

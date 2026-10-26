@@ -26,8 +26,10 @@ WEEK = "月火水木金土日"
 LIMITS = {
     "free": (int(config.env("NAIKEN_FREE_MONTH", "2")), int(config.env("NAIKEN_DAY", "20"))),
     "light": (int(config.env("NAIKEN_LIGHT_MONTH", "20")), int(config.env("NAIKEN_DAY", "20"))),
-    "unlimited": (int(config.env("NAIKEN_UNLIMITED_MONTH", "100")), int(config.env("NAIKEN_DAY", "20"))),
+    "unlimited": (int(config.env("NAIKEN_UNLIMITED_MONTH", "50")), int(config.env("NAIKEN_DAY", "20"))),
 }
+PACK_SIZE = int(config.env("FAX_PACK_SIZE", "10"))     # 追加FAX：10回500円
+PACK_DAYS = int(config.env("FAX_PACK_DAYS", "90"))     # 購入から3か月有効（月末にリセットしない）
 
 
 # ---------- FAX番号 ----------
@@ -216,17 +218,28 @@ def usage(u):
     return month, day
 
 
-def can_send(u):
+def pack_left(u):
+    t = store.now()
+    return sum(p["n"] - p["used"] for p in (u.get("fax_packs") or []) if p["exp"] > t)
+
+
+def remaining(u):
+    """(今月の残り, 追加購入分の残り, 本日の残り)"""
     m, d = usage(u)
     lim_m, lim_d = LIMITS.get(u.get("plan") or "free", LIMITS["free"])
-    return m < lim_m and d < lim_d
+    return max(0, lim_m - m), pack_left(u), max(0, lim_d - d)
+
+
+def can_send(u):
+    month, packs, day = remaining(u)
+    return day > 0 and (month > 0 or packs > 0)
 
 
 def limit_info(u):
     """上限に達したときの案内用。(期間, 上限, 次に使える日)"""
-    m, d = usage(u)
+    month, packs, day = remaining(u)
     lim_m, lim_d = LIMITS.get(u.get("plan") or "free", LIMITS["free"])
-    if d >= lim_d and m < lim_m:
+    if day <= 0 and (month > 0 or packs > 0):
         return "本日", lim_d, "明日"
     now = datetime.now(store.JST)
     nxt = datetime(now.year + (now.month == 12), now.month % 12 + 1, 1)
@@ -234,13 +247,37 @@ def limit_info(u):
 
 
 def count(uid, delta=1):
+    """送信1回分を数える。今月の枠を先に使い、なくなったら追加購入分から使う。delta=-1 で取り消し。"""
     now = datetime.now(store.JST)
     mk, dk = now.strftime("%Y-%m"), now.strftime("%Y-%m-%d")
 
     def fn(u):
         c = u.get("naiken_count") or {}
-        c = {"m": {mk: c.get("m", {}).get(mk, 0) + delta}, "d": {dk: c.get("d", {}).get(dk, 0) + delta}}
-        u["naiken_count"] = c
+        m = c.get("m", {}).get(mk, 0)
+        lim_m = LIMITS.get(u.get("plan") or "free", LIMITS["free"])[0]
+        if delta > 0 and m >= lim_m:
+            # 今月の枠を使い切っている → 期限の近い追加購入分から使う
+            packs = sorted([p for p in (u.get("fax_packs") or []) if p["exp"] > store.now() and p["used"] < p["n"]],
+                           key=lambda p: p["exp"])
+            if packs:
+                packs[0]["used"] += 1
+                u["last_fax_from"] = "pack"
+        elif delta > 0:
+            u["last_fax_from"] = "month"
+        if delta < 0 and u.get("last_fax_from") == "pack":
+            used = sorted([p for p in (u.get("fax_packs") or []) if p["used"] > 0], key=lambda p: p["exp"])
+            if used:
+                used[0]["used"] -= 1
+        elif not (delta > 0 and m >= lim_m):
+            m = m + delta
+        u["naiken_count"] = {"m": {mk: max(0, m)}, "d": {dk: max(0, c.get("d", {}).get(dk, 0) + delta)}}
+    store.db().update_tx("users", uid, fn)
+
+
+def add_pack(uid, n=PACK_SIZE):
+    def fn(u):
+        u["fax_packs"] = [p for p in (u.get("fax_packs") or []) if p["exp"] > store.now()] + [
+            {"n": n, "used": 0, "at": store.now(), "exp": store.now() + timedelta(days=PACK_DAYS)}]
     store.db().update_tx("users", uid, fn)
 
 

@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import config
 import store
@@ -45,6 +45,33 @@ def unsign(t):
     if not hmac.compare_digest(good, mac) or int(exp) < time.time():
         return None
     return uid
+
+
+def fax_pack_price():
+    """追加FAX（10回500円・税込）の価格。PRICE_FAX_PACK がなければ lookup_key で探し、なければ作る。"""
+    pid = config.env("PRICE_FAX_PACK")
+    if pid:
+        return pid
+    s = _stripe()
+    found = plain(s.Price.list(lookup_keys=["naiken_fax_10"], limit=1))["data"]
+    if found:
+        return found[0]["id"]
+    prod = plain(s.Product.create(name="内見申込FAX 追加10回", description="購入から3か月有効（税込）",
+                                  metadata={"service": "maisoku", "kind": "fax_pack"}))
+    return plain(s.Price.create(product=prod["id"], currency="jpy", unit_amount=500, tax_behavior="inclusive",
+                                lookup_key="naiken_fax_10", nickname="追加FAX 10回 500円（税込）"))["id"]
+
+
+def fax_pack_checkout(uid):
+    s = _stripe()
+    u = store.get_user(uid)
+    params = dict(mode="payment", line_items=[{"price": fax_pack_price(), "quantity": 1,
+                                               "tax_rates": [tax_rate(inclusive=True)]}],
+                  client_reference_id=uid, metadata={"uid": uid, "purpose": "fax_pack"}, locale="ja",
+                  success_url=f"{config.BASE_URL}/paid?t={sign(uid)}", cancel_url=f"{config.BASE_URL}/canceled")
+    if u.get("stripe_customer"):
+        params["customer"] = u["stripe_customer"]
+    return plain(s.checkout.Session.create(**params))["url"]
 
 
 def pay_url(uid, plan):
@@ -193,6 +220,14 @@ def handle_webhook(payload: bytes, sig: str):
         uid, before, after = sync_subscription(sub)
         if uid:
             notices.append((uid, "plan_started", {}))
+    elif t == "checkout.session.completed" and (obj.get("metadata") or {}).get("purpose") == "fax_pack":
+        import naiken
+        uid = obj.get("client_reference_id")
+        if uid and obj.get("payment_status") == "paid":
+            naiken.add_pack(uid)
+            exp = store.now() + timedelta(days=naiken.PACK_DAYS)
+            d = exp.astimezone(store.JST)
+            notices.append((uid, "addfax_done", {"有効期限": f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）"}))
     elif t == "checkout.session.completed" and obj.get("mode") == "setup":
         import monitor
         n = monitor.on_setup_completed(obj)

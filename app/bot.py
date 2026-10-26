@@ -323,6 +323,8 @@ def on_postback(c, data):
         return send_last(c, v)
     if k == "commercial" and v == "go":
         return pool.submit(_safe_pending, c, "commercial")
+    if k == "addfax":
+        return c.send(texts.build("addfax_show", urls=plan_urls(c)))
     if k == "naiken":
         return naiken_bot.on_postback(c, v)
     if k in ("card_roman", "card_role", "card_contact"):
@@ -342,7 +344,15 @@ def plan_urls(c):
             "使い放題に切り替える": billing.pay_url(c.uid, "unlimited"),
             "FAXオプションを申し込む": billing.pay_url(c.uid, "fax"),
             "変更・解約": billing.portal_url(c.uid),
-            "お支払い情報を確認": billing.portal_url(c.uid)}
+            "お支払い情報を確認": billing.portal_url(c.uid),
+            "10回追加する（500円）": billing.pay_url(c.uid, "faxpack"),
+            # 文面の uri の行き先名でも引けるようにする
+            "Stripe決済ページ（ライト）": billing.pay_url(c.uid, "light"),
+            "Stripe決済ページ（使い放題）": billing.pay_url(c.uid, "unlimited"),
+            "Stripe決済ページ（追加FAX）": billing.pay_url(c.uid, "faxpack"),
+            "Stripe決済ページ": billing.pay_url(c.uid, "fax"),
+            "Stripeのお客様ページ": billing.portal_url(c.uid),
+            "Stripeのカード登録ページ": f"{config.BASE_URL}/card?t={billing.sign(c.uid)}"}
 
 
 def plan_show(c):
@@ -350,12 +360,22 @@ def plan_show(c):
 
 
 def plan_status(c):
+    import naiken
     q = store.quota(c.u)
     d = c.u.get("delivery") or {}
-    return texts.build("plan_status", urls=plan_urls(c), プラン名=billing.PLAN_NAMES[q["plan"]],
-                       n="上限なし" if q["remaining"] is None else q["remaining"],
-                       更新日=store.renew_date(c.u),
-                       受け取り方={"line": "LINE", "email": "メール", "fax": "FAX"}.get(d.get("method"), "LINE"))
+    month, packs, _ = naiken.remaining(c.u)
+    live_packs = sorted([p for p in (c.u.get("fax_packs") or []) if p["exp"] > store.now() and p["used"] < p["n"]],
+                        key=lambda p: p["exp"])
+    soon = sorted(store._live_grants(c.u), key=lambda g: g["exp"]) if q["plan"] == "light" else []
+    text = texts.raw("plan_status", プラン名=billing.PLAN_NAMES[q["plan"]],
+                     n="上限なし" if q["remaining"] is None else q["remaining"],
+                     失効の案内=f"（うち{soon[0]['n'] - soon[0]['used']}枚は{_md(soon[0]['exp'])}まで）" if len(soon) > 1 else "",
+                     内見残=month, 追加FAXの案内=f"＋追加分{packs}回（{_md(live_packs[0]['exp'])}まで）" if packs else "",
+                     更新日=store.renew_date(c.u),
+                     受け取り方={"line": "LINE", "email": "メール", "fax": "FAX"}.get(d.get("method"), "LINE"))
+    if q["plan"] == "unlimited":
+        text = text.replace("資料のこり：上限なし枚", f"資料：枚数の上限なし（今月{q['month_used']}枚）")
+    return texts.build("plan_status", urls=plan_urls(c), text=text)
 
 
 # ---------- 文字 ----------
@@ -387,14 +407,32 @@ def on_text(c, t):
 
 # ---------- のこり枚数の案内 ----------
 
+def _md(dt):
+    d = dt.astimezone(store.JST)
+    return f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）"
+
+
+def expiry_note(u):
+    """ライトの繰り越し分で、30日以内に失効する分の案内。"""
+    soon = [g for g in store._live_grants(u) if (g["exp"] - store.now()).days < 30]
+    if not soon:
+        return ""
+    g = sorted(soon, key=lambda g: g["exp"])[0]
+    return f"うち{g['n'] - g['used']}枚は{_md(g['exp'])}までにお使いください。"
+
+
 def remain_note(u):
     q = store.quota(u)
     if q["plan"] == "unlimited":
+        if q["month_used"] == store.UNLIMITED_SOFT_CAP + 1:
+            return texts.note("unlimited_over")
         return ""
     n = q["remaining"]
     if q["plan"] == "light":
         mid = "remain_light_low" if n <= 3 else "remain_light"
-        return texts.note(mid, n=n, 更新日=store.renew_date(u))
+        t = texts.note(mid, n=n, 更新日=store.renew_date(u))
+        exp = expiry_note(u)
+        return t + ("\n" + exp if exp else "")
     if n == 0:
         return texts.note("remain_free_zero")
     if n == 1:
@@ -608,8 +646,9 @@ def notify(uid, mid, kw):
         return
     if mid == "plan_started":
         q = store.quota(u)
-        body = {"light": f"毎月{config.LIGHT_SHEETS}枚までお使いいただけます。",
-                "unlimited": "枚数を気にせずお使いいただけます。"}.get(q["plan"], "")
+        import naiken
+        body = {"light": f"毎月、資料{config.LIGHT_SHEETS}枚と内見申込FAX{naiken.LIMITS['light'][0]}回をお使いいただけます。",
+                "unlimited": f"資料は枚数を気にせず、内見申込FAXは月{naiken.LIMITS['unlimited'][0]}回までお使いいただけます。"}.get(q["plan"], "")
         kw = {"プラン名": billing.PLAN_NAMES[q["plan"]], "プランの内容": body, "更新日": store.renew_date(u)}
     elif mid == "plan_canceled":
         kw = {"期限": store.renew_date(u)}
