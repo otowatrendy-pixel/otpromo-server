@@ -533,8 +533,8 @@ def process(c, data, held=None):
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "title": out["title"], "texts": out["texts"], "log": out["log"],
                                "pages": out["pages"], "result": out["result"]})
-        recent = [{"id": jid, "title": out["title"]}] + [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
-        store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:10]})
+        recent = [{"id": jid, "title": out["title"], "at": store.now()}] + [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
+        store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:12]})
         c.refresh()
         done.set()
         deliver(c, jid)
@@ -594,7 +594,8 @@ def deliver(c, jid):
     pdf_url = store.file_url(jid, job, "shiryou.pdf")
     img = line.image(store.file_url(jid, job, "obikae.jpg"), store.file_url(jid, job, "preview.jpg"))
     remain = "\n\n".join(x for x in extra + [remain] if x)
-    common = dict(物件名=job["title"], のこり枚数の案内=remain, extra_buttons=remain_buttons(u))
+    # 何枚か続けて送られても、各資料の「この物件で内見FAX」はその物件で始まるよう資料IDを入れる
+    common = dict(物件名=job["title"], のこり枚数の案内=remain, extra_buttons=remain_buttons(u), 資料ID=jid)
     if method == "email" and d.get("email"):
         pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
         if delivery.send_mail(d["email"], job["title"], pdf, pdf_url):
@@ -616,7 +617,7 @@ def send_last(c, how):
     if how == "line":
         exp = job["expires_at"].astimezone(store.JST)
         return c.send(texts.build("deliver_line", 物件名=job["title"], リンク=store.file_url(jid, job, "shiryou.pdf"),
-                                  有効期限=f"{exp.month}月{exp.day}日", のこり枚数の案内=""))
+                                  有効期限=f"{exp.month}月{exp.day}日", のこり枚数の案内="", 資料ID=jid))
     if how == "mail":
         if not d.get("email"):
             store.update_user(c.uid, {"reg_queue": ["send_mail"], "reg_mode": "send_mail"})

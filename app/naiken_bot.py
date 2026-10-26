@@ -5,6 +5,7 @@
 import logging
 import re
 import unicodedata
+from datetime import timedelta
 
 import line
 import naiken
@@ -34,18 +35,36 @@ def start(c):
 
 def start_from_job(c, jid):
     job = store.get_job(jid) if jid else None
-    if not job or job.get("status") != "done":
+    if not job or job.get("status") != "done" or job.get("user_id") != c.uid:
         return c.send(line.text("お作りした資料が見つかりませんでした。物件名と号室を教えてください。"),
                       texts.build("naiken_ask_property"))
     job["_id"] = jid
     d = naiken.from_job(job)
     to = d["to"]
+    p = d.get("prop") or {}
     if not (to.get("company") and naiken.fax_ok(to.get("fax"))):
         _set(c, nk=d, nk_step="to")
-        return c.send(line.text(f"{d['prop']['name']}の内見申込書をお作りします。\nマイソクから管理会社のFAX番号が読み取れませんでした。"),
-                      texts.build("naiken_ask_to"))
+        msg = texts.build("naiken_fax_unread", 物件名=room_text(d))
+        if to.get("company"):
+            # 管理会社名だけ読めたときは短く聞く
+            msg = texts.build("naiken_fax_unread", text=f"{to_text(to)}のFAX番号を教えてください。")
+        return c.send(msg)
     _set(c, nk=d, nk_step="dates")
-    c.send(texts.build("naiken_from_last", 物件名=room_text(d), 管理会社=to_text(to), FAX番号=naiken.fax_display(to["fax"])))
+    text = texts.raw("naiken_from_last", 物件名=p.get("name", ""), 号室=p.get("room") or "",
+                     管理会社=to_text(to), FAX番号=naiken.fax_display(to["fax"]))
+    if not p.get("room"):
+        text = text.replace(" 号室", "")
+    c.send(texts.build("naiken_from_last", text=text))
+
+
+def short_label(title):
+    """ボタンの20文字に収める。物件名を短くして、号室は残す。"""
+    t = (title or "物件").strip()
+    if len(t) <= 20:
+        return t
+    m = re.search(r"\s*\S*号室$", t)
+    tail = m.group().strip() if m else ""
+    return (t[:20 - len(tail) - 2] + "… " + tail) if tail else t[:19] + "…"
 
 
 def room_text(d):
@@ -80,6 +99,7 @@ def on_text(c, t):
         if step in ("edit_dates", "dates") and parsed.get("wishes"):
             d["wishes"] = []
         d = naiken.merge(d, parsed)
+        d["wishes"] = (d.get("wishes") or [])[:2]  # 内見の希望日時は第2希望まで
         if not parsed.get("to_fax"):
             # AIが番号を拾えなかったときは、電話番号の形をした最後のものをFAX番号とみなす
             nums = re.findall(r"\+?\d[\d\-‐－ー()（） ]{8,16}\d", unicodedata.normalize("NFKC", t))
@@ -126,7 +146,7 @@ def confirm(c, pre=()):
     kw = {"管理会社": to_text(to), "FAX番号": naiken.fax_display(to["fax"]),
           "読み取り元": "（マイソクから読み取りました）" if to.get("from_maisoku") else "",
           "物件名": (d.get("prop") or {}).get("name", ""), "号室": (d.get("prop") or {}).get("room") or "",
-          "人数": d.get("guests") or "", "ご案内担当": d.get("guide") or ""}
+          "人数": d.get("guests") or "", "ご案内担当": d.get("guide") or co.get("担当者名") or ""}
     for i in range(3):
         kw[f"日時{i + 1}"] = wishes[i] if i < len(wishes) else ""
     text = texts.raw("naiken_confirm", **kw)
@@ -222,14 +242,19 @@ def on_postback(c, v):
         return start(c)
     if v == "from_last":
         return start_from_job(c, c.u.get("last_job"))
+    if v.startswith("from_last&doc="):
+        return start_from_job(c, v.split("=", 1)[1])
     if v.startswith("job:"):
         return start_from_job(c, v[4:])
     if v == "recent":
-        rec = c.u.get("recent_jobs") or []
+        # 直近7日の資料を新しい順に最大12件
+        since = store.now() - timedelta(days=7)
+        rec = [r for r in (c.u.get("recent_jobs") or []) if not r.get("at") or r["at"] >= since][:12]
         if not rec:
-            return c.send(line.text("最近お作りした資料がありません。物件名と号室を教えてください。"))
-        q = [line.qr_postback(r["title"][:20] or "物件", f"naiken=job:{r['id']}") for r in rec[:10]]
-        return c.send(line.text("どの物件の内見申込書を作りますか？", quick=q))
+            return c.send(line.text("最近お作りした物件がありません。マイソクを送ってください。",
+                                    quick=[{"type": "action", "action": {"type": "camera", "label": "マイソクを送る"}}]))
+        q = [line.qr_postback(short_label(r["title"]), f"naiken=from_last&doc={r['id']}") for r in rec]
+        return c.send(texts.build("naiken_recent", text=texts.raw("naiken_recent")) | {"quickReply": {"items": q}})
     if v == "history":
         h = c.u.get("naiken_history") or []
         if not h:

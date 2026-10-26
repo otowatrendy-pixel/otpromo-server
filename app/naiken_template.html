@@ -49,10 +49,10 @@
   .wish.first .dt { font-size: 15pt; font-weight: 900; }
 
   /* 下半分：ご案内担当（名刺） */
-  .lower { margin-top: auto; padding-top: 5mm; }
+  .lower { flex: 1; display: flex; flex-direction: column; padding-top: 8mm; }
   .lbl { display: flex; align-items: center; gap: 3mm; font-size: 10.5pt; font-weight: 700; }
   .lbl::after { content: ""; flex: 1; border-top: 1.2px dashed var(--line); }
-  .cardwrap { display: flex; justify-content: center; padding: 6mm 0 7mm; }
+  .cardwrap { flex: 1; display: flex; align-items: center; justify-content: center; }
 
   /* 名刺：91×55mmを約1.2倍（109×66mm） */
   .card { width: 109mm; height: 66mm; position: relative; background: #fff; border: 0.35mm solid #8a93a6; box-shadow: 1.2mm 1.2mm 0 0 #2b3550; padding: 6mm 7mm 5mm 9mm; display: flex; flex-direction: column; }
@@ -68,18 +68,7 @@
   .card .addr b { font-weight: 700; }
   .card .lic { position: absolute; right: 7mm; top: 6.3mm; font-size: 6.3pt; color: var(--sub); text-align: right; line-height: 1.45; }
 
-  /* ご回答欄 */
-  .reply { border: 1.6px solid var(--line); }
-  .reply .hd { background: var(--ink); color: #fff; font-size: 10.5pt; font-weight: 700; padding: 1.4mm 3.5mm; display: flex; justify-content: space-between; }
-  .reply .hd span:last-child { font-weight: 500; font-size: 9.5pt; }
-  .reply .bd { padding: 2.6mm 3.5mm 3mm; font-size: 10.5pt; font-weight: 500; line-height: 2; }
-  .reply .q { display: flex; gap: 5mm; flex-wrap: wrap; }
-  .reply .q > b { width: 22mm; font-weight: 700; }
-  .box { display: inline-block; width: 3.6mm; height: 3.6mm; border: 1.2px solid var(--line); vertical-align: -0.5mm; margin-right: 1.4mm; }
-  .blank { display: inline-block; border-bottom: 1.2px solid var(--line); min-width: 52mm; }
-  .blank.s { min-width: 30mm; }
-
-  .foot { margin-top: 3mm; display: flex; justify-content: space-between; font-size: 7.5pt; font-weight: 500; color: var(--sub); }
+  .foot { margin-top: auto; display: flex; justify-content: space-between; font-size: 7.5pt; font-weight: 500; color: var(--sub); }
 </style>
 </head>
 <body>
@@ -109,7 +98,7 @@
   <p class="greet">
     <span class="nw">いつも大変お世話になっております。</span><br>
     <span class="nw">下記物件の内見をお願いしたく、ご連絡いたしました。</span><br>
-    <span class="nw">お手数ですが、下のご回答欄にご記入のうえ、FAXにてご返信いただけますと幸いです。</span>
+    <span class="nw">ご確認のほど、どうぞよろしくお願い申し上げます。</span>
   </p>
 
   <table>
@@ -131,10 +120,6 @@
         {% endfor %}
       </td>
     </tr>
-    <tr>
-      <th>ご案内予定</th>
-      <td><span class="nw">当日は弊社の{{ me.family_name }}がご案内いたします。</span>{% if guests %}<span class="s nw">（お客様{{ guests }}名様）</span>{% endif %}</td>
-    </tr>
   </table>
 
   <div class="lower">
@@ -154,16 +139,6 @@
           <div class="row"><span class="nw"><b>TEL</b> {{ me.tel }}</span><span class="nw"><b>FAX</b> {{ me.fax }}</span>{% if me.mobile %}<span class="nw"><b>携帯</b> {{ me.mobile }}</span>{% endif %}</div>
           {% if me.email %}<div class="nw"><b>E-mail</b> {{ me.email }}</div>{% endif %}
         </div>
-      </div>
-    </div>
-
-    <div class="reply">
-      <div class="hd"><span class="nw">ご回答欄</span><span class="nw">このままFAXでご返信ください　返信先FAX：{{ me.fax }}</span></div>
-      <div class="bd">
-        <div class="q"><b class="nw">内見</b><span class="nw"><i class="box"></i>可能です</span><span class="nw"><i class="box"></i>別の日時でお願いします（<span class="blank s"></span>）</span></div>
-        <div class="q"><b class="nw"></b><span class="nw"><i class="box"></i>お申込みが入っているため、内見できません</span></div>
-        <div class="q"><b class="nw">鍵の手配</b><span class="nw"><i class="box"></i>現地</span><span class="nw"><i class="box"></i>店舗で貸出</span><span class="nw"><i class="box"></i>その他（<span class="blank s"></span>）</span></div>
-        <div class="q"><b class="nw">ご担当者</b><span class="nw"><span class="blank"></span>　様</span></div>
       </div>
     </div>
 

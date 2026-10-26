@@ -42,14 +42,14 @@ def raw(mid, **kw):
     return fill(_MSG[mid]["text"], **kw)
 
 
-def _action(b, urls):
-    a, label = b["action"], b["label"]
+def _action(b, urls, kw=None):
+    a, label = b["action"], fill(b["label"], **(kw or {}))
     if a == "camera":
         return {"type": "camera", "label": label[:20]}
     if a == "cameraRoll":
         return {"type": "cameraRoll", "label": label[:20]}
     if a.startswith("postback "):
-        data = a.split(" ", 1)[1]
+        data = fill(a.split(" ", 1)[1], **(kw or {}))  # 「naiken=from_last&doc={資料ID}」など
         return {"type": "postback", "label": label[:20], "data": data, "displayText": label}
     if a.startswith("uri "):
         target = a.split(" ", 1)[1]
@@ -67,7 +67,7 @@ def build(mid, urls=None, extra_buttons=None, append="", text=None, **kw):
     if append:
         text = text + "\n\n" + append
     buttons = list(m.get("buttons", [])) + list(extra_buttons or [])
-    acts = [a for a in (_action(b, urls or {}) for b in buttons) if a]
+    acts = [a for a in (_action(b, urls or {}, kw) for b in buttons) if a]
     if any(a["type"] == "uri" for a in acts):
         return _card(text, acts)
     msg = line.text(text)
