@@ -1,0 +1,927 @@
+{
+ "version": "2026-10-27 第2版（正式名称「1分資料」・PDF受付を反映）",
+ "note": "{ }は差し込み。送り方は reply=応答（通数に数えない）／push=プッシュ（月200通の無料枠から1通）。ボタンはクイックリプライ（ラベル20文字以内）またはFlexのボタン。",
+ "common": {
+  "disclaimer": "参考資料です。最終確認はご担当者様が行ってください。",
+  "terms_url": "https://otpromo.com/terms-maisoku.html",
+  "contact_mail": "m-aij@otpromo.com",
+  "service_name": "1分資料（いっぷんしりょう）"
+ },
+ "sections": [
+  {
+   "id": "greeting",
+   "title": "1. 友だち追加のあいさつ",
+   "messages": [
+    {
+     "id": "follow",
+     "when": "友だち追加されたとき（followイベント）",
+     "send": "reply",
+     "text": "{表示名}さん、友だち追加ありがとうございます！\n\nこちらは「1分資料」です。\nマイソクの写真かPDFを送るだけで、接客に使える資料が5つ届きます。\n\n届く資料\n①帯替え図面\n②おすすめポイント\n③初期費用の概算書\n④ポータル掲載文\n⑤想定Q&A\n\n居住用の賃貸物件に対応しています。最初の5枚は無料でお試しいただけます。\n\nはじめに、資料の帯に入れる会社情報を登録します（2〜3分ほどで終わります）。\nご利用の前に、利用規約をご確認ください。\nhttps://otpromo.com/terms-maisoku.html",
+     "buttons": [
+      {
+       "label": "同意して登録をはじめる",
+       "action": "postback reg=start"
+      },
+      {
+       "label": "先に使い方を見る",
+       "action": "postback help=usage"
+      }
+     ],
+     "note": "「同意して登録をはじめる」は20文字以内（11文字）。同意した日時をサーバーに記録する。"
+    },
+    {
+     "id": "refollow",
+     "when": "ブロック解除・再追加で、登録済みのとき",
+     "send": "reply",
+     "text": "おかえりなさい！{会社名}さまの登録内容はそのまま残っています。\nマイソクの写真を送っていただければ、すぐに資料をお作りします。\n\n{のこり枚数の案内}",
+     "buttons": [
+      {
+       "label": "カメラを開く",
+       "action": "camera"
+      },
+      {
+       "label": "写真を選ぶ",
+       "action": "cameraRoll"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "reg",
+   "title": "2. 初回登録の質問",
+   "messages": [
+    {
+     "id": "reg_company",
+     "when": "登録開始",
+     "send": "reply",
+     "text": "ありがとうございます。それでは登録をはじめます。\n\nまず、会社名を教えてください。\n（例：〇〇不動産株式会社）",
+     "buttons": []
+    },
+    {
+     "id": "reg_shop",
+     "when": "会社名の次",
+     "send": "reply",
+     "text": "店舗名・支店名があれば教えてください。\nなければ「なし」を押してください。",
+     "buttons": [
+      {
+       "label": "なし",
+       "action": "postback shop=none"
+      }
+     ]
+    },
+    {
+     "id": "reg_license",
+     "when": "店舗名の次",
+     "send": "reply",
+     "text": "宅地建物取引業の免許番号を教えてください。帯に小さく入ります。\n（例：東京都知事(1)第12345号）",
+     "buttons": []
+    },
+    {
+     "id": "reg_license_retry",
+     "when": "免許番号の形が読み取れないとき",
+     "send": "reply",
+     "text": "すみません、免許番号の形がうまく読み取れませんでした。\n「東京都知事(1)第12345号」や「国土交通大臣(2)第1234号」のように、もう一度お送りください。\n\nこのままでよろしければ「このまま登録」を押してください。",
+     "buttons": [
+      {
+       "label": "このまま登録",
+       "action": "postback license=asis"
+      }
+     ]
+    },
+    {
+     "id": "reg_tel",
+     "when": "免許番号の次",
+     "send": "reply",
+     "text": "帯に載せる電話番号を教えてください。\n（例：03-1234-5678）",
+     "buttons": []
+    },
+    {
+     "id": "reg_fax",
+     "when": "電話番号の次",
+     "send": "reply",
+     "text": "帯に載せるFAX番号があれば教えてください。\nなければ「なし」を押してください。",
+     "buttons": [
+      {
+       "label": "なし",
+       "action": "postback fax=none"
+      }
+     ]
+    },
+    {
+     "id": "reg_address",
+     "when": "FAX番号の次",
+     "send": "reply",
+     "text": "店舗の住所を教えてください。\n（例：東京都〇〇区〇〇1-2-3 〇〇ビル1階）",
+     "buttons": []
+    },
+    {
+     "id": "reg_fee",
+     "when": "住所の次",
+     "send": "reply",
+     "text": "初期費用の概算書に入れる、仲介手数料を選んでください。\n（賃料の何ヶ月分か。消費税は概算書で自動で足します）",
+     "buttons": [
+      {
+       "label": "1ヶ月分",
+       "action": "postback fee=1"
+      },
+      {
+       "label": "0.5ヶ月分",
+       "action": "postback fee=0.5"
+      },
+      {
+       "label": "なし（0ヶ月）",
+       "action": "postback fee=0"
+      },
+      {
+       "label": "その他",
+       "action": "postback fee=other"
+      }
+     ]
+    },
+    {
+     "id": "reg_fee_other",
+     "when": "「その他」を押したとき",
+     "send": "reply",
+     "text": "賃料の何ヶ月分か、数字で教えてください。\n（例：0.75）",
+     "buttons": []
+    },
+    {
+     "id": "reg_color",
+     "when": "仲介手数料の次",
+     "send": "reply",
+     "text": "資料のテーマ色を選んでください。\n見出しや帯の色になります。あとからいつでも変えられます。\n\n※上の見本画像もご覧ください。",
+     "buttons": [
+      {
+       "label": "青",
+       "action": "postback color=青"
+      },
+      {
+       "label": "紺",
+       "action": "postback color=紺"
+      },
+      {
+       "label": "水色",
+       "action": "postback color=水色"
+      },
+      {
+       "label": "緑",
+       "action": "postback color=緑"
+      },
+      {
+       "label": "深緑",
+       "action": "postback color=深緑"
+      },
+      {
+       "label": "赤",
+       "action": "postback color=赤"
+      },
+      {
+       "label": "えんじ",
+       "action": "postback color=えんじ"
+      },
+      {
+       "label": "オレンジ",
+       "action": "postback color=オレンジ"
+      },
+      {
+       "label": "茶",
+       "action": "postback color=茶"
+      },
+      {
+       "label": "紫",
+       "action": "postback color=紫"
+      },
+      {
+       "label": "ピンク",
+       "action": "postback color=ピンク"
+      },
+      {
+       "label": "黒",
+       "action": "postback color=黒"
+      },
+      {
+       "label": "色番号で指定",
+       "action": "postback color=code"
+      }
+     ],
+     "note": "クイックリプライの上限13個ちょうど。直前に12色の見本画像（Canvaで作成）を1枚送る。"
+    },
+    {
+     "id": "reg_color_code",
+     "when": "「色番号で指定」を押したとき",
+     "send": "reply",
+     "text": "会社のロゴなどで使っている色番号を教えてください。\n（例：#1A56A8）\n\n白い文字が読みにくい明るい色の場合は、少しだけ濃くして使います。",
+     "buttons": []
+    },
+    {
+     "id": "reg_font",
+     "when": "色の次",
+     "send": "reply",
+     "text": "資料の書体を選んでください。\n\n※上の見本画像もご覧ください。",
+     "buttons": [
+      {
+       "label": "ゴシック",
+       "action": "postback font=ゴシック"
+      },
+      {
+       "label": "明朝",
+       "action": "postback font=明朝"
+      },
+      {
+       "label": "丸ゴシック",
+       "action": "postback font=丸ゴシック"
+      },
+      {
+       "label": "UDゴシック",
+       "action": "postback font=UDゴシック"
+      }
+     ],
+     "note": "直前に4書体の見本画像を1枚送る。"
+    },
+    {
+     "id": "reg_obi",
+     "when": "書体の次（任意）",
+     "send": "reply",
+     "text": "お店でお使いの帯（物件資料の下の会社情報の部分）の画像があれば、写真で送ってください。帯替え図面にそのまま使います。\n\nなければ、ここまでの登録内容から自動でお作りします。",
+     "buttons": [
+      {
+       "label": "自動で作る",
+       "action": "postback obi=auto"
+      },
+      {
+       "label": "写真を選ぶ",
+       "action": "cameraRoll"
+      }
+     ]
+    },
+    {
+     "id": "reg_receive",
+     "when": "帯の次",
+     "send": "reply",
+     "text": "最後に、資料の受け取り方を選んでください。\n\nどれを選んでも、できあがりのお知らせはこのLINEにも届きます。",
+     "buttons": [
+      {
+       "label": "LINEで受け取る",
+       "action": "postback recv=line"
+      },
+      {
+       "label": "メールで受け取る",
+       "action": "postback recv=mail"
+      },
+      {
+       "label": "FAXで受け取る",
+       "action": "postback recv=fax"
+      }
+     ]
+    },
+    {
+     "id": "reg_mail",
+     "when": "「メールで受け取る」を選んだとき",
+     "send": "reply",
+     "text": "送り先のメールアドレスを教えてください。",
+     "buttons": []
+    },
+    {
+     "id": "reg_faxto",
+     "when": "「FAXで受け取る」を選んだとき",
+     "send": "reply",
+     "text": "送り先のFAX番号を教えてください。\n\nFAXでの受け取りは、有料プランではFAXオプション（月額500円）になります。無料でお試しの5枚の間は、そのままFAXでもお届けします。",
+     "buttons": [],
+     "note": "【要決定】お試し中もFAXを無料で送るか。"
+    },
+    {
+     "id": "reg_confirm",
+     "when": "全部そろったとき",
+     "send": "reply",
+     "text": "登録内容のご確認です。\n\n会社名：{会社名}\n店舗名：{店舗名}\n免許番号：{免許番号}\n電話：{電話}\nFAX：{FAX}\n住所：{住所}\n仲介手数料：賃料の{ヶ月}ヶ月分（税別）\nテーマ色：{色}\n書体：{書体}\n帯：{帯}\n受け取り方：{受け取り方}\n\nこの内容でよろしいですか？",
+     "buttons": [
+      {
+       "label": "この内容で登録",
+       "action": "postback reg=done"
+      },
+      {
+       "label": "修正する",
+       "action": "postback reg=edit"
+      }
+     ]
+    },
+    {
+     "id": "reg_done",
+     "when": "登録完了",
+     "send": "reply",
+     "text": "登録ありがとうございました！\nさっそく、マイソクを1枚撮って送ってみてください。PDFのままでも大丈夫です。\n\nきれいに読み取るコツ\n・マイソク全体が入るように、横向きで\n・真上から、明るい場所で\n・影や光の反射が入らないように\n\n無料のこり5枚です。",
+     "buttons": [
+      {
+       "label": "カメラを開く",
+       "action": "camera"
+      },
+      {
+       "label": "写真を選ぶ",
+       "action": "cameraRoll"
+      }
+     ]
+    },
+    {
+     "id": "reg_edit",
+     "when": "「修正する」・メニューの「登録内容の変更」",
+     "send": "reply",
+     "text": "変更したい項目を選んでください。",
+     "buttons": [
+      {
+       "label": "会社名・店舗名",
+       "action": "postback edit=company"
+      },
+      {
+       "label": "免許番号",
+       "action": "postback edit=license"
+      },
+      {
+       "label": "電話・FAX",
+       "action": "postback edit=tel"
+      },
+      {
+       "label": "住所",
+       "action": "postback edit=address"
+      },
+      {
+       "label": "仲介手数料",
+       "action": "postback edit=fee"
+      },
+      {
+       "label": "テーマ色",
+       "action": "postback edit=color"
+      },
+      {
+       "label": "書体",
+       "action": "postback edit=font"
+      },
+      {
+       "label": "帯の画像",
+       "action": "postback edit=obi"
+      },
+      {
+       "label": "受け取り方",
+       "action": "postback edit=recv"
+      }
+     ]
+    },
+    {
+     "id": "reg_edit_done",
+     "when": "1項目を変更したあと",
+     "send": "reply",
+     "text": "{項目}を変更しました。次の資料から反映されます。",
+     "buttons": [
+      {
+       "label": "ほかも変更する",
+       "action": "postback reg=edit"
+      },
+      {
+       "label": "登録内容を見る",
+       "action": "postback reg=show"
+      }
+     ]
+    },
+    {
+     "id": "reg_first",
+     "when": "登録の前にマイソク（写真・PDF）が送られてきたとき",
+     "send": "reply",
+     "text": "マイソクを送っていただき、ありがとうございます！\n資料の帯に会社情報を入れるため、先に登録をお願いします（2〜3分ほど）。\n登録が終わったら、もう一度送ってください。",
+     "buttons": [
+      {
+       "label": "同意して登録をはじめる",
+       "action": "postback reg=start"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "deliver",
+   "title": "3. マイソクを受け取ったとき・資料が届いたとき",
+   "messages": [
+    {
+     "id": "recv_loading",
+     "when": "マイソクの写真を受け取った直後",
+     "send": "なし（読み込み中の表示）",
+     "text": "（文章は送らず、トーク画面に「・・・」の読み込み中アニメーションを出す。最大60秒）",
+     "buttons": [],
+     "note": "読み込み中の表示は通数に数えない。できあがったら応答で返せれば、資料の配信も通数ゼロ。"
+    },
+    {
+     "id": "recv_ack_multi",
+     "when": "一度に2枚以上送られてきたとき",
+     "send": "reply",
+     "text": "{n}枚受け取りました。順番にお作りしますので、少しお待ちください。\n（{n}枚分を使います。{のこり枚数の案内}）",
+     "buttons": []
+    },
+    {
+     "id": "deliver_line",
+     "when": "資料ができたとき（受け取り方：LINE）",
+     "send": "reply（間に合わなければpush）",
+     "text": "資料ができました！\n\n物件：{物件名}\n\n▼5つの資料（PDF）\n{リンク}\n※リンクは{有効期限}まで開けます。\n\n参考資料です。最終確認はご担当者様が行ってください。\n\n{のこり枚数の案内}",
+     "buttons": [
+      {
+       "label": "メールにも送る",
+       "action": "postback send=mail"
+      },
+      {
+       "label": "FAXにも送る",
+       "action": "postback send=fax"
+      },
+      {
+       "label": "お客様への送り方",
+       "action": "postback help=share"
+      }
+     ],
+     "note": "同じ送信に帯替え図面の画像（画像メッセージ）を1つ添える。1回の送信に5つまで入れられ、pushでも1通の扱い。"
+    },
+    {
+     "id": "deliver_partial",
+     "when": "一部の項目が読み取れなかったとき（上の文に追記）",
+     "send": "（追記）",
+     "text": "※一部の項目が読み取れなかったため、資料に「要確認」と入れています。お手数ですが、マイソクの原本でご確認ください。",
+     "buttons": []
+    },
+    {
+     "id": "deliver_mail",
+     "when": "資料ができたとき（受け取り方：メール）",
+     "send": "reply（間に合わなければpush）",
+     "text": "資料ができました！\n{メールアドレス}あてにお送りしました。\n\n物件：{物件名}\n\n参考資料です。最終確認はご担当者様が行ってください。\n\n{のこり枚数の案内}",
+     "buttons": [
+      {
+       "label": "LINEでも見る",
+       "action": "postback send=line"
+      },
+      {
+       "label": "FAXにも送る",
+       "action": "postback send=fax"
+      }
+     ]
+    },
+    {
+     "id": "deliver_fax",
+     "when": "資料ができたとき（受け取り方：FAX）",
+     "send": "reply（間に合わなければpush）",
+     "text": "資料ができました！\n{FAX番号}あてにFAXでお送りしています。数分で届きます。\n\n物件：{物件名}\n\n参考資料です。最終確認はご担当者様が行ってください。\n\n{のこり枚数の案内}",
+     "buttons": [
+      {
+       "label": "LINEでも見る",
+       "action": "postback send=line"
+      },
+      {
+       "label": "メールにも送る",
+       "action": "postback send=mail"
+      }
+     ]
+    },
+    {
+     "id": "deliver_slow",
+     "when": "50秒たってもできないとき",
+     "send": "reply",
+     "text": "ただいま混み合っていて、いつもより時間がかかっています。\nできあがり次第、こちらにお送りしますので、少々お待ちください。",
+     "buttons": [],
+     "note": "この応答で返信の権利を使うため、資料はpush（1通）で届ける。"
+    },
+    {
+     "id": "send_mail_done",
+     "when": "「メールにも送る」を押したとき",
+     "send": "reply",
+     "text": "{メールアドレス}あてにお送りしました。",
+     "buttons": []
+    },
+    {
+     "id": "send_mail_ask",
+     "when": "「メールにも送る」でアドレス未登録のとき",
+     "send": "reply",
+     "text": "送り先のメールアドレスを教えてください。次回からも使えるように登録しておきます。",
+     "buttons": []
+    },
+    {
+     "id": "send_fax_done",
+     "when": "「FAXにも送る」を押したとき（オプション加入済み）",
+     "send": "reply",
+     "text": "{FAX番号}あてにFAXでお送りしています。数分で届きます。",
+     "buttons": []
+    },
+    {
+     "id": "send_fax_option",
+     "when": "「FAXにも送る」でオプション未加入のとき",
+     "send": "reply",
+     "text": "FAXでのお届けは、FAXオプション（月額500円）でご利用いただけます。\nお申し込みいただくと、この資料もすぐにFAXでお送りします。",
+     "buttons": [
+      {
+       "label": "FAXオプションを申し込む",
+       "action": "uri Stripe決済ページ"
+      },
+      {
+       "label": "今回はやめておく",
+       "action": "postback cancel"
+      }
+     ]
+    },
+    {
+     "id": "help_share",
+     "when": "「お客様への送り方」を押したとき",
+     "send": "reply",
+     "text": "お客様に送るときは、帯替え図面の画像やリンクを長押しして「転送」を押し、お客様のトークを選んでください。\n\n※おすすめポイントと想定Q&Aは、ご担当者様の接客準備用です。お客様にお送りする前に、内容をご確認ください。",
+     "buttons": [],
+     "note": "【要決定】お客様向け（帯替え図面・概算書・掲載文）と社内向け（おすすめポイント・Q&A）でPDFを分けるか。"
+    }
+   ]
+  },
+  {
+   "id": "remain",
+   "title": "4. のこり枚数の案内（資料の最後に1行添える）",
+   "messages": [
+    {
+     "id": "remain_free",
+     "when": "無料お試し中（のこり2〜4枚）",
+     "send": "（追記）",
+     "text": "無料のこり{n}枚です。",
+     "buttons": []
+    },
+    {
+     "id": "remain_free_last",
+     "when": "無料お試しののこり1枚",
+     "send": "（追記）",
+     "text": "無料のこり1枚です。\n続けてお使いいただく場合は、ライトプラン（月額980円・月20枚）か使い放題（月額2,980円）をご検討ください。",
+     "buttons": [
+      {
+       "label": "料金プランを見る",
+       "action": "postback plan=show"
+      }
+     ]
+    },
+    {
+     "id": "remain_free_zero",
+     "when": "無料の5枚目を使い切ったとき",
+     "send": "（追記）",
+     "text": "無料でお試しいただける5枚をすべてお使いいただきました。ありがとうございました！\n続けてお使いいただく場合は、料金プランをお選びください。",
+     "buttons": [
+      {
+       "label": "料金プランを見る",
+       "action": "postback plan=show"
+      }
+     ]
+    },
+    {
+     "id": "remain_light",
+     "when": "ライトプラン（のこり4枚以上）",
+     "send": "（追記）",
+     "text": "今月のこり{n}枚です（{更新日}に20枚に戻ります）。",
+     "buttons": []
+    },
+    {
+     "id": "remain_light_low",
+     "when": "ライトプラン（のこり1〜3枚）",
+     "send": "（追記）",
+     "text": "今月のこり{n}枚です（{更新日}に20枚に戻ります）。\nたくさんお使いの月は、使い放題（月額2,980円）への切り替えもできます。",
+     "buttons": [
+      {
+       "label": "使い放題に切り替える",
+       "action": "uri Stripeのお客様ページ"
+      }
+     ]
+    },
+    {
+     "id": "remain_unlimited",
+     "when": "使い放題",
+     "send": "（追記）",
+     "text": "（案内なし。メニューの「のこり枚数・プラン」から今月の枚数を見られる）",
+     "buttons": []
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "5. ライト・使い放題へのご案内",
+   "messages": [
+    {
+     "id": "plan_show",
+     "when": "「料金プランを見る」・メニューから",
+     "send": "reply",
+     "text": "料金プランのご案内です。\n\n■ライト　月額980円\n　月20枚まで\n\n■使い放題　月額2,980円\n　枚数の上限なし\n\n■FAXオプション　月額＋500円\n　資料をFAXでもお届け\n\n（価格は税別です）\nお申し込みはボタンから。クレジットカードでお支払いいただけます。いつでも解約できます。",
+     "buttons": [
+      {
+       "label": "ライトを申し込む",
+       "action": "uri Stripe決済ページ（ライト）"
+      },
+      {
+       "label": "使い放題を申し込む",
+       "action": "uri Stripe決済ページ（使い放題）"
+      },
+      {
+       "label": "詳しく見る",
+       "action": "uri https://otpromo.com/maisoku.html"
+      }
+     ],
+     "note": "Flexメッセージで2枚のカードにしてもよい。"
+    },
+    {
+     "id": "plan_needed",
+     "when": "無料5枚を使い切ったあとにマイソクが送られてきたとき",
+     "send": "reply",
+     "text": "マイソクを送っていただき、ありがとうございます！\n無料でお試しいただける5枚は、すでにお使いいただきました。\n\n続けてお使いいただくには、料金プランのお申し込みをお願いします。お申し込みが済みましたら、いま送っていただいたマイソクからお作りします。",
+     "buttons": [
+      {
+       "label": "ライトを申し込む",
+       "action": "uri Stripe決済ページ（ライト）"
+      },
+      {
+       "label": "使い放題を申し込む",
+       "action": "uri Stripe決済ページ（使い放題）"
+      },
+      {
+       "label": "料金プランを見る",
+       "action": "postback plan=show"
+      }
+     ],
+     "note": "【要決定】送られたマイソクを24時間保管して、申し込み後に自動で作るか（作らない場合は文の最後を「もう一度送ってください」に変える）。"
+    },
+    {
+     "id": "plan_light_empty",
+     "when": "ライトの20枚を使い切ったあとにマイソクが送られてきたとき",
+     "send": "reply",
+     "text": "今月の20枚をすべてお使いいただきました。いつもありがとうございます！\n{更新日}に20枚に戻ります。\n\nすぐに続けてお使いになりたい場合は、使い放題（月額2,980円）に切り替えると、いま送っていただいたマイソクからお作りします。",
+     "buttons": [
+      {
+       "label": "使い放題に切り替える",
+       "action": "uri Stripeのお客様ページ"
+      },
+      {
+       "label": "更新日まで待つ",
+       "action": "postback cancel"
+      }
+     ]
+    },
+    {
+     "id": "plan_started",
+     "when": "申し込みが完了したとき（Stripeから通知）",
+     "send": "push",
+     "text": "お申し込みありがとうございます！\n{プラン名}がはじまりました。{プランの内容}\n\n次の更新日は{更新日}です。これからもよろしくお願いいたします。",
+     "buttons": [],
+     "note": "プランの内容の例：ライト＝「今月は20枚までお使いいただけます。」／使い放題＝「枚数を気にせずお使いいただけます。」"
+    },
+    {
+     "id": "plan_status",
+     "when": "メニューの「のこり枚数・プラン」",
+     "send": "reply",
+     "text": "ご利用状況です。\n\nプラン：{プラン名}\n今月のこり：{n}枚\n次の更新日：{更新日}\n受け取り方：{受け取り方}",
+     "buttons": [
+      {
+       "label": "料金プランを見る",
+       "action": "postback plan=show"
+      },
+      {
+       "label": "変更・解約",
+       "action": "uri Stripeのお客様ページ"
+      }
+     ]
+    },
+    {
+     "id": "plan_payment_failed",
+     "when": "カード決済ができなかったとき（Stripeから通知）",
+     "send": "push",
+     "text": "今月のお支払いが確認できませんでした。\nお手数ですが、カード情報をご確認ください。確認が取れるまでの間も、{猶予日}まではそのままお使いいただけます。",
+     "buttons": [
+      {
+       "label": "お支払い情報を確認",
+       "action": "uri Stripeのお客様ページ"
+      }
+     ],
+     "note": "【要決定】猶予日数（Stripeの再請求設定に合わせる）。"
+    },
+    {
+     "id": "plan_canceled",
+     "when": "解約の手続きが済んだとき（Stripeから通知）",
+     "send": "push",
+     "text": "解約の手続きを承りました。\n{期限}までは、そのままお使いいただけます。\nこれまでご利用いただき、ありがとうございました。またいつでもお待ちしております。",
+     "buttons": []
+    }
+   ]
+  },
+  {
+   "id": "error",
+   "title": "6. 読み取れなかったとき・想定外のとき",
+   "messages": [
+    {
+     "id": "err_blurry",
+     "when": "文字が読み取れない（ぼやけ・暗い・一部しか写っていない）",
+     "send": "reply",
+     "text": "すみません、写真の文字がうまく読み取れませんでした。\nお手数ですが、もう一度撮って送ってください。\n\nきれいに読み取るコツ\n・マイソク全体が入るように、横向きで\n・真上から、明るい場所で\n・ピントが合ってから撮る\n\n※今回の分は、枚数に数えていません。",
+     "buttons": [
+      {
+       "label": "カメラを開く",
+       "action": "camera"
+      },
+      {
+       "label": "写真を選ぶ",
+       "action": "cameraRoll"
+      }
+     ]
+    },
+    {
+     "id": "err_not_maisoku",
+     "when": "物件資料ではない写真",
+     "send": "reply",
+     "text": "物件資料（マイソク）ではない写真のようでした。\n賃貸物件の募集図面を、写真かPDFで送ってください。\n\n※今回の分は、枚数に数えていません。",
+     "buttons": [
+      {
+       "label": "カメラを開く",
+       "action": "camera"
+      },
+      {
+       "label": "使い方を見る",
+       "action": "postback help=usage"
+      }
+     ]
+    },
+    {
+     "id": "err_sale",
+     "when": "売買物件の資料",
+     "send": "reply",
+     "text": "売買物件の資料のようでした。\n申し訳ありませんが、こちらは居住用の賃貸物件専門のサービスのため、お作りできません。\n\n※今回の分は、枚数に数えていません。",
+     "buttons": []
+    },
+    {
+     "id": "err_commercial",
+     "when": "事務所・店舗など事業用の賃貸物件",
+     "send": "reply",
+     "text": "事務所・店舗などの事業用物件の資料のようでした。\n今のところ居住用の賃貸物件を対象にしているため、内容が合わない部分があるかもしれません。このままお作りしてもよろしいですか？",
+     "buttons": [
+      {
+       "label": "このまま作る",
+       "action": "postback commercial=go"
+      },
+      {
+       "label": "やめておく",
+       "action": "postback cancel"
+      }
+     ],
+     "note": "【要決定】事業用を断るか、確認のうえ作るか。"
+    },
+    {
+     "id": "err_file",
+     "when": "2ページ以上のPDFが送られてきたとき（上の資料の文に追記）",
+     "send": "（追記）",
+     "text": "※PDFは1ページ目のマイソクからお作りしました。ほかのページの物件も作る場合は、そのページだけを写真かPDFで送ってください。",
+     "buttons": [],
+     "note": "PDFは1ページ目を使う（10/27決定）。1ページだけのPDFは写真と同じ流れで、この追記は不要。"
+    },
+    {
+     "id": "err_unsupported_file",
+     "when": "PDF以外のファイル（Word・Excelなど）が送られてきたとき",
+     "send": "reply",
+     "text": "ファイルを送っていただき、ありがとうございます。\n今のところ、写真（画像）とPDFを受け付けています。お手数ですが、マイソクを写真で撮るか、PDFにして送ってください。",
+     "buttons": [
+      {
+       "label": "カメラを開く",
+       "action": "camera"
+      },
+      {
+       "label": "写真を選ぶ",
+       "action": "cameraRoll"
+      }
+     ]
+    },
+    {
+     "id": "err_text",
+     "when": "文字だけのメッセージ（登録中以外）",
+     "send": "reply",
+     "text": "メッセージありがとうございます。\nこちらのトークは自動でお返事しています。マイソクの写真かPDFを送っていただくと、資料をお作りします。\n\nご質問・ご要望は、メニューの「お問い合わせ」からお願いします。",
+     "buttons": [
+      {
+       "label": "使い方を見る",
+       "action": "postback help=usage"
+      },
+      {
+       "label": "お問い合わせ",
+       "action": "postback help=contact"
+      }
+     ]
+    },
+    {
+     "id": "err_other",
+     "when": "スタンプ・動画・音声など",
+     "send": "reply",
+     "text": "ありがとうございます！\nマイソクの写真かPDFを送っていただくと、資料をお作りします。",
+     "buttons": [
+      {
+       "label": "カメラを開く",
+       "action": "camera"
+      },
+      {
+       "label": "写真を選ぶ",
+       "action": "cameraRoll"
+      }
+     ]
+    },
+    {
+     "id": "err_system",
+     "when": "資料づくりの途中でエラー",
+     "send": "reply（間に合わなければpush）",
+     "text": "申し訳ありません。資料をお作りする途中で、問題が起きてしまいました。\n今回の分は、枚数に数えていません。少し時間をおいて、もう一度送っていただけますか。\n\n何度も続く場合は、お手数ですが m-aij@otpromo.com までご連絡ください。",
+     "buttons": []
+    }
+   ]
+  },
+  {
+   "id": "help",
+   "title": "7. 使い方・お問い合わせ",
+   "messages": [
+    {
+     "id": "help_usage",
+     "when": "メニューの「使い方」",
+     "send": "reply",
+     "text": "「1分資料」の使い方はかんたんです。\n\n①マイソクを撮る\n　全体が入るように、横向きで\n　（PDFのままでもOK。1ページ目を使います）\n②このトークに送る\n③1分ほどで、資料が5つ届く\n\n届いた資料は、長押しして「転送」でお客様に送れます。\n\n届く資料\n①帯替え図面\n②おすすめポイント\n③初期費用の概算書\n④ポータル掲載文\n⑤想定Q&A\n\nマイソクに書いてあることだけで作ります。書いていないことは「要確認」と入ります。",
+     "buttons": [
+      {
+       "label": "カメラを開く",
+       "action": "camera"
+      },
+      {
+       "label": "料金プランを見る",
+       "action": "postback plan=show"
+      }
+     ]
+    },
+    {
+     "id": "help_contact",
+     "when": "メニューの「お問い合わせ」",
+     "send": "reply",
+     "text": "ご質問・ご要望は、こちらのメールアドレスまでお送りください。\nm-aij@otpromo.com\n\n内容を確認のうえ、順にお返事いたします。",
+     "buttons": [
+      {
+       "label": "よくある質問",
+       "action": "uri https://otpromo.com/maisoku.html#faq"
+      }
+     ],
+     "note": "HPにFAQの見出し（#faq）があるか要確認。"
+    }
+   ]
+  }
+ ],
+ "richmenu": {
+  "registered": {
+   "size": "2500×1686px（大）",
+   "chatBarText": "メニュー",
+   "areas": [
+    {
+     "pos": "左上",
+     "label": "撮って送る",
+     "sub": "カメラが開きます",
+     "action": "uri https://line.me/R/nv/camera/"
+    },
+    {
+     "pos": "中上",
+     "label": "写真から送る",
+     "sub": "撮った写真を選ぶ",
+     "action": "uri https://line.me/R/nv/cameraRoll/multi"
+    },
+    {
+     "pos": "右上",
+     "label": "使い方",
+     "sub": "",
+     "action": "postback help=usage"
+    },
+    {
+     "pos": "左下",
+     "label": "のこり枚数・プラン",
+     "sub": "",
+     "action": "postback plan=status"
+    },
+    {
+     "pos": "中下",
+     "label": "登録内容の変更",
+     "sub": "色・書体・受け取り方など",
+     "action": "postback reg=edit"
+    },
+    {
+     "pos": "右下",
+     "label": "お問い合わせ",
+     "sub": "",
+     "action": "postback help=contact"
+    }
+   ]
+  },
+  "unregistered": {
+   "size": "2500×843px（小）",
+   "chatBarText": "メニュー",
+   "areas": [
+    {
+     "pos": "左（2/3幅）",
+     "label": "登録をはじめる",
+     "sub": "2〜3分・最初の5枚は無料",
+     "action": "postback reg=start"
+    },
+    {
+     "pos": "右（1/3幅）",
+     "label": "使い方",
+     "sub": "",
+     "action": "postback help=usage"
+    }
+   ]
+  }
+ }
+}
