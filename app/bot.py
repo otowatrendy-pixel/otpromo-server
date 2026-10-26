@@ -24,8 +24,8 @@ log = logging.getLogger("bot")
 pool = ThreadPoolExecutor(max_workers=int(config.env("WORKERS", "4")))
 SLOW_SECONDS = 50
 
-# 合言葉 → お試しに足す枚数（例 {"FAX15": 10}）。FAX DM のリストごとに変えて反応を測る
-PROMO = json.loads(config.env("PROMO_CODES", "{}") or "{}")
+# 合言葉 → お試しに足す枚数（例 PROMO_CODES="FAX15:10;FAXB15:10"）。FAX DM のリストごとに変えて反応を測る
+PROMO = {k.strip().upper(): int(v) for k, _, v in (x.partition(":") for x in config.env("PROMO_CODES").split(";")) if v}
 RICHMENU_REGISTERED = config.env("RICHMENU_REGISTERED")
 RICHMENU_UNREGISTERED = config.env("RICHMENU_UNREGISTERED")
 

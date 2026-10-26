@@ -38,7 +38,7 @@ done
 gcloud run deploy $SERVICE --source=. --region=$REGION --service-account=$SA \
   --allow-unauthenticated --no-cpu-throttling --cpu=2 --memory=2Gi --concurrency=8 --timeout=300 \
   --min-instances=0 --max-instances=3 \
-  --set-env-vars="BASE_URL=${BASE_URL:-${URL:-https://example.invalid}},GCP_PROJECT=$PROJECT,BUCKET=$BUCKET,MODEL=claude-sonnet-5-5,EFFORT=low,PROMO_CODES=${PROMO_CODES:-{\}}" \
+  --set-env-vars="BASE_URL=${BASE_URL:-${URL:-https://example.invalid}},GCP_PROJECT=$PROJECT,BUCKET=$BUCKET,MODEL=claude-sonnet-5-5,EFFORT=low" \
   ${SECRETS:+--set-secrets=$SECRETS}
 URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)')
 # 初回は公開URLが決まってから BASE_URL を入れ直す
