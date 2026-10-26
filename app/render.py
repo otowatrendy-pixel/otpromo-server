@@ -203,7 +203,19 @@ def _yen(v):
     return "要確認" if v is None else f"{v:,}円"
 
 
-def build_html(r: Result, obikae_png: bytes, company: dict) -> str:
+ALL_SECTIONS = ("obikae", "osusume", "estimate", "keisai", "qa")
+FAX_SECTIONS = ("obikae", "estimate")  # FAXは2ページ（帯替え図面＋初期費用概算書）
+
+
+def fax_image(img: Image.Image) -> Image.Image:
+    """FAX向けに白黒・高コントラストにする（細かい網点で文字がつぶれないよう、二値化はしない）。"""
+    g = ImageOps.grayscale(img)
+    g = ImageOps.autocontrast(g, cutoff=2)
+    # 明るい背景は白に飛ばし、文字は濃くする
+    return g.point(lambda v: 255 if v > 200 else int(v * 0.8)).convert("RGB")
+
+
+def build_html(r: Result, obikae_png: bytes, company: dict, sections=ALL_SECTIONS, bw=False) -> str:
     e = html.escape
     f = r.事実
     img64 = base64.b64encode(obikae_png).decode()
@@ -223,8 +235,24 @@ def build_html(r: Result, obikae_png: bytes, company: dict) -> str:
     if not f.広告転載 or "不可" in (f.広告転載 or ""):
         ad = f"<p class=warn>広告転載：{e(f.広告転載 or 'マイソクに記載なし')}。ポータルに載せる前に元付業者へご確認ください。</p>"
 
+    if bw:
+        company = {**company, "テーマ色": "#222222"}
     t = theme(company)
     fcss, family = font_css(company)
+    parts = {
+        "obikae": f"""<section><h1>① 帯替え図面<small>{e(name)}</small></h1>
+<img src="data:image/png;base64,{img64}">{shaky}
+<p class=note>{NOTE}</p></section>""",
+        "osusume": f"""<section><h1>② おすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol>
+<p class=note>{NOTE}</p></section>""",
+        "estimate": estimate_section(f, company, name),
+        "keisai": f"""<section><h1>④ ポータル掲載文<small>{e(name)}</small></h1>{ad}
+<div class=portal><b>{e(r.ポータル掲載文.キャッチコピー)}</b><p>{e(r.ポータル掲載文.本文)}</p></div>
+<p class=note>{NOTE}</p></section>""",
+        "qa": f"""<section><h1>⑤ 想定Q&amp;A<small>{e(name)}</small></h1><dl>{qa}</dl>
+<p class=note>{NOTE}</p></section>""",
+    }
+    body = "\n".join(parts[k] for k in sections)
     return f"""<!doctype html><html lang=ja><meta charset=utf-8><style>
 {fcss}
 :root {{ --main: {t['main']}; --dark: {t['dark']}; --line: {t['line']}; --light: {t['light']}; --pale: {t['pale']}; --ontext: {t['ontext']}; --font: {family}; }}
@@ -265,17 +293,7 @@ dt {{ font-weight: bold; margin-top: 8px; }} dd {{ margin: 2px 0 0 1.2em; }}
 .est .notes {{ margin-top: 10px; font-size: 9pt; color: #444444; }}
 .est .notes p {{ margin: 2px 0; }}
 </style>
-<section><h1>① 帯替え図面<small>{e(name)}</small></h1>
-<img src="data:image/png;base64,{img64}">{shaky}
-<p class=note>{NOTE}</p></section>
-<section><h1>② おすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol>
-<p class=note>{NOTE}</p></section>
-{estimate_section(f, company, name)}
-<section><h1>④ ポータル掲載文<small>{e(name)}</small></h1>{ad}
-<div class=portal><b>{e(r.ポータル掲載文.キャッチコピー)}</b><p>{e(r.ポータル掲載文.本文)}</p></div>
-<p class=note>{NOTE}</p></section>
-<section><h1>⑤ 想定Q&amp;A<small>{e(name)}</small></h1><dl>{qa}</dl>
-<p class=note>{NOTE}</p></section></html>"""
+{body}</html>"""
 
 
 def to_pdf(html_text: str, out: Path):
