@@ -16,6 +16,7 @@ import config
 import core
 import delivery
 import line
+import monitor
 import naiken_bot
 import store
 import texts
@@ -370,6 +371,11 @@ def on_text(c, t):
             store.update_user(c.uid, {"nk": {}, "nk_step": "free", "nk_fid": None})
             c.refresh()
         return naiken_bot.on_text(c, t)
+    if norm(t) == monitor.CODE:
+        if not c.u.get("registered"):
+            return c.send(texts.build("reg_first"))
+        mid = monitor.apply(c.uid)
+        return c.send(monitor.accepted_message(c.uid) if mid == "monitor_accepted" else texts.build(mid))
     code = norm(t).upper()
     if code in PROMO:
         if store.apply_promo(c.uid, code, int(PROMO[code])):

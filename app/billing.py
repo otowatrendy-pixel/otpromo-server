@@ -193,6 +193,11 @@ def handle_webhook(payload: bytes, sig: str):
         uid, before, after = sync_subscription(sub)
         if uid:
             notices.append((uid, "plan_started", {}))
+    elif t == "checkout.session.completed" and obj.get("mode") == "setup":
+        import monitor
+        n = monitor.on_setup_completed(obj)
+        if n:
+            notices.append(n)
     elif t in ("customer.subscription.updated", "customer.subscription.created"):
         uid, before, after = sync_subscription(obj)
         if uid and before not in (None, after) and after != "free" and t == "customer.subscription.updated":

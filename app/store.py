@@ -55,7 +55,7 @@ def new_user(**ids):
 
 class _Local:
     def __init__(self):
-        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}}
+        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}}
         self.lock = threading.Lock()
         self.dir = Path(config.LOCAL_DIR)
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -228,7 +228,9 @@ def quota(u):
     if plan == "unlimited":
         return {"plan": plan, "remaining": None, "free_left": 0, "month_used": u["month_used"]}
     if plan == "light":
-        return {"plan": plan, "remaining": max(0, config.LIGHT_SHEETS - u["month_used"]), "free_left": 0,
+        import monitor
+        limit = config.LIGHT_SHEETS + monitor.bonus_sheets(u)
+        return {"plan": plan, "remaining": max(0, limit - u["month_used"]), "free_left": 0,
                 "month_used": u["month_used"]}
     left = max(0, u.get("free_limit", config.FREE_SHEETS) - u.get("free_used", 0))
     return {"plan": "free", "remaining": left, "free_left": left, "month_used": u["month_used"]}
@@ -242,6 +244,7 @@ def try_consume(uid):
         if q["remaining"] is not None and q["remaining"] <= 0:
             return False
         u["month_used"] = u.get("month_used", 0) + 1
+        u["total_docs"] = u.get("total_docs", 0) + 1
         if q["plan"] == "free":
             u["free_used"] = u.get("free_used", 0) + 1
         return True
@@ -252,6 +255,7 @@ def refund(uid):
     def fn(u):
         _roll_month(u)
         u["month_used"] = max(0, u.get("month_used", 0) - 1)
+        u["total_docs"] = max(0, u.get("total_docs", 0) - 1)
         if (u.get("plan") or "free") == "free":
             u["free_used"] = max(0, u.get("free_used", 0) - 1)
     db().update_tx("users", uid, fn)

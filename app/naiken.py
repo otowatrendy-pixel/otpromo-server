@@ -293,6 +293,7 @@ def send(uid, fid):
     store.db().set("faxes", fid, {"status": status, "sent_at": store.now()}, merge=True)
     if ok:
         remember_to(uid, to)
+        store.db().update_tx("users", uid, lambda u: u.__setitem__("total_naiken", u.get("total_naiken", 0) + 1))
     return status
 
 

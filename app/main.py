@@ -134,6 +134,23 @@ def portal(t: str = ""):
     return RedirectResponse(url, status_code=303)
 
 
+@app.get("/card")
+def card(t: str = ""):
+    import monitor
+    uid = _uid(t)
+    return RedirectResponse(monitor.card_checkout(uid), status_code=303)
+
+
+@app.post("/cron/daily")
+def cron_daily(x_cron_key: str = Header("")):
+    """Cloud Scheduler から毎日呼ぶ（モニターのお知らせなど）。"""
+    import hmac as _hmac
+    if not _hmac.compare_digest(x_cron_key, config.env("CRON_KEY") or config.APP_SECRET):
+        raise HTTPException(403)
+    import monitor
+    return {"monitor_sent": monitor.daily()}
+
+
 @app.get("/paid")
 def paid(t: str = ""):
     return page("ありがとうございました", f"""<p>お手続きが完了しました。LINEに戻って、そのままお使いください。</p>
