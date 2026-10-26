@@ -60,10 +60,10 @@ def _action(b, urls):
     return None
 
 
-def build(mid, urls=None, extra_buttons=None, append="", **kw):
-    """文面IDからLINEのメッセージを1つ作る。urls はボタンのラベル→URL。"""
+def build(mid, urls=None, extra_buttons=None, append="", text=None, **kw):
+    """文面IDからLINEのメッセージを1つ作る。urls はボタンのラベル→URL。text で文を差し替えられる。"""
     m = _MSG[mid]
-    text = raw(mid, **kw)
+    text = text if text is not None else raw(mid, **kw)
     if append:
         text = text + "\n\n" + append
     buttons = list(m.get("buttons", [])) + list(extra_buttons or [])

@@ -16,6 +16,7 @@ import config
 import core
 import delivery
 import line
+import naiken_bot
 import store
 import texts
 from schema import Result
@@ -311,7 +312,8 @@ def on_postback(c, data):
     if k in ("shop", "license", "fax", "fee", "color", "font", "obi", "recv"):
         return reg_postback(c, k, v)
     if k == "help":
-        return c.send(texts.build({"usage": "help_usage", "contact": "help_contact", "share": "help_share"}.get(v, "help_usage")))
+        return c.send(texts.build({"usage": "help_usage", "contact": "help_contact", "share": "help_share",
+                                   "menu": "help_menu"}.get(v, "help_usage")))
     if k == "plan" and v == "show":
         return c.send(plan_show(c))
     if k == "plan" and v == "status":
@@ -320,7 +322,15 @@ def on_postback(c, data):
         return send_last(c, v)
     if k == "commercial" and v == "go":
         return pool.submit(_safe_pending, c, "commercial")
+    if k == "naiken":
+        return naiken_bot.on_postback(c, v)
+    if k in ("card_roman", "card_role", "card_contact"):
+        return naiken_bot.card_postback(c, k)
+    if k == "edit" and v == "card":
+        return naiken_bot.edit_card(c)
     if k == "cancel":
+        if naiken_bot.active(c.u):
+            return naiken_bot.cancel(c)
         store.update_user(c.uid, {"pending": None})
         return c.send(line.text("かしこまりました。またいつでもお送りください。"))
 
@@ -353,6 +363,13 @@ def on_text(c, t):
     step = current_step(c.u)
     if step:
         return reg_text(c, step, t)
+    if naiken_bot.active(c.u) or norm(t).startswith("内見"):
+        if not c.u.get("registered"):
+            return c.send(texts.build("reg_first"))
+        if norm(t).startswith("内見") or not naiken_bot.active(c.u):
+            store.update_user(c.uid, {"nk": {}, "nk_step": "free", "nk_fid": None})
+            c.refresh()
+        return naiken_bot.on_text(c, t)
     code = norm(t).upper()
     if code in PROMO:
         if store.apply_promo(c.uid, code, int(PROMO[code])):
@@ -471,8 +488,9 @@ def process(c, data, held=None):
         out = core.render_documents(company_for_render(c.uid, c.u), a["img"], a["result"], a["pages"], a["log"])
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "title": out["title"], "texts": out["texts"], "log": out["log"],
-                               "pages": out["pages"]})
-        store.update_user(c.uid, {"last_job": jid, "pending": None})
+                               "pages": out["pages"], "result": out["result"]})
+        recent = [{"id": jid, "title": out["title"]}] + [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
+        store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:10]})
         c.refresh()
         done.set()
         deliver(c, jid)

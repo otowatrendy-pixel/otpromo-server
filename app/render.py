@@ -320,7 +320,7 @@ NAIKEN_TEMPLATE = HERE / "naiken_template.html"
 WEEK = "月火水木金土日"
 
 
-def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=None) -> str:
+def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=None, prop=None) -> str:
     """内見申込書（FAX用）。テンプレートは内見FAX担当が作った naiken_template.html（Jinja2）。
 
     資料一式に入れるときは希望日時を空欄にし、元付業者と自社の情報だけ入れておく。
@@ -344,7 +344,7 @@ def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=
     data = {
         "sent_date": f"{today.year}年{today.month}月{today.day}日（{WEEK[today.weekday()]}）",
         "to": to or {"company": f.元付業者 or "", "branch": "", "person": "", "fax": f.元付業者_FAX or ""},
-        "prop": {"name": name, "room": room, "address": f.所在地 or ""},
+        "prop": prop or {"name": name, "room": room, "address": f.所在地 or ""},
         "wishes": wishes or [blank, blank, blank], "guests": guests, "me": me,
     }
     tpl = NAIKEN_TEMPLATE.read_text(encoding="utf-8")

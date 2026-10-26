@@ -58,6 +58,11 @@ class CompanyIn(BaseModel):
     賃貸_仲介手数料_ヶ月: float = 1.0
     テーマ色: str = "青"
     書体: str = "ゴシック"
+    担当者名: str = ""
+    ローマ字: str = ""
+    役職: str = ""
+    携帯: str = ""
+    メール: str = ""
     受け取り方: str = "app"
     メール: str = ""
     FAX送り先: str = ""
@@ -69,6 +74,7 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     co = body.model_dump()
     delivery = {"method": co.pop("受け取り方"), "email": co.pop("メール"), "fax": co.pop("FAX送り先")}
     co["帯画像"] = (u.get("company") or {}).get("帯画像")
+    co["名刺済み"] = bool(co.get("担当者名"))
     store.update_user(uid, {"company": co, "delivery": delivery, "registered": True})
     return {"ok": True}
 
@@ -127,6 +133,8 @@ def get_job(jid: str, authorization: str = Header("")):
     res = {"status": job["status"], "error": job.get("error"), "title": job.get("title"),
            "pdf_url": None, "obikae_url": None, "texts": None}
     if job["status"] == "done":
+        mz = (job.get("texts") or {}).get("motozuke") or {}
+        res.update(motozuke=mz.get("name"), motozuke_fax=mz.get("fax"), motozuke_tel=mz.get("tel"))
         res.update(pdf_url=store.file_url(jid, job, "shiryou.pdf"), obikae_url=store.file_url(jid, job, "obikae.png"),
                    texts=job.get("texts"), expires_at=job["expires_at"].isoformat())
     return res
@@ -140,3 +148,62 @@ def google_verify():
 @router.post("/billing/google/rtdn")
 def google_rtdn():
     return {"ok": True}
+
+
+# ---------- 内見申込書FAX ----------
+
+class NaikenIn(BaseModel):
+    job_id: str | None = None
+    to_company: str
+    to_branch: str = ""
+    to_fax: str
+    prop_name: str
+    prop_room: str | None = None
+    prop_address: str | None = None
+    wishes: list[str] = []      # 表示する文字のまま（例「10月29日（木）14時00分頃」）か "YYYY-MM-DD HH:MM"
+    guests: int | None = None
+    guide: str | None = None
+
+
+def _wish(s):
+    import re as _re
+    m = _re.match(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}))?$", s.strip())
+    return {"date": m.group(1), "time": m.group(2)} if m else {"text": s}
+
+
+@router.post("/naiken/preview")
+def naiken_preview(body: NaikenIn, authorization: str = Header("")):
+    import naiken
+    uid, u = _me(authorization)
+    if not naiken.fax_ok(body.to_fax):
+        raise HTTPException(422, "このFAX番号にはお送りできません（携帯・0120・0570・国際番号などは不可）")
+    if not body.wishes:
+        raise HTTPException(422, "希望日時を1つ以上入れてください")
+    d = {"job_id": body.job_id, "to": {"company": body.to_company, "branch": body.to_branch, "fax": body.to_fax},
+         "prop": {"name": body.prop_name, "room": body.prop_room, "address": body.prop_address or ""},
+         "wishes": [_wish(w) for w in body.wishes[:3]], "guests": body.guests, "guide": body.guide}
+    fid, rec = naiken.save_preview(uid, d, u.get("company") or {})
+    return {"fax_id": fid, "status": "preview", "preview_url": naiken.file_url(fid, rec, "naiken.png"),
+            "pdf_url": naiken.file_url(fid, rec, "naiken.pdf")}
+
+
+@router.post("/naiken/{fid}/send")
+def naiken_send(fid: str, authorization: str = Header("")):
+    import naiken
+    uid, u = _me(authorization)
+    status = naiken.send(uid, fid)
+    if status is None:
+        raise HTTPException(404)
+    if status == "limit":
+        raise HTTPException(402, "内見FAXの回数の上限に達しました")
+    return {"status": status}
+
+
+@router.get("/naiken/{fid}")
+def naiken_get(fid: str, authorization: str = Header("")):
+    import naiken
+    uid, u = _me(authorization)
+    rec = store.db().get("faxes", fid)
+    if not rec or rec["user_id"] != uid:
+        raise HTTPException(404)
+    return {"status": rec["status"], "pdf_url": naiken.file_url(fid, rec, "naiken.pdf"), "error": rec.get("error")}

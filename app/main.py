@@ -147,6 +147,17 @@ def canceled():
 
 # ---------- 資料のファイル ----------
 
+@app.get("/n/{fid}/{token}/{name}")
+def naiken_file(fid: str, token: str, name: str):
+    import naiken
+    data = naiken.read_file(fid, token, name)
+    if data == "expired":
+        return page("リンクの期限が切れました", "<p>内見申込書を見られるのは7日間です。</p>", 410)
+    if not data:
+        raise HTTPException(404)
+    return Response(data, media_type="application/pdf" if name.endswith(".pdf") else "image/png",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
 @app.get("/f/{jid}/{token}/{name}")
 def file(jid: str, token: str, name: str):
     data = store.read_file(jid, token, name)
