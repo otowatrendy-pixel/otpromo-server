@@ -1,4 +1,4 @@
-"""ご感想モニター（先着20社・ライト1か月無料・カード登録なし）。
+"""ご感想モニター（先着40社・ライト1か月無料・カード登録なし）。
 
 - 申し込み：LINEで合言葉（MONITOR_CODE、既定「モニター」）→ Stripe でカードなしの無料期間つき契約を作る
   （無料期間が終わってカードがなければ自動で終わる：trial_settings.end_behavior.missing_payment_method=cancel）
@@ -16,7 +16,7 @@ import store
 import texts
 
 log = logging.getLogger("monitor")
-CAPACITY = int(config.env("MONITOR_CAPACITY", "20"))
+CAPACITY = int(config.env("MONITOR_CAPACITY", "40"))
 CODE = config.env("MONITOR_CODE", "モニター")
 BONUS = int(config.env("MONITOR_BONUS", "10"))
 WEEK = "月火水木金土日"
