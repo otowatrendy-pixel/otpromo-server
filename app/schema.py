@@ -54,6 +54,8 @@ class Facts(BaseModel):
     条件_備考: List[str] = Field(default_factory=list, description="ペット可、二人入居可、フリーレントなど")
     その他の費用: List[OtherCost] = Field(default_factory=list, description="鍵交換、消毒、24時間サポートなど費用の記載")
     元付業者: Optional[str] = None
+    元付業者_電話: Optional[str] = Field(None, description="帯に書いてある元付業者のTEL")
+    元付業者_FAX: Optional[str] = Field(None, description="帯に書いてある元付業者のFAX（内見申込書の送り先に使う）")
     取引態様: Optional[str] = None
     広告転載: Optional[str] = Field(None, description="『広告転載可』『不可』など記載のまま。なければ null")
     読み取りに自信がない項目: List[str] = Field(default_factory=list)
@@ -68,8 +70,8 @@ class Band(BaseModel):
 
 class Point(BaseModel):
     見出し: str = Field(description="15字程度")
-    説明: str = Field(description="60字程度。お客様にそのまま話せる言葉で")
-    根拠: str = Field(description="マイソクのどの記載にもとづくか")
+    説明: str = Field("", description="60字程度。お客様にそのまま話せる言葉で")
+    根拠: str = Field("", description="マイソクのどの記載にもとづくか")
 
 
 class QA(BaseModel):
@@ -78,14 +80,8 @@ class QA(BaseModel):
     要確認: bool = Field(description="マイソクに答えが書いておらず、元付業者などへの確認が必要なら true")
 
 
-class Portal(BaseModel):
-    キャッチコピー: str = Field(description="30字以内")
-    本文: str = Field(description="200〜300字")
-
-
 class Result(BaseModel):
     事実: Facts
     帯: Band = Field(default_factory=lambda: Band(見つかった=False))
     おすすめポイント: List[Point] = Field(default_factory=list, description="3〜5個")
-    ポータル掲載文: Portal = Field(default_factory=lambda: Portal(キャッチコピー="", 本文=""))
     想定QA: List[QA] = Field(default_factory=list, description="8〜10個")

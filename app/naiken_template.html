@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>内見申込書</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Noto+Serif+JP:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* FAXは白黒（1ビット）になる前提：薄い塗りの上に文字を置かない。色は濃い紺だけ */
+  :root { --ink:#0b2a6b; --line:#0b2a6b; --sub:#3b4a6b; }
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #fff; }
+  body { font-family: "Noto Sans JP", "IPAGothic", sans-serif; color: var(--ink); }
+  .page { width: 210mm; height: 297mm; padding: 13mm 15mm 9mm; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  .nw { white-space: nowrap; }
+
+  /* 送信情報 */
+  .meta { display: flex; justify-content: space-between; align-items: flex-end; font-size: 11pt; font-weight: 500; }
+  .meta .pages { border: 1.2px solid var(--line); padding: 1mm 3mm; font-size: 10pt; }
+
+  /* 宛先 */
+  .to { margin-top: 5mm; display: flex; justify-content: space-between; align-items: flex-end; }
+  .to .co { font-size: 17pt; font-weight: 700; line-height: 1.35; border-bottom: 2px solid var(--line); padding-bottom: 1mm; padding-right: 6mm; }
+  .to .co small { font-size: 12pt; font-weight: 700; margin-left: 2mm; }
+  .to .person { font-size: 12pt; font-weight: 500; margin-top: 1.5mm; }
+  .to .fax { font-size: 12pt; font-weight: 700; margin-top: 1mm; letter-spacing: .02em; }
+  .to .from { text-align: right; font-size: 10pt; line-height: 1.6; font-weight: 500; }
+  .to .from b { font-size: 11.5pt; font-weight: 700; }
+
+  /* 表題 */
+  .title { margin-top: 6mm; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; gap: 6mm; height: 15mm; }
+  .title h1 { font-size: 25pt; font-weight: 900; letter-spacing: .55em; margin-right: -.55em; }
+  .title .en { font-size: 9pt; font-weight: 700; letter-spacing: .25em; border-left: 1.5px solid #fff; padding-left: 5mm; }
+
+  .greet { margin-top: 4mm; font-size: 11pt; line-height: 1.75; font-weight: 500; }
+
+  /* 物件・日時 */
+  table { width: 100%; border-collapse: collapse; margin-top: 3.5mm; }
+  th, td { border: 1.2px solid var(--line); padding: 2mm 3.5mm; vertical-align: middle; }
+  th { width: 34mm; font-size: 10.5pt; font-weight: 700; text-align: left; white-space: nowrap; }
+  th::before { content: ""; display: inline-block; width: 1.6mm; height: 4mm; background: var(--ink); margin-right: 2mm; vertical-align: -0.6mm; }
+  td { font-size: 13pt; font-weight: 700; }
+  td .big { font-size: 17pt; font-weight: 900; }
+  td .room { font-size: 17pt; font-weight: 900; margin-left: 4mm; }
+  td .s { font-size: 10pt; font-weight: 500; }
+  .wish { display: flex; align-items: center; gap: 3mm; }
+  .wish + .wish { margin-top: 1mm; }
+  .wish .no { font-size: 9pt; font-weight: 700; border: 1.2px solid var(--line); border-radius: 1mm; padding: 0 1.6mm; }
+  .wish.first .dt { font-size: 15pt; font-weight: 900; }
+
+  /* 下半分：ご案内担当（名刺） */
+  .lower { margin-top: auto; padding-top: 5mm; }
+  .lbl { display: flex; align-items: center; gap: 3mm; font-size: 10.5pt; font-weight: 700; }
+  .lbl::after { content: ""; flex: 1; border-top: 1.2px dashed var(--line); }
+  .cardwrap { display: flex; justify-content: center; padding: 6mm 0 7mm; }
+
+  /* 名刺：91×55mmを約1.2倍（109×66mm） */
+  .card { width: 109mm; height: 66mm; position: relative; background: #fff; border: 0.35mm solid #8a93a6; box-shadow: 1.2mm 1.2mm 0 0 #2b3550; padding: 6mm 7mm 5mm 9mm; display: flex; flex-direction: column; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2.2mm; background: var(--ink); }
+  .card .shop { font-size: 11pt; font-weight: 900; letter-spacing: .04em; }
+  .card .branch { font-size: 8pt; font-weight: 500; margin-top: .4mm; color: var(--sub); }
+  .card .mid { margin-top: auto; }
+  .card .role { font-size: 7.5pt; font-weight: 500; color: var(--sub); }
+  .card .name { font-family: "Noto Serif JP", serif; font-size: 21pt; font-weight: 600; letter-spacing: .14em; line-height: 1.25; word-spacing: .3em; margin-top: .5mm; }
+  .card .roma { font-size: 7pt; font-weight: 500; letter-spacing: .2em; color: var(--sub); }
+  .card .addr { margin-top: auto; padding-top: 2.4mm; border-top: 0.3mm solid #8a93a6; font-size: 7.3pt; line-height: 1.6; font-weight: 500; }
+  .card .addr .row { display: flex; gap: 3.2mm; }
+  .card .addr b { font-weight: 700; }
+  .card .lic { position: absolute; right: 7mm; top: 6.3mm; font-size: 6.3pt; color: var(--sub); text-align: right; line-height: 1.45; }
+
+  /* ご回答欄 */
+  .reply { border: 1.6px solid var(--line); }
+  .reply .hd { background: var(--ink); color: #fff; font-size: 10.5pt; font-weight: 700; padding: 1.4mm 3.5mm; display: flex; justify-content: space-between; }
+  .reply .hd span:last-child { font-weight: 500; font-size: 9.5pt; }
+  .reply .bd { padding: 2.6mm 3.5mm 3mm; font-size: 10.5pt; font-weight: 500; line-height: 2; }
+  .reply .q { display: flex; gap: 5mm; flex-wrap: wrap; }
+  .reply .q > b { width: 22mm; font-weight: 700; }
+  .box { display: inline-block; width: 3.6mm; height: 3.6mm; border: 1.2px solid var(--line); vertical-align: -0.5mm; margin-right: 1.4mm; }
+  .blank { display: inline-block; border-bottom: 1.2px solid var(--line); min-width: 52mm; }
+  .blank.s { min-width: 30mm; }
+
+  .foot { margin-top: 3mm; display: flex; justify-content: space-between; font-size: 7.5pt; font-weight: 500; color: var(--sub); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="meta">
+    <span class="nw">送信日：{{ sent_date }}</span>
+    <span class="pages nw">送信枚数：本紙を含め1枚</span>
+  </div>
+
+  <div class="to">
+    <div>
+      <div class="co"><span class="nw">{{ to.company }}</span>{% if to.branch %}<small class="nw">{{ to.branch }}</small>{% endif %}<small class="nw">御中</small></div>
+      <div class="person nw">{{ to.person or "ご担当者" }}　様</div>
+      <div class="fax nw">FAX：{{ to.fax }}</div>
+    </div>
+    <div class="from">
+      <b class="nw">{{ me.company }}</b><br>
+      <span class="nw">担当：{{ me.name }}</span><br>
+      <span class="nw">TEL：{{ me.tel }}</span><br>
+      <span class="nw">FAX：{{ me.fax }}</span>
+    </div>
+  </div>
+
+  <div class="title"><h1>内見申込書</h1><span class="en nw">VIEWING REQUEST</span></div>
+
+  <p class="greet">
+    <span class="nw">いつも大変お世話になっております。</span><br>
+    <span class="nw">下記物件の内見をお願いしたく、ご連絡いたしました。</span><br>
+    <span class="nw">お手数ですが、下のご回答欄にご記入のうえ、FAXにてご返信いただけますと幸いです。</span>
+  </p>
+
+  <table>
+    <tr>
+      <th>物件名・号室</th>
+      <td><span class="big nw">{{ prop.name }}</span>{% if prop.room %}<span class="room nw">{{ prop.room }}号室</span>{% endif %}</td>
+    </tr>
+    {% if prop.address %}
+    <tr>
+      <th>所在地</th>
+      <td><span class="nw">{{ prop.address }}</span></td>
+    </tr>
+    {% endif %}
+    <tr>
+      <th>内見希望日時</th>
+      <td>
+        {% for w in wishes %}
+        <div class="wish{% if loop.first %} first{% endif %}"><span class="no nw">第{{ loop.index }}希望</span><span class="dt nw">{{ w }}</span></div>
+        {% endfor %}
+      </td>
+    </tr>
+    <tr>
+      <th>ご案内予定</th>
+      <td><span class="nw">当日は弊社の{{ me.family_name }}がご案内いたします。</span>{% if guests %}<span class="s nw">（お客様{{ guests }}名様）</span>{% endif %}</td>
+    </tr>
+  </table>
+
+  <div class="lower">
+    <div class="lbl"><span class="nw">ご案内担当</span></div>
+    <div class="cardwrap">
+      <div class="card">
+        {% if me.license %}<div class="lic"><span class="nw">{{ me.license }}</span></div>{% endif %}
+        <div class="shop nw">{{ me.company }}</div>
+        {% if me.branch %}<div class="branch nw">{{ me.branch }}</div>{% endif %}
+        <div class="mid">
+          {% if me.role %}<div class="role nw">{{ me.role }}</div>{% endif %}
+          <div class="name nw">{{ me.name }}</div>
+          {% if me.roman %}<div class="roma nw">{{ me.roman }}</div>{% endif %}
+        </div>
+        <div class="addr">
+          <div class="nw">〒{{ me.zip }}　{{ me.address }}</div>
+          <div class="row"><span class="nw"><b>TEL</b> {{ me.tel }}</span><span class="nw"><b>FAX</b> {{ me.fax }}</span>{% if me.mobile %}<span class="nw"><b>携帯</b> {{ me.mobile }}</span>{% endif %}</div>
+          {% if me.email %}<div class="nw"><b>E-mail</b> {{ me.email }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="reply">
+      <div class="hd"><span class="nw">ご回答欄</span><span class="nw">このままFAXでご返信ください　返信先FAX：{{ me.fax }}</span></div>
+      <div class="bd">
+        <div class="q"><b class="nw">内見</b><span class="nw"><i class="box"></i>可能です</span><span class="nw"><i class="box"></i>別の日時でお願いします（<span class="blank s"></span>）</span></div>
+        <div class="q"><b class="nw"></b><span class="nw"><i class="box"></i>お申込みが入っているため、内見できません</span></div>
+        <div class="q"><b class="nw">鍵の手配</b><span class="nw"><i class="box"></i>現地</span><span class="nw"><i class="box"></i>店舗で貸出</span><span class="nw"><i class="box"></i>その他（<span class="blank s"></span>）</span></div>
+        <div class="q"><b class="nw">ご担当者</b><span class="nw"><span class="blank"></span>　様</span></div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span class="nw">万一、誤って届いた場合は、お手数ですが破棄のうえご連絡ください。</span>
+      <span class="nw">作成・送信：1分資料</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

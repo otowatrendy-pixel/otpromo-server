@@ -125,7 +125,11 @@ def analyze(data: bytes) -> dict:
     if config.MOCK_RESULT:
         result, usage = Result.model_validate_json(Path(config.MOCK_RESULT).read_text(encoding="utf-8")), {}
     else:
-        result, usage = call_claude(jpeg)
+        try:
+            result, usage = call_claude(jpeg)
+        except ValueError:
+            # JSONの形が崩れたときは1回だけやり直す（pydantic の検証エラーも ValueError）
+            result, usage = call_claude(jpeg)
     t2 = time.perf_counter()
     log = {"秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "モデル": config.MODEL, **usage}
     return {"img": img, "pages": pages, "result": result, "log": log}
@@ -154,10 +158,13 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
     t2 = time.perf_counter()
     ob = render.obikae(img, result, company)
     ob_png = render.png_bytes(ob)
-    html_text = render.build_html(result, ob_png, company)
+    # ①帯替え ②おすすめ ③概算書 ／ ④内見申込書 ／ ⑤想定Q&A の順に1つのPDFにする
+    htmls = [render.build_html(result, ob_png, company, sections=("obikae", "osusume", "estimate")),
+             render.naiken_html(result, company),
+             render.build_html(result, ob_png, company, sections=("qa",))]
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "shiryou.pdf"
-        render.to_pdf(html_text, out)
+        render.to_pdf(htmls, out)
         pdf = out.read_bytes()
     t3 = time.perf_counter()
 
@@ -166,10 +173,9 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
     shaky = list(f.読み取りに自信がない項目)
     texts = {
         "osusume": [p.model_dump() for p in result.おすすめポイント],
-        "keisai": result.ポータル掲載文.model_dump(),
         "qa": [q.model_dump() for q in result.想定QA],
         "shaky": shaky,
-        "ad_ok": bool(f.広告転載) and "不可" not in (f.広告転載 or ""),
+        "motozuke": {"name": f.元付業者, "tel": f.元付業者_電話, "fax": f.元付業者_FAX},
     }
     log = {**(log or {}), "秒_資料": round(t3 - t2, 2)}
     log["秒_合計"] = round(log.get("秒_準備", 0) + log.get("秒_AI", 0) + log["秒_資料"], 2)

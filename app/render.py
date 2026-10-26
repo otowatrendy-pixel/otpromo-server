@@ -203,7 +203,7 @@ def _yen(v):
     return "要確認" if v is None else f"{v:,}円"
 
 
-ALL_SECTIONS = ("obikae", "osusume", "estimate", "keisai", "qa")
+ALL_SECTIONS = ("obikae", "osusume", "estimate", "qa")
 FAX_SECTIONS = ("obikae", "estimate")  # FAXは2ページ（帯替え図面＋初期費用概算書）
 
 
@@ -231,9 +231,6 @@ def build_html(r: Result, obikae_png: bytes, company: dict, sections=ALL_SECTION
         shaky += "<p class=warn>賃貸以外のマイソクのようです。このサービスは賃貸物件専用のため、内容をよくご確認ください。</p>"
     if f.読み取りに自信がない項目:
         shaky += f"<p class=warn>読み取りに自信がない項目：{e('、'.join(f.読み取りに自信がない項目))}</p>"
-    ad = ""
-    if not f.広告転載 or "不可" in (f.広告転載 or ""):
-        ad = f"<p class=warn>広告転載：{e(f.広告転載 or 'マイソクに記載なし')}。ポータルに載せる前に元付業者へご確認ください。</p>"
 
     if bw:
         company = {**company, "テーマ色": "#222222"}
@@ -246,9 +243,6 @@ def build_html(r: Result, obikae_png: bytes, company: dict, sections=ALL_SECTION
         "osusume": f"""<section><h1>② おすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol>
 <p class=note>{NOTE}</p></section>""",
         "estimate": estimate_section(f, company, name),
-        "keisai": f"""<section><h1>④ ポータル掲載文<small>{e(name)}</small></h1>{ad}
-<div class=portal><b>{e(r.ポータル掲載文.キャッチコピー)}</b><p>{e(r.ポータル掲載文.本文)}</p></div>
-<p class=note>{NOTE}</p></section>""",
         "qa": f"""<section><h1>⑤ 想定Q&amp;A<small>{e(name)}</small></h1><dl>{qa}</dl>
 <p class=note>{NOTE}</p></section>""",
     }
@@ -296,19 +290,69 @@ dt {{ font-weight: bold; margin-top: 8px; }} dd {{ margin: 2px 0 0 1.2em; }}
 {body}</html>"""
 
 
-def to_pdf(html_text: str, out: Path):
+def to_pdf(html_text, out: Path):
+    """HTMLをPDFにする。html_text に並びを渡すと、順にPDFにして1つにまとめる（pdfunite）。"""
+    import subprocess
     from playwright.sync_api import sync_playwright
+    htmls = [html_text] if isinstance(html_text, str) else list(html_text)
+    parts = []
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=CHROME)
         page = b.new_page()
-        # 書体ファイルを読み込めるよう、いったんファイルに書いてから開く
-        tmp = out.with_suffix(".print.html")
-        tmp.write_text(html_text, encoding="utf-8")
-        page.goto(tmp.as_uri(), wait_until="networkidle")
-        page.evaluate("document.fonts.ready")
-        page.pdf(path=str(out), format="A4", print_background=True)
+        for i, h in enumerate(htmls):
+            # 書体ファイルを読み込めるよう、いったんファイルに書いてから開く
+            tmp = out.with_suffix(f".{i}.print.html")
+            tmp.write_text(h, encoding="utf-8")
+            page.goto(tmp.as_uri(), wait_until="networkidle")
+            page.evaluate("document.fonts.ready")
+            part = out if len(htmls) == 1 else out.with_suffix(f".{i}.pdf")
+            page.pdf(path=str(part), format="A4", print_background=True)
+            tmp.unlink()
+            parts.append(part)
         b.close()
-        tmp.unlink()
+    if len(parts) > 1:
+        subprocess.run(["pdfunite", *map(str, parts), str(out)], check=True)
+        for part in parts:
+            part.unlink()
+
+
+NAIKEN_TEMPLATE = HERE / "naiken_template.html"
+WEEK = "月火水木金土日"
+
+
+def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=None) -> str:
+    """内見申込書（FAX用）。テンプレートは内見FAX担当が作った naiken_template.html（Jinja2）。
+
+    資料一式に入れるときは希望日時を空欄にし、元付業者と自社の情報だけ入れておく。
+    """
+    from jinja2 import Template
+    f = r.事実
+    today = datetime.now(timezone(timedelta(hours=9)))
+    blank = "　　月　　日（　　）　　時　　分頃"
+    me = me or {
+        "company": company.get("会社名", ""), "branch": company.get("店舗名", ""), "role": company.get("役職", ""),
+        "name": company.get("担当者名", ""), "family_name": company.get("担当者姓") or "担当者",
+        "roman": company.get("ローマ字", ""), "zip": company.get("郵便番号", ""), "address": company.get("住所", ""),
+        "tel": company.get("電話", ""), "fax": company.get("FAX", ""), "mobile": company.get("携帯", ""),
+        "email": company.get("メール", ""), "license": company.get("免許", ""),
+    }
+    room = None
+    name = f.物件名 or ""
+    m = re.search(r"\s*(\d+)\s*号室?$", name)
+    if m:
+        name, room = name[:m.start()].strip(), m.group(1)
+    data = {
+        "sent_date": f"{today.year}年{today.month}月{today.day}日（{WEEK[today.weekday()]}）",
+        "to": to or {"company": f.元付業者 or "", "branch": "", "person": "", "fax": f.元付業者_FAX or ""},
+        "prop": {"name": name, "room": room, "address": f.所在地 or ""},
+        "wishes": wishes or [blank, blank, blank], "guests": guests, "me": me,
+    }
+    tpl = NAIKEN_TEMPLATE.read_text(encoding="utf-8")
+    # 書体はネットから読まず、同梱のものを使う
+    tpl = re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "", tpl)
+    css = font_css({"書体": "ゴシック"})[0] + font_css({"書体": "明朝"})[0]
+    html_text = Template(tpl, autoescape=True).render(**data)
+    return html_text.replace("<style>", "<style>\n" + css, 1)
 
 
 def png_bytes(img: Image.Image) -> bytes:
