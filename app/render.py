@@ -14,7 +14,8 @@ from schema import Result
 
 FONT = os.environ.get("BAND_FONT", "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf")
 CHROME = os.environ.get("CHROME_PATH") or None  # 空ならPlaywright付属のChromiumを使う
-NOTE = "参考資料です。最終確認はご担当者様が行ってください。"
+# スタッフ向けの注意書き。お客様に転送される①帯替え②おすすめ③概算書と、PDFの下の余白には入れない
+NOTE = "AIが作った下書きです。お客様にお渡しする前に、内容をご確認ください。"
 
 # 初回登録で選んでもらう色。company.json の「テーマ色」に名前か #RRGGBB を入れる
 PRESETS = {
@@ -238,10 +239,8 @@ def build_html(r: Result, obikae_png: bytes, company: dict, sections=ALL_SECTION
     fcss, family = font_css(company)
     parts = {
         "obikae": f"""<section><h1>① 帯替え図面<small>{e(name)}</small></h1>
-<img src="data:image/png;base64,{img64}">{shaky}
-<p class=note>{NOTE}</p></section>""",
-        "osusume": f"""<section><h1>② おすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol>
-<p class=note>{NOTE}</p></section>""",
+<img src="data:image/png;base64,{img64}">{shaky}</section>""",
+        "osusume": f"""<section><h1>② おすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol></section>""",
         "estimate": estimate_section(f, company, name),
         "qa": f"""<section><h1>⑤ 想定Q&amp;A<small>{e(name)}</small></h1><dl>{qa}</dl>
 <p class=note>{NOTE}</p></section>""",
@@ -250,7 +249,7 @@ def build_html(r: Result, obikae_png: bytes, company: dict, sections=ALL_SECTION
     return f"""<!doctype html><html lang=ja><meta charset=utf-8><style>
 {fcss}
 :root {{ --main: {t['main']}; --dark: {t['dark']}; --line: {t['line']}; --light: {t['light']}; --pale: {t['pale']}; --ontext: {t['ontext']}; --font: {family}; }}
-@page {{ size: A4; margin: 14mm 14mm 16mm; @bottom-center {{ content: "{NOTE}"; font-size: 8pt; color: #666; }} }}
+@page {{ size: A4; margin: 14mm 14mm 16mm; }}
 body {{ font-family: var(--font); color: #222; font-size: 10.5pt; line-height: 1.7;
   word-break: auto-phrase; line-break: strict; }}
 h1 {{ color: var(--main); font-size: 16pt; border-bottom: 3px solid var(--main); padding-bottom: 4px; margin: 0 0 10px; }}

@@ -31,7 +31,7 @@ def send_mail(to, title, pdf: bytes, pdf_url: str) -> bool:
     body = (f"いつも「1分資料」をご利用いただき、ありがとうございます。\n\n"
             f"物件「{title}」の資料をお送りします（PDFを添付しています）。\n"
             f"添付が開けない場合は、こちらからもご覧いただけます。\n{pdf_url}\n\n"
-            f"参考資料です。最終確認はご担当者様が行ってください。\n\n"
+            f"AIが作った下書きです。お客様にお渡しする前に、内容をご確認ください。\n\n"
             f"――――――――――\n1分資料（otpromo.com）\nお問い合わせ：{MAIL_REPLY_TO}\n")
     r = requests.post("https://api.resend.com/emails", timeout=30,
                       headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
