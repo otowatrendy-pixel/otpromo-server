@@ -311,6 +311,11 @@ def on_postback(c, data):
         store.update_user(c.uid, {"reg_edit_name": EDIT_NAMES[v]})
         mode = "edit" if c.u.get("registered") else "new"
         return start_steps(c, list(EDIT_STEPS[v]), mode)
+    if k == "recv" and v == "line" and not current_step(c.u):
+        # 回数券を使い切ったときの「LINEで受け取りにする」
+        set_delivery(c, method="line")
+        store.update_user(c.uid, {"recvfax_wait": None})
+        return c.send(line.text("承知しました。これからは資料をLINEでお届けします。"))
     if k in ("shop", "license", "fax", "fee", "color", "font", "obi", "recv"):
         return reg_postback(c, k, v)
     if k == "help":
@@ -322,11 +327,8 @@ def on_postback(c, data):
         return c.send(plan_status(c))
     if k == "send":
         return send_last(c, v)
-    if k == "faxopt" and v == "pause":
-        faxopt.pause(c.uid)
-        return c.send(texts.build("faxopt_paused", 更新日=store.renew_date(c.u)))
-    if k == "faxopt" and v == "keep":
-        return c.send(line.text("承知しました。このままFAXでもお届けします。"))
+    if k == "recvfax":
+        return c.send(texts.build("recvfax_show", urls=plan_urls(c)))
     if k == "commercial" and v == "go":
         return pool.submit(_safe_pending, c, "commercial")
     if k == "addfax":
@@ -348,7 +350,6 @@ def plan_urls(c):
     return {"ライトを申し込む": billing.pay_url(c.uid, "light"),
             "使い放題を申し込む": billing.pay_url(c.uid, "unlimited"),
             "使い放題に切り替える": billing.pay_url(c.uid, "unlimited"),
-            "FAXオプションを申し込む": billing.pay_url(c.uid, "fax"),
             "変更・解約": billing.portal_url(c.uid),
             "お支払い情報を確認": billing.portal_url(c.uid),
             "10回追加する（500円）": billing.pay_url(c.uid, "faxpack"),
@@ -356,7 +357,7 @@ def plan_urls(c):
             "Stripe決済ページ（ライト）": billing.pay_url(c.uid, "light"),
             "Stripe決済ページ（使い放題）": billing.pay_url(c.uid, "unlimited"),
             "Stripe決済ページ（追加FAX）": billing.pay_url(c.uid, "faxpack"),
-            "Stripe決済ページ": billing.pay_url(c.uid, "fax"),
+            "Stripe決済ページ（受け取り用FAX回数券）": billing.pay_url(c.uid, "faxrecv"),
             "Stripeのお客様ページ": billing.portal_url(c.uid),
             "Stripeのカード登録ページ": f"{config.BASE_URL}/card?t={billing.sign(c.uid)}"}
 
@@ -377,6 +378,8 @@ def plan_status(c):
                      失効の案内="",
                      内見残=month, 追加FAXの案内=f"＋追加分{packs}回（{_md(live_packs[0]['exp'])}まで）" if packs else "",
                      更新日=store.renew_date(c.u),
+                     受取FAX残=faxopt.left(c.u),
+                     受取FAXの期限=f"（{_md(faxopt.next_expiry(c.u))}まで）" if faxopt.left(c.u) else "",
                      受け取り方={"line": "LINE", "email": "メール", "fax": "FAX"}.get(d.get("method"), "LINE"))
     if q["plan"] == "unlimited":
         text = re.sub(r"資料のこり：今月上限なし(枚|件分?)", f"資料：件数の上限なし（今月{q['month_used']}件）", text)
@@ -596,35 +599,47 @@ def deliver(c, jid):
         pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
         if delivery.send_mail(d["email"], job["title"], pdf, pdf_url):
             return c.send(img, texts.build("deliver_mail", メールアドレス=d["email"], **common))
-    if method == "fax" and d.get("fax") and delivery.fax_ready() and fax_allowed(u) and faxopt.can_send(u):
-        n = send_fax_job(c, jid, job)
-        if n:
-            mid = faxopt.note(n)
-            if mid:
-                common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, faxopt_text(mid, n)) if x)
-            if mid == "faxopt_over":
-                common["extra_buttons"] = list(common["extra_buttons"] or []) + texts.buttons_of("faxopt_over")
+    if method == "fax":
+        how, n = recvfax_send(c.uid, u, jid, job)
+        if how == "sent":
+            add, btns = recvfax_low(c.uid, n)
+            common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, add) if x)
+            common["extra_buttons"] = list(common["extra_buttons"] or []) + btns
             return c.send(img, texts.build("deliver_fax", FAX番号=d["fax"], **common))
+        if how == "empty":
+            # 回数券がないときはFAXを送らずLINEで届け、買えばこの資料もFAXで送る
+            store.update_user(c.uid, {"recvfax_wait": jid})
+            common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, texts.raw("recvfax_empty")) if x)
+            common["extra_buttons"] = list(common["extra_buttons"] or []) + texts.buttons_of("recvfax_empty")
+            common["urls"] = plan_urls(c)
     c.send(img, texts.build("deliver_line", リンク=pdf_url, 有効期限=f"{exp.month}月{exp.day}日", **common))
 
 
-def fax_allowed(u):
-    """FAXで資料を受け取れるか。受け取り用FAXオプションの加入者と、無料お試し中の方。"""
-    return bool(u.get("fax_option")) or (u.get("plan") or "free") == "free"
+def recvfax_send(uid, u, jid, job):
+    """受け取り用FAXで、資料の2枚（帯替え図面＋初期費用概算書）を御社のFAXへ送る。
+    無料お試し中は回数券なしで送る。戻り値は (結果, のこり回数)。結果は "sent"・"empty"（回数券なし）・None（送れない）。"""
+    number = (u.get("delivery") or {}).get("fax")
+    if not (number and delivery.fax_ready()):
+        return None, None
+    company = company_for_render(uid, u)
+    if (u.get("plan") or "free") == "free":
+        ok = delivery.send_fax(number, faxopt.build_pdf(company, {**job, "_id": jid}))
+        return ("sent", None) if ok else (None, None)
+    if not faxopt.can_send(u):
+        return "empty", None
+    n = faxopt.send_job(uid, u, jid, job, company)
+    return ("sent", n) if n is not None else (None, None)
 
 
-def send_fax_job(c, jid, job):
-    """資料の2ページ（帯替え図面＋概算書）をFAXで送り、ページを数える。戻り値は送ったあとの今月のページ数（失敗は None）。"""
-    job = {**job, "_id": jid}
-    pdf = faxopt.build_pdf(company_for_render(c.uid, c.u), job)
-    if not delivery.send_fax((c.u.get("delivery") or {})["fax"], pdf):
-        return None
-    return faxopt.record(c.uid)[0]
-
-
-def faxopt_text(mid, n):
-    left = max(0, faxopt.PAGES - n)
-    return texts.raw(mid, FAX残=left, FAX残件=left // faxopt.PER_DOC)
+def recvfax_low(uid, n):
+    """のこりが少ないときの一文とボタン（recvfax_low）。"""
+    if n is None or n > faxopt.LOW:
+        return "", []
+    exp = faxopt.next_expiry(store.get_user(uid))
+    t = texts.raw("recvfax_low", 受取FAX残=n, 有効期限=_md(exp) if exp else "")
+    if not exp:
+        t = t.replace("（まで）", "")
+    return t, texts.buttons_of("recvfax_low")
 
 
 def send_last(c, how):
@@ -647,18 +662,24 @@ def send_last(c, how):
             return c.send(texts.build("send_mail_done", メールアドレス=d["email"]))
         return c.send(line.text("ただいまメールでのお届けを準備中です。もうしばらくお待ちください。"))
     if how == "fax":
-        if not fax_allowed(c.u):
-            return c.send(texts.build("send_fax_option", urls=plan_urls(c)))
         if not d.get("fax"):
             store.update_user(c.uid, {"reg_queue": ["faxto"], "reg_mode": "edit", "reg_edit_name": "FAXの送り先"})
             return c.send(texts.build("reg_faxto"))
-        n = send_fax_job(c, jid, job) if delivery.fax_ready() else None
-        if n:
-            mid = faxopt.note(n)
-            msg = texts.build("send_fax_done", FAX番号=d["fax"], append=faxopt_text(mid, n) if mid else "",
-                              extra_buttons=texts.buttons_of("faxopt_over") if mid == "faxopt_over" else None)
-            return c.send(msg)
+        if (c.u.get("plan") or "free") != "free" and not faxopt.can_send(c.u):
+            store.update_user(c.uid, {"recvfax_wait": jid})
+            return c.send(texts.build("send_fax_option", urls=plan_urls(c)))
+        res, n = recvfax_send(c.uid, c.u, jid, job)
+        if res == "sent":
+            return c.send(send_fax_done(c.uid, d["fax"], n))
         return c.send(line.text("ただいまFAXでのお届けを準備中です。もうしばらくお待ちください。"))
+
+
+def send_fax_done(uid, number, n):
+    msg = texts.build("send_fax_done", FAX番号=number, 受取FAX残=n if n is not None else "")
+    if n is None:  # お試し中は回数券を使わない
+        msg = texts.build("send_fax_done", FAX番号=number,
+                          text=texts.raw("send_fax_done", FAX番号=number).split("\n受け取り用FAXは")[0])
+    return msg
 
 
 # ---------- Stripe からの通知を LINE で知らせる ----------
@@ -679,6 +700,24 @@ def notify(uid, mid, kw):
         kw = {"猶予日": "1週間後", "urls": {"お支払い情報を確認": billing.portal_url(uid)}}
     urls = kw.pop("urls", None)
     line.push(u["line_uid"], [texts.build(mid, urls=urls, **kw)])
+    if mid == "recvfax_done" and u.get("recvfax_wait"):
+        pool.submit(_send_waiting_fax, uid)
     if mid == "plan_started" and u.get("pending"):
         c = Ctx({"source": {"userId": u["line_uid"]}})
         pool.submit(_safe_pending, c, None)
+
+
+def _send_waiting_fax(uid):
+    """回数券を買う前に待っていた資料を、FAXで送る。"""
+    try:
+        u = store.get_user(uid)
+        jid = u.get("recvfax_wait")
+        store.update_user(uid, {"recvfax_wait": None})
+        job = store.get_job(jid) if jid else None
+        if not job or job.get("status") != "done" or job.get("user_id") not in (None, uid):
+            return
+        res, n = recvfax_send(uid, u, jid, job)
+        if res == "sent":
+            line.push(u["line_uid"], [send_fax_done(uid, u["delivery"]["fax"], n)])
+    except Exception:
+        log.exception("waiting fax")

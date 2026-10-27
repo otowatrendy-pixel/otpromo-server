@@ -1,6 +1,6 @@
 """Stripe の支払い（Checkout）・お客様ページ・Webhook。
 
-ライト（1,480円）・使い放題（2,980円）・受け取り用FAXオプション（990円）は、どれも税込。消費税10%の税率（txr_）を項目ごとに付ける。
+ライト（1,480円）・使い放題（2,980円）・回数券（内見FAX追加・受け取り用FAX）は、どれも税込。消費税10%の税率（txr_）を項目ごとに付ける。
 """
 import base64
 import hashlib
@@ -74,6 +74,35 @@ def fax_pack_checkout(uid):
     return plain(s.checkout.Session.create(**params))["url"]
 
 
+def faxrecv_pack_price():
+    """受け取り用FAXの回数券（10回1,000円・税込）の価格。PRICE_FAXRECV_PACK がなければ lookup_key で探し、なければ作る。"""
+    import faxopt
+    pid = config.env("PRICE_FAXRECV_PACK")
+    if pid:
+        return pid
+    s = _stripe()
+    found = plain(s.Price.list(lookup_keys=["fax_receive_10"], limit=1))["data"]
+    if found:
+        return found[0]["id"]
+    prod = plain(s.Product.create(name="1分資料 受け取り用FAX 10回",
+                                  description="帯替え図面と初期費用概算書の2枚を御社のFAX機へ。1回100円（税込）、購入から3か月有効",
+                                  metadata={"service": "maisoku", "kind": "faxrecv_pack"}))
+    return plain(s.Price.create(product=prod["id"], currency="jpy", unit_amount=faxopt.PACK_YEN, tax_behavior="inclusive",
+                                lookup_key="fax_receive_10", nickname="受け取り用FAX 10回 1,000円（税込）"))["id"]
+
+
+def faxrecv_pack_checkout(uid):
+    s = _stripe()
+    u = store.get_user(uid)
+    params = dict(mode="payment", line_items=[{"price": faxrecv_pack_price(), "quantity": 1,
+                                               "tax_rates": [tax_rate(inclusive=True)]}],
+                  client_reference_id=uid, metadata={"uid": uid, "purpose": "faxrecv_pack"}, locale="ja",
+                  success_url=f"{config.BASE_URL}/paid?t={sign(uid)}", cancel_url=f"{config.BASE_URL}/canceled")
+    if u.get("stripe_customer"):
+        params["customer"] = u["stripe_customer"]
+    return plain(s.checkout.Session.create(**params))["url"]
+
+
 def pay_url(uid, plan):
     return f"{config.BASE_URL}/pay/{plan}?t={sign(uid)}"
 
@@ -109,34 +138,18 @@ def tax_rate(inclusive=False):
 
 
 def item_tax(price):
-    """その価格に付ける税率。ライト・使い放題・FAXオプションは税込。"""
-    return [tax_rate(inclusive=(price in (config.PRICE_LIGHT, config.PRICE_UNLIMITED, config.PRICE_FAX)))]
-
-
-def fax_overage(uid, pages, yen):
-    """受け取り用FAXの超過分（1ページ yen 円・税込）を、次回の請求に足す。"""
-    u = store.get_user(uid)
-    if not (u.get("stripe_customer") and u.get("stripe_subscription")):
-        log.info("契約がないため超過分は請求しない uid=%s pages=%s", uid, pages)
-        return None
-    s = _stripe()
-    return plain(s.InvoiceItem.create(
-        customer=u["stripe_customer"], subscription=u["stripe_subscription"], currency="jpy",
-        amount=pages * yen, tax_rates=[tax_rate(inclusive=True)],
-        description=f"受け取り用FAX 超過{pages}ページ（1ページ{yen}円・税込）",
-        metadata={"uid": uid, "kind": "faxopt_over", "pages": str(pages)}))["id"]
+    """その価格に付ける税率。ライト・使い放題は税込。"""
+    return [tax_rate(inclusive=(price in (config.PRICE_LIGHT, config.PRICE_UNLIMITED)))]
 
 
 # ---------- 申し込み ----------
 
-def checkout(uid, plan, fax=False):
+def checkout(uid, plan):
     """プランの支払いページ（Checkout）のURLを作る。すでに契約中なら None。"""
     s = _stripe()
     u = store.get_user(uid)
     price = {"light": config.PRICE_LIGHT, "unlimited": config.PRICE_UNLIMITED}[plan]
     items = [{"price": price, "quantity": 1, "tax_rates": item_tax(price)}]
-    if fax:
-        items.append({"price": config.PRICE_FAX, "quantity": 1, "tax_rates": item_tax(config.PRICE_FAX)})
     company = (u.get("company") or {}).get("会社名") or ""
     params = dict(
         mode="subscription", line_items=items, client_reference_id=uid,
@@ -155,8 +168,8 @@ def checkout(uid, plan, fax=False):
     return sess.url
 
 
-def change_plan(uid, plan=None, fax=None):
-    """契約中の内容を変える（ライト⇔使い放題、FAXオプションの追加）。日割りで精算。"""
+def change_plan(uid, plan):
+    """契約中のプランを変える（ライト⇔使い放題）。日割りで精算。"""
     s = _stripe()
     u = store.get_user(uid)
     sub = plain(s.Subscription.retrieve(u["stripe_subscription"]))
@@ -166,8 +179,6 @@ def change_plan(uid, plan=None, fax=None):
         if plan and pid in (config.PRICE_LIGHT, config.PRICE_UNLIMITED):
             new = config.PRICE_UNLIMITED if plan == "unlimited" else config.PRICE_LIGHT
             items.append({"id": it["id"], "price": new, "tax_rates": item_tax(new)})
-    if fax and not any(it["price"]["id"] == config.PRICE_FAX for it in sub["items"]["data"]):
-        items.append({"price": config.PRICE_FAX, "quantity": 1, "tax_rates": item_tax(config.PRICE_FAX)})
     if items:
         s.Subscription.modify(sub["id"], items=items, proration_behavior="create_prorations")
     sync_subscription(s.Subscription.retrieve(sub["id"]))
@@ -209,11 +220,7 @@ def sync_subscription(sub):
     if active:
         plan = "unlimited" if config.PRICE_UNLIMITED in prices else "light" if config.PRICE_LIGHT in prices else "free"
     start, end = _period(sub)
-    fax_stripe = active and config.PRICE_FAX in prices
     data = {"plan": plan, "plan_source": "stripe" if plan != "free" else u.get("plan_source"),
-            # アプリ（Google Play）で申し込んだ受け取り用FAXは、Stripe側の契約で消さない
-            "fax_option": fax_stripe or (u.get("fax_option_source") == "google_play" and bool(u.get("fax_option"))),
-            "fax_option_source": "stripe" if fax_stripe else (u.get("fax_option_source") if u.get("fax_option_source") == "google_play" else None),
             "stripe_customer": sub["customer"], "stripe_subscription": sub["id"] if active else None,
             "sub_status": sub["status"], "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
             "period_start": datetime.fromtimestamp(start, timezone.utc) if start else None,
@@ -245,6 +252,14 @@ def handle_webhook(payload: bytes, sig: str):
             exp = store.now() + timedelta(days=naiken.PACK_DAYS)
             d = exp.astimezone(store.JST)
             notices.append((uid, "addfax_done", {"有効期限": f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）"}))
+    elif t == "checkout.session.completed" and (obj.get("metadata") or {}).get("purpose") == "faxrecv_pack":
+        import faxopt
+        uid = obj.get("client_reference_id")
+        if uid and obj.get("payment_status") == "paid":
+            faxopt.add_pack(uid)
+            d = (store.now() + timedelta(days=faxopt.PACK_DAYS)).astimezone(store.JST)
+            notices.append((uid, "recvfax_done", {"有効期限": f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）",
+                                                  "受取FAX残": faxopt.left(store.get_user(uid))}))
     elif t == "checkout.session.completed" and obj.get("mode") == "setup":
         import monitor
         n = monitor.on_setup_completed(obj)

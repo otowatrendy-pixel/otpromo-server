@@ -9,7 +9,8 @@ users/{id}
   delivery{method, email, fax} … 受け取り方（line / email / fax）
   plan                         … free / light / unlimited
   plan_source                  … stripe / google_play
-  fax_option                   … FAXオプションの有無
+  faxrecv_packs                … 受け取り用FAXの回数券 [{n, used, at, exp}]（10回・90日）
+  recvfax_wait                 … 回数券を買ったらFAXで送る資料ID
   stripe_customer, stripe_subscription
   free_limit                   … お試しの枚数（既定5。合言葉などで増やせる）
   free_used                    … お試しで使った枚数（通算）
@@ -43,7 +44,7 @@ def new_user(**ids):
     return {
         "line_uid": None, "firebase_uid": None, "registered": False, "company": {},
         "delivery": {"method": "line", "email": "", "fax": ""},
-        "plan": "free", "plan_source": None, "fax_option": False,
+        "plan": "free", "plan_source": None,
         "stripe_customer": None, "stripe_subscription": None,
         "free_limit": config.FREE_SHEETS, "free_used": 0, "month_key": month_key(), "month_used": 0,
         "promo_codes": [], "referral_code": None, "referred_by": None,

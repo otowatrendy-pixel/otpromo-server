@@ -79,8 +79,7 @@ def _uid(t):
     return uid
 
 
-NAMES = {"light": "ライトプラン（月額1,480円（税込）・マイソク月50件分）", "unlimited": "使い放題プラン（月額2,980円（税込））",
-         "fax": "受け取り用FAXオプション（月額990円（税込））"}
+NAMES = {"light": "ライトプラン（月額1,480円（税込）・マイソク月50件分）", "unlimited": "使い放題プラン（月額2,980円（税込））"}
 
 
 @app.get("/pay/{plan}")
@@ -88,41 +87,27 @@ def pay(plan: str, t: str = ""):
     uid = _uid(t)
     if plan == "faxpack":
         return RedirectResponse(billing.fax_pack_checkout(uid), status_code=303)
+    if plan == "faxrecv":
+        return RedirectResponse(billing.faxrecv_pack_checkout(uid), status_code=303)
     if plan not in NAMES:
         raise HTTPException(404)
     u = store.get_user(uid)
     if u.get("stripe_subscription"):
         cur = u.get("plan")
-        if plan == cur or (plan == "fax" and u.get("fax_option")):
+        if plan == cur:
             return page("ご契約中です", f"<p>すでに{NAMES[plan]}をご利用中です。</p>")
         return page("ご契約内容の変更", f"""<p>{NAMES[plan]}に変更します。差額は日割りで次回のご請求に反映されます。</p>
 <form method=post action="/pay/{plan}/change?t={html.escape(t)}"><button>変更する</button></form>""")
-    if plan == "fax":
-        return page("FAXオプション", f"""<p>できあがった資料のうち、帯替え図面と初期費用の概算書（2ページ）を御社のFAXへお送りします。月額990円（税込）で、月40ページ（マイソク20件分）まで。超えた分は1ページ15円（税込）です。</p>
-<p>ライトプランか使い放題プランに追加してお申し込みいただけます。</p>
-<a class=btn href="/pay/light/fax?t={html.escape(t)}">ライト＋FAXオプション</a>
-<a class=btn href="/pay/unlimited/fax?t={html.escape(t)}">使い放題＋FAXオプション</a>""")
     return RedirectResponse(billing.checkout(uid, plan), status_code=303)
-
-
-@app.get("/pay/{plan}/fax")
-def pay_with_fax(plan: str, t: str = ""):
-    uid = _uid(t)
-    return RedirectResponse(billing.checkout(uid, plan, fax=True), status_code=303)
 
 
 @app.post("/pay/{plan}/change")
 def pay_change(plan: str, t: str = ""):
     uid = _uid(t)
-    if plan == "fax":
-        billing.change_plan(uid, fax=True)
-    elif plan in ("light", "unlimited"):
-        billing.change_plan(uid, plan=plan)
-    else:
+    if plan not in NAMES:
         raise HTTPException(404)
-    u = store.get_user(uid)
-    if plan != "fax":
-        bot.notify(uid, "plan_started", {})
+    billing.change_plan(uid, plan)
+    bot.notify(uid, "plan_started", {})
     return page("変更しました", f"<p>{NAMES[plan]}に変更しました。LINEに戻って、そのままお使いください。</p>")
 
 

@@ -52,9 +52,11 @@ def me(authorization: str = Header("")):
             "naiken_day_left": day,
             "free_left": q["free_left"], "registered": u.get("registered", False),
             "company": u.get("company") or {}, "delivery": u.get("delivery") or {},
-            # 受け取り用FAXオプション（未申込は null）
-            "fax_receive": {"number": (u.get("delivery") or {}).get("fax") or None, "pages_left": faxopt.left(u)}
-            if u.get("fax_option") else None}
+            # 受け取り用FAX（回数券 10回1,000円・購入から3か月）。next_expiry は一番近い期限
+            # 番号が未登録なら null
+            "fax_receive": {"number": (u.get("delivery") or {}).get("fax"), "left": faxopt.left(u),
+                            "next_expiry": faxopt.next_expiry(u).isoformat() if faxopt.next_expiry(u) else None}
+            if (u.get("delivery") or {}).get("fax") else None}
 
 
 class FaxReceiveIn(BaseModel):
@@ -105,16 +107,15 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
 
 
 def _fax_receive(uid, jid):
-    """受け取り用FAXオプションの方には、2ページ（帯替え図面＋概算書）をFAXでも送る。"""
+    """受け取り用FAXの番号がある方には、2枚（帯替え図面＋概算書）をFAXでも送る（回数券を1回使う）。
+    job の fax_receive は "sent"・"empty"（回数券なし）。"""
     u = store.get_user(uid)
-    number = (u.get("delivery") or {}).get("fax")
-    if not (u.get("fax_option") and number and delivery.fax_ready() and faxopt.can_send(u)):
+    if not (u.get("delivery") or {}).get("fax"):
         return
     try:
-        job = {**store.get_job(jid), "_id": jid}
-        if delivery.send_fax(number, faxopt.build_pdf(bot.company_for_render(uid, u), job)):
-            n, _ = faxopt.record(uid)
-            store.update_job(jid, {"fax_sent": True, "fax_pages_month": n})
+        res, n = bot.recvfax_send(uid, u, jid, store.get_job(jid))
+        if res:
+            store.update_job(jid, {"fax_receive": res, "fax_tickets_left": n})
     except Exception:
         log.exception("受け取り用FAXの送信で例外 uid=%s", uid)
 

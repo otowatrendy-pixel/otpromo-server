@@ -15,8 +15,8 @@ log = logging.getLogger("play")
 PACKAGE = config.env("ANDROID_PACKAGE", "com.otpromo.ippunshiryo")
 API = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications"
 SUBS = {"lite_monthly": "light", "unlimited_monthly": "unlimited"}
-FAX_OPTION = "fax_receive_monthly"  # 受け取り用FAXオプション（定期購入。プランとは別のトークン）
-FAX_PACK = "fax_10"
+FAX_PACK = "fax_10"            # 内見FAXの追加 10回（消費型）
+FAXRECV_PACK = "fax_receive_10"  # 受け取り用FAXの回数券 10回（消費型）
 
 
 def _session():
@@ -34,22 +34,26 @@ def verify(uid, product_id, token):
     """戻り値 {"ok": bool, "plan"?: ..., "error"?: ...}"""
     sess = _session()
     key = hashlib.sha256(token.encode()).hexdigest()
-    if product_id == FAX_PACK:
-        r = sess.get(f"{API}/{PACKAGE}/purchases/products/{FAX_PACK}/tokens/{token}")
+    if product_id in (FAX_PACK, FAXRECV_PACK):
+        r = sess.get(f"{API}/{PACKAGE}/purchases/products/{product_id}/tokens/{token}")
         if r.status_code != 200:
             return {"ok": False, "error": f"確認できませんでした（{r.status_code}）"}
         p = r.json()
         if p.get("purchaseState") != 0:
             return {"ok": False, "error": "購入が完了していません"}
         # 同じトークンで二重に足さない
-        if not store.db().create("play_tokens", key, {"uid": uid, "product": FAX_PACK, "at": store.now()}):
+        if not store.db().create("play_tokens", key, {"uid": uid, "product": product_id, "at": store.now()}):
             return {"ok": True, "duplicate": True}
-        import naiken
-        naiken.add_pack(uid)
+        if product_id == FAXRECV_PACK:
+            import faxopt
+            faxopt.add_pack(uid)
+        else:
+            import naiken
+            naiken.add_pack(uid)
         if p.get("consumptionState") != 1:
-            sess.post(f"{API}/{PACKAGE}/purchases/products/{FAX_PACK}/tokens/{token}:consume")
+            sess.post(f"{API}/{PACKAGE}/purchases/products/{product_id}/tokens/{token}:consume")
         return {"ok": True}
-    if product_id in SUBS or product_id == FAX_OPTION:
+    if product_id in SUBS:
         return sync_subscription(uid, token, sess)
     return {"ok": False, "error": "不明な商品です"}
 
@@ -66,22 +70,12 @@ def sync_subscription(uid, token, sess=None):
     active = state in ("SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD")
     if uid is None:
         uid, _ = store.db().find("users", "play_token", token)
-        if not uid:
-            uid, _ = store.db().find("users", "fax_play_token", token)
-        if not uid:
-            linked = (s.get("linkedPurchaseToken"))
-            for f in ("play_token", "fax_play_token"):
-                if linked and not uid:
-                    uid, _ = store.db().find("users", f, linked)
+        linked = s.get("linkedPurchaseToken")
+        if not uid and linked:
+            uid, _ = store.db().find("users", "play_token", linked)
     if not uid:
         return {"ok": False, "error": "利用者が見つかりません"}
     end = _ts(item.get("expiryTime"))
-    if pid == FAX_OPTION:
-        store.update_user(uid, {"fax_option": active, "fax_option_source": "google_play" if active else None,
-                                "fax_play_token": token, "fax_play_state": state})
-        if s.get("acknowledgementState") == "ACKNOWLEDGEMENT_STATE_PENDING":
-            sess.post(f"{API}/{PACKAGE}/purchases/subscriptions/{pid}/tokens/{token}:acknowledge", json={})
-        return {"ok": True, "fax_option": active}
     data = {"plan": SUBS.get(pid, "free") if active else "free", "plan_source": "google_play",
             "play_token": token, "play_state": state, "period_end": end,
             # 月額なので、期限の1か月前を今の期間の始まりとみなす（枚数の付与の区切りに使う）

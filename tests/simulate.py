@@ -32,10 +32,10 @@ def show():
         for m in msgs:
             if m["type"] == "text":
                 qr = [i["action"].get("label") for i in m.get("quickReply", {}).get("items", [])]
-                print(f"[{how}] {m['text'][:200]!r}  ボタン:{qr}")
+                print(f"[{how}] {m['text'][:int(os.environ.get('SHOW', '200'))]!r}  ボタン:{qr}")
             elif m["type"] == "flex":
                 btn = [b["action"]["label"] for b in m["contents"]["footer"]["contents"]]
-                print(f"[{how}] カード {m['altText'][:120]!r} ボタン:{btn}")
+                print(f"[{how}] カード {m['altText'][:int(os.environ.get('SHOW', '120'))]!r} ボタン:{btn}")
             else:
                 print(f"[{how}] {m['type']} {m.get('originalContentUrl', '')}")
     SENT.clear()
