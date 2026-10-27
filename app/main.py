@@ -79,7 +79,7 @@ def _uid(t):
     return uid
 
 
-NAMES = {"light": "ライトプラン（月額1,480円（税込）・月50枚）", "unlimited": "使い放題プラン（月額2,980円（税別））",
+NAMES = {"light": "ライトプラン（月額1,480円（税込）・マイソク月50件分）", "unlimited": "使い放題プラン（月額2,980円（税別））",
          "fax": "FAXオプション（月額500円）"}
 
 
@@ -131,7 +131,7 @@ def portal(t: str = ""):
     url = billing.portal(uid)
     if not url:
         return page("料金プラン", f"""<p>まだ有料プランのお申し込みはありません。</p>
-<a class=btn href="/pay/light?t={html.escape(t)}">ライトプラン（月額1,480円（税込）・月50枚）</a>
+<a class=btn href="/pay/light?t={html.escape(t)}">ライトプラン（月額1,480円（税込）・マイソク月50件分）</a>
 <a class=btn href="/pay/unlimited?t={html.escape(t)}">使い放題プラン（月額2,980円（税別））</a>""")
     return RedirectResponse(url, status_code=303)
 

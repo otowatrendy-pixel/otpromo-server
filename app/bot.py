@@ -373,7 +373,7 @@ def plan_status(c):
                      更新日=store.renew_date(c.u),
                      受け取り方={"line": "LINE", "email": "メール", "fax": "FAX"}.get(d.get("method"), "LINE"))
     if q["plan"] == "unlimited":
-        text = text.replace("資料のこり：今月上限なし枚", f"資料：枚数の上限なし（今月{q['month_used']}枚）")
+        text = re.sub(r"資料のこり：今月上限なし(枚|件分?)", f"資料：件数の上限なし（今月{q['month_used']}件）", text)
     elif q["plan"] == "free":
         text = text.replace("資料のこり：今月", "資料のこり：")  # お試しの枚数は月ごとではない
     return texts.build("plan_status", urls=plan_urls(c), text=text)
@@ -401,7 +401,7 @@ def on_text(c, t):
     if code in PROMO:
         if store.apply_promo(c.uid, code, int(PROMO[code])):
             n = config.FREE_SHEETS + int(PROMO[code])
-            return c.send(line.text(f"合言葉を受け付けました！\n無料でお試しいただける枚数が{n}枚になりました。"))
+            return c.send(line.text(f"合言葉を受け付けました！\n無料でお試しいただけるのが、マイソク{n}件分になりました。"))
         return c.send(line.text("合言葉は、おひとり様1回までのご利用です。"))
     c.send(texts.build("err_text"))
 
@@ -534,7 +534,7 @@ def process(c, data, held=None):
         if consumed:
             store.refund(c.uid)
         store.update_job(jid, {"status": "failed", "error": str(e)})
-        c.send(line.text(str(e) + "\n\n※今回の分は、枚数に数えていません。"))
+        c.send(line.text(str(e) + "\n\n※今回の分は、件数に数えていません。"))
     except Exception as e:
         done.set()
         log.exception("資料づくりで例外")
@@ -638,8 +638,8 @@ def notify(uid, mid, kw):
     if mid == "plan_started":
         q = store.quota(u)
         import naiken
-        body = {"light": f"毎月、資料{config.LIGHT_SHEETS}枚と内見申込FAX{naiken.LIMITS['light'][0]}回をお使いいただけます。",
-                "unlimited": f"資料は枚数を気にせず、内見申込FAXは月{naiken.LIMITS['unlimited'][0]}回までお使いいただけます。"}.get(q["plan"], "")
+        body = {"light": f"毎月、マイソク{config.LIGHT_SHEETS}件分の資料と内見申込FAX{naiken.LIMITS['light'][0]}回をお使いいただけます。",
+                "unlimited": f"資料は件数を気にせず、内見申込FAXは月{naiken.LIMITS['unlimited'][0]}回までお使いいただけます。"}.get(q["plan"], "")
         kw = {"プラン名": billing.PLAN_NAMES[q["plan"]], "プランの内容": body, "更新日": store.renew_date(u)}
     elif mid == "plan_canceled":
         kw = {"期限": store.renew_date(u)}

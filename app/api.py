@@ -120,7 +120,7 @@ async def create_job(file: UploadFile = File(...), authorization: str = Header("
         raise HTTPException(409, "先に会社情報を登録してください")
     q = store.quota(u)
     if q["remaining"] is not None and q["remaining"] <= 0:
-        raise HTTPException(402, "今月の枚数を使い切りました")
+        raise HTTPException(402, "今月の件数を使い切りました")
     data = await file.read()
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(413, "ファイルが大きすぎます（20MBまで）")
