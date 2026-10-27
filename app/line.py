@@ -115,3 +115,16 @@ def button_card(alt, title, body, buttons, note=None):
         "body": {"type": "box", "layout": "vertical", "contents": contents},
         "footer": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": footer},
     }}
+
+
+def ensure_webhook():
+    """LINE の Webhook URL を BASE_URL/line/webhook に合わせる。戻り値は「Webhookの利用」がオンかどうか。"""
+    url = f"{config.BASE_URL}/line/webhook"
+    if not (config.LINE_CHANNEL_ACCESS_TOKEN and url.startswith("https://")):
+        return None
+    r = requests.get(f"{API}/channel/webhook/endpoint", headers=_h(), timeout=10)
+    cur = r.json() if r.ok else {}
+    if cur.get("endpoint") != url:
+        requests.put(f"{API}/channel/webhook/endpoint", headers=_h(), json={"endpoint": url}, timeout=10)
+        log.info("LINE の Webhook URL を %s にしました", url)
+    return cur.get("active")

@@ -21,6 +21,20 @@ import store
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("main")
 app = FastAPI(title="1分資料", docs_url=None, redoc_url=None)
+
+
+@app.on_event("startup")
+def _setup_webhooks():
+    """起動したら、Stripe と LINE の通知先がこのサーバーを向いているか確かめる（手作業を減らすため）。"""
+    import threading
+
+    def run():
+        for name, fn in (("stripe", billing.ensure_webhook), ("line", line.ensure_webhook)):
+            try:
+                fn()
+            except Exception:
+                logging.getLogger("main").exception("%s の通知先の設定に失敗", name)
+    threading.Thread(target=run, daemon=True).start()
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 app.include_router(api.router)
 

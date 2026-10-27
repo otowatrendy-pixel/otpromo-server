@@ -229,10 +229,38 @@ def sync_subscription(sub):
     return uid, u.get("plan"), plan
 
 
+WEBHOOK_EVENTS = ["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated",
+                  "customer.subscription.deleted", "invoice.payment_failed", "invoice.paid"]
+
+
+def webhook_secret():
+    """STRIPE_WEBHOOK_SECRET があればそれ、なければ ensure_webhook で作って Firestore にしまったもの。"""
+    if config.STRIPE_WEBHOOK_SECRET:
+        return config.STRIPE_WEBHOOK_SECRET
+    return (store.db().get("meta", "stripe_webhook") or {}).get("secret")
+
+
+def ensure_webhook():
+    """Stripe の通知先（BASE_URL/stripe/webhook）がなければ作る。署名用の秘密は人の手を通さず Firestore にしまう。"""
+    url = f"{config.BASE_URL}/stripe/webhook"
+    if not (config.STRIPE_SECRET_KEY and url.startswith("https://") and "example.invalid" not in url):
+        return
+    if webhook_secret():
+        return
+    # 複数のインスタンスが同時に作らないよう、先に場所を取る
+    # （失敗しても1時間たてばやり直せるよう、時間ごとの名前にする）
+    if not store.db().create("meta", "stripe_webhook_lock_" + store.now().strftime("%Y%m%d%H"), {"at": store.now()}):
+        return
+    s = _stripe()
+    ep = plain(s.WebhookEndpoint.create(url=url, enabled_events=WEBHOOK_EVENTS, description="1分資料 サーバー"))
+    store.db().set("meta", "stripe_webhook", {"id": ep["id"], "url": url, "secret": ep["secret"], "at": store.now()})
+    log.info("Stripe の通知先を作りました %s", ep["id"])
+
+
 def handle_webhook(payload: bytes, sig: str):
     """Stripeからの通知。戻り値は LINE で知らせる内容 [(uid, 文面ID, 差し込み)]。"""
     s = _stripe()
-    ev = plain(s.Webhook.construct_event(payload, sig, config.STRIPE_WEBHOOK_SECRET))
+    ev = plain(s.Webhook.construct_event(payload, sig, webhook_secret()))
     if not store.first_event("stripe-" + ev["id"]):
         return []
     t, obj = ev["type"], ev["data"]["object"]
