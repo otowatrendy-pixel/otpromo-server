@@ -344,7 +344,8 @@ def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=
         "sent_date": f"{today.year}年{today.month}月{today.day}日（{WEEK[today.weekday()]}）",
         "to": to or {"company": f.元付業者 or "", "branch": "", "person": "", "fax": f.元付業者_FAX or ""},
         "prop": prop or {"name": name, "room": room, "address": f.所在地 or ""},
-        "wishes": wishes or [blank, blank, blank], "guests": guests, "me": me,
+        # 空文字の希望は手書きできる空欄の行にする（アプリの「空欄にする」）。全部空なら2行とも空欄
+        "wishes": [w or blank for w in wishes] if wishes else [blank, blank], "guests": guests, "me": me,
     }
     tpl = NAIKEN_TEMPLATE.read_text(encoding="utf-8")
     # 書体はネットから読まず、同梱のものを使う

@@ -179,7 +179,28 @@ def get_job(jid: str, authorization: str = Header("")):
         res.update(motozuke=mz.get("name"), motozuke_fax=mz.get("fax"), motozuke_tel=mz.get("tel"))
         res.update(pdf_url=store.file_url(jid, job, "shiryou.pdf"), obikae_url=store.file_url(jid, job, "obikae.png"),
                    texts=job.get("texts"), expires_at=job["expires_at"].isoformat())
+    res.update(fax_receive=job.get("fax_receive"), fax_tickets_left=faxopt.left(u))
     return res
+
+
+@router.post("/jobs/{jid}/fax-receive")
+def job_fax_receive(jid: str, authorization: str = Header("")):
+    """「自社のFAXに送信する（1回分）」「もう一度送る」。回数券を1回使って2枚を送り、更新後の Job を返す。"""
+    uid, u = _me(authorization)
+    job = store.get_job(jid)
+    if not job or job["user_id"] != uid or job["status"] != "done":
+        raise HTTPException(404)
+    if not (u.get("delivery") or {}).get("fax"):
+        raise HTTPException(402, "受け取り用のFAX番号が登録されていません")
+    if not faxopt.can_send(u):
+        raise HTTPException(402, "受け取り用FAXの回数券がありません")
+    if not delivery.fax_ready():
+        raise HTTPException(503, "ただいまFAXでのお届けを準備中です")
+    n = faxopt.send_job(uid, u, jid, job, bot.company_for_render(uid, u))
+    if n is None:
+        raise HTTPException(502, "FAXを送れませんでした。時間をおいてもう一度お試しください")
+    store.update_job(jid, {"fax_receive": "sent", "fax_tickets_left": n})
+    return get_job(jid, authorization)
 
 
 class PlayIn(BaseModel):
@@ -218,7 +239,9 @@ class NaikenIn(BaseModel):
     prop_name: str
     prop_room: str | None = None
     prop_address: str | None = None
-    wishes: list[str] = []      # 表示する文字のまま（例「10月29日（木）14時00分頃」）か "YYYY-MM-DD HH:MM"
+    # 表示する文字のまま（例「10月30日（金） 14:00」、日付だけ・時間だけも可）か "YYYY-MM-DD HH:MM"。
+    # 空文字は空欄の行（順番を保つ）。全部空なら []
+    wishes: list[str] = []
     guests: int | None = None
     guide: str | None = None
 
@@ -226,7 +249,7 @@ class NaikenIn(BaseModel):
 def _wish(s):
     import re as _re
     m = _re.match(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}))?$", s.strip())
-    return {"date": m.group(1), "time": m.group(2)} if m else {"text": s}
+    return {"date": m.group(1), "time": m.group(2)} if m else {"text": s.strip()}
 
 
 @router.post("/naiken/preview")
@@ -235,11 +258,9 @@ def naiken_preview(body: NaikenIn, authorization: str = Header("")):
     uid, u = _me(authorization)
     if not naiken.fax_ok(body.to_fax):
         raise HTTPException(422, "このFAX番号にはお送りできません（携帯・0120・0570・国際番号などは不可）")
-    if not body.wishes:
-        raise HTTPException(422, "希望日時を1つ以上入れてください")
     d = {"job_id": body.job_id, "to": {"company": body.to_company, "branch": body.to_branch, "fax": body.to_fax},
          "prop": {"name": body.prop_name, "room": body.prop_room, "address": body.prop_address or ""},
-         "wishes": [_wish(w) for w in body.wishes[:3]], "guests": body.guests, "guide": body.guide}
+         "wishes": [_wish(w) for w in body.wishes[:2]], "guests": body.guests, "guide": body.guide}
     fid, rec = naiken.save_preview(uid, d, u.get("company") or {})
     return {"fax_id": fid, "status": "preview", "preview_url": naiken.file_url(fid, rec, "naiken.png"),
             "pdf_url": naiken.file_url(fid, rec, "naiken.pdf")}
