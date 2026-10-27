@@ -1,6 +1,6 @@
 """Stripe の支払い（Checkout）・お客様ページ・Webhook。
 
-ライトは税込1,480円、使い放題・FAXオプションは税別。消費税10%の税率（txr_）を項目ごとに付ける。
+ライト（1,480円）・使い放題（2,980円）は税込、FAXオプションは税別。消費税10%の税率（txr_）を項目ごとに付ける。
 """
 import base64
 import hashlib
@@ -83,7 +83,7 @@ def portal_url(uid):
 
 
 # ---------- 税率 ----------
-# ライトは税込価格（1,480円）、使い放題・FAXオプションは税別価格。項目ごとに税込・税別の消費税10%を付ける
+# ライト・使い放題は税込価格、FAXオプションは税別価格。項目ごとに税込・税別の消費税10%を付ける
 
 _tax = {}
 
@@ -109,8 +109,8 @@ def tax_rate(inclusive=False):
 
 
 def item_tax(price):
-    """その価格に付ける税率。ライトだけ税込。"""
-    return [tax_rate(inclusive=(price == config.PRICE_LIGHT))]
+    """その価格に付ける税率。ライトと使い放題は税込。"""
+    return [tax_rate(inclusive=(price in (config.PRICE_LIGHT, config.PRICE_UNLIMITED)))]
 
 
 # ---------- 申し込み ----------
