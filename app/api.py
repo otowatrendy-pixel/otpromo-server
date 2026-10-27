@@ -14,6 +14,8 @@ from pydantic import BaseModel
 import bot
 import config
 import core
+import delivery
+import faxopt
 import store
 
 router = APIRouter(prefix="/v1")
@@ -49,7 +51,25 @@ def me(authorization: str = Header("")):
             "naiken_month_left": month, "naiken_pack_left": packs,
             "naiken_day_left": day,
             "free_left": q["free_left"], "registered": u.get("registered", False),
-            "company": u.get("company") or {}, "delivery": u.get("delivery") or {}}
+            "company": u.get("company") or {}, "delivery": u.get("delivery") or {},
+            # 受け取り用FAXオプション（未申込は null）
+            "fax_receive": {"number": (u.get("delivery") or {}).get("fax") or None, "pages_left": faxopt.left(u)}
+            if u.get("fax_option") else None}
+
+
+class FaxReceiveIn(BaseModel):
+    number: str
+
+
+@router.put("/me/fax-receive")
+def put_fax_receive(body: FaxReceiveIn, authorization: str = Header("")):
+    """受け取り用FAXの送り先番号。番号のチェックは内見FAXと同じ（携帯・0120・0570・国際番号は不可）。"""
+    import naiken
+    uid, u = _me(authorization)
+    if not naiken.fax_ok(body.number):
+        raise HTTPException(422, "この番号にはFAXをお送りできません。固定電話のFAX番号をご確認ください。")
+    store.update_user(uid, {"delivery": {**(u.get("delivery") or {}), "fax": naiken.fax_display(body.number)}})
+    return {"ok": True, "number": naiken.fax_display(body.number)}
 
 
 class CompanyIn(BaseModel):
@@ -84,6 +104,21 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     return {"ok": True}
 
 
+def _fax_receive(uid, jid):
+    """受け取り用FAXオプションの方には、2ページ（帯替え図面＋概算書）をFAXでも送る。"""
+    u = store.get_user(uid)
+    number = (u.get("delivery") or {}).get("fax")
+    if not (u.get("fax_option") and number and delivery.fax_ready() and faxopt.can_send(u)):
+        return
+    try:
+        job = {**store.get_job(jid), "_id": jid}
+        if delivery.send_fax(number, faxopt.build_pdf(bot.company_for_render(uid, u), job)):
+            n, _ = faxopt.record(uid)
+            store.update_job(jid, {"fax_sent": True, "fax_pages_month": n})
+    except Exception:
+        log.exception("受け取り用FAXの送信で例外 uid=%s", uid)
+
+
 def _run_job(uid, jid, data):
     u = store.get_user(uid)
     consumed = False
@@ -101,7 +136,8 @@ def _run_job(uid, jid, data):
         out = core.render_documents(bot.company_for_render(uid, u), a["img"], a["result"], a["pages"], a["log"])
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "title": out["title"], "texts": out["texts"], "log": out["log"],
-                               "pages": out["pages"], "verdict": v})
+                               "pages": out["pages"], "verdict": v, "result": out["result"]})
+        _fax_receive(uid, jid)
     except core.InputError as e:
         if consumed:
             store.refund(uid)

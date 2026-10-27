@@ -1,6 +1,6 @@
 """Stripe の支払い（Checkout）・お客様ページ・Webhook。
 
-ライト（1,480円）・使い放題（2,980円）は税込、FAXオプションは税別。消費税10%の税率（txr_）を項目ごとに付ける。
+ライト（1,480円）・使い放題（2,980円）・受け取り用FAXオプション（990円）は、どれも税込。消費税10%の税率（txr_）を項目ごとに付ける。
 """
 import base64
 import hashlib
@@ -83,7 +83,7 @@ def portal_url(uid):
 
 
 # ---------- 税率 ----------
-# ライト・使い放題は税込価格、FAXオプションは税別価格。項目ごとに税込・税別の消費税10%を付ける
+# 料金はどれも税込価格。項目ごとに内税の消費税10%を付ける（税別の税率は TAX_RATE 用に残す）
 
 _tax = {}
 
@@ -109,8 +109,22 @@ def tax_rate(inclusive=False):
 
 
 def item_tax(price):
-    """その価格に付ける税率。ライトと使い放題は税込。"""
-    return [tax_rate(inclusive=(price in (config.PRICE_LIGHT, config.PRICE_UNLIMITED)))]
+    """その価格に付ける税率。ライト・使い放題・FAXオプションは税込。"""
+    return [tax_rate(inclusive=(price in (config.PRICE_LIGHT, config.PRICE_UNLIMITED, config.PRICE_FAX)))]
+
+
+def fax_overage(uid, pages, yen):
+    """受け取り用FAXの超過分（1ページ yen 円・税込）を、次回の請求に足す。"""
+    u = store.get_user(uid)
+    if not (u.get("stripe_customer") and u.get("stripe_subscription")):
+        log.info("契約がないため超過分は請求しない uid=%s pages=%s", uid, pages)
+        return None
+    s = _stripe()
+    return plain(s.InvoiceItem.create(
+        customer=u["stripe_customer"], subscription=u["stripe_subscription"], currency="jpy",
+        amount=pages * yen, tax_rates=[tax_rate(inclusive=True)],
+        description=f"受け取り用FAX 超過{pages}ページ（1ページ{yen}円・税込）",
+        metadata={"uid": uid, "kind": "faxopt_over", "pages": str(pages)}))["id"]
 
 
 # ---------- 申し込み ----------
@@ -195,8 +209,11 @@ def sync_subscription(sub):
     if active:
         plan = "unlimited" if config.PRICE_UNLIMITED in prices else "light" if config.PRICE_LIGHT in prices else "free"
     start, end = _period(sub)
+    fax_stripe = active and config.PRICE_FAX in prices
     data = {"plan": plan, "plan_source": "stripe" if plan != "free" else u.get("plan_source"),
-            "fax_option": active and config.PRICE_FAX in prices,
+            # アプリ（Google Play）で申し込んだ受け取り用FAXは、Stripe側の契約で消さない
+            "fax_option": fax_stripe or (u.get("fax_option_source") == "google_play" and bool(u.get("fax_option"))),
+            "fax_option_source": "stripe" if fax_stripe else (u.get("fax_option_source") if u.get("fax_option_source") == "google_play" else None),
             "stripe_customer": sub["customer"], "stripe_subscription": sub["id"] if active else None,
             "sub_status": sub["status"], "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
             "period_start": datetime.fromtimestamp(start, timezone.utc) if start else None,

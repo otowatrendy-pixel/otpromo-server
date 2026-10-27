@@ -80,7 +80,7 @@ def _uid(t):
 
 
 NAMES = {"light": "ライトプラン（月額1,480円（税込）・マイソク月50件分）", "unlimited": "使い放題プラン（月額2,980円（税込））",
-         "fax": "FAXオプション（月額500円）"}
+         "fax": "受け取り用FAXオプション（月額990円（税込））"}
 
 
 @app.get("/pay/{plan}")
@@ -98,7 +98,8 @@ def pay(plan: str, t: str = ""):
         return page("ご契約内容の変更", f"""<p>{NAMES[plan]}に変更します。差額は日割りで次回のご請求に反映されます。</p>
 <form method=post action="/pay/{plan}/change?t={html.escape(t)}"><button>変更する</button></form>""")
     if plan == "fax":
-        return page("FAXオプション", f"""<p>FAXオプションは、ライトプランか使い放題プランに追加してお申し込みいただけます。</p>
+        return page("FAXオプション", f"""<p>できあがった資料のうち、帯替え図面と初期費用の概算書（2ページ）を御社のFAXへお送りします。月額990円（税込）で、月40ページ（マイソク20件分）まで。超えた分は1ページ15円（税込）です。</p>
+<p>ライトプランか使い放題プランに追加してお申し込みいただけます。</p>
 <a class=btn href="/pay/light/fax?t={html.escape(t)}">ライト＋FAXオプション</a>
 <a class=btn href="/pay/unlimited/fax?t={html.escape(t)}">使い放題＋FAXオプション</a>""")
     return RedirectResponse(billing.checkout(uid, plan), status_code=303)

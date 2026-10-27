@@ -15,6 +15,7 @@ log = logging.getLogger("play")
 PACKAGE = config.env("ANDROID_PACKAGE", "com.otpromo.ippunshiryo")
 API = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications"
 SUBS = {"lite_monthly": "light", "unlimited_monthly": "unlimited"}
+FAX_OPTION = "fax_receive_monthly"  # 受け取り用FAXオプション（定期購入。プランとは別のトークン）
 FAX_PACK = "fax_10"
 
 
@@ -48,7 +49,7 @@ def verify(uid, product_id, token):
         if p.get("consumptionState") != 1:
             sess.post(f"{API}/{PACKAGE}/purchases/products/{FAX_PACK}/tokens/{token}:consume")
         return {"ok": True}
-    if product_id in SUBS:
+    if product_id in SUBS or product_id == FAX_OPTION:
         return sync_subscription(uid, token, sess)
     return {"ok": False, "error": "不明な商品です"}
 
@@ -66,11 +67,21 @@ def sync_subscription(uid, token, sess=None):
     if uid is None:
         uid, _ = store.db().find("users", "play_token", token)
         if not uid:
+            uid, _ = store.db().find("users", "fax_play_token", token)
+        if not uid:
             linked = (s.get("linkedPurchaseToken"))
-            uid, _ = store.db().find("users", "play_token", linked) if linked else (None, None)
+            for f in ("play_token", "fax_play_token"):
+                if linked and not uid:
+                    uid, _ = store.db().find("users", f, linked)
     if not uid:
         return {"ok": False, "error": "利用者が見つかりません"}
     end = _ts(item.get("expiryTime"))
+    if pid == FAX_OPTION:
+        store.update_user(uid, {"fax_option": active, "fax_option_source": "google_play" if active else None,
+                                "fax_play_token": token, "fax_play_state": state})
+        if s.get("acknowledgementState") == "ACKNOWLEDGEMENT_STATE_PENDING":
+            sess.post(f"{API}/{PACKAGE}/purchases/subscriptions/{pid}/tokens/{token}:acknowledge", json={})
+        return {"ok": True, "fax_option": active}
     data = {"plan": SUBS.get(pid, "free") if active else "free", "plan_source": "google_play",
             "play_token": token, "play_state": state, "period_end": end,
             # 月額なので、期限の1か月前を今の期間の始まりとみなす（枚数の付与の区切りに使う）

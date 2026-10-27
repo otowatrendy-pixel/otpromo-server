@@ -15,6 +15,7 @@ import billing
 import config
 import core
 import delivery
+import faxopt
 import line
 import monitor
 import naiken_bot
@@ -321,6 +322,11 @@ def on_postback(c, data):
         return c.send(plan_status(c))
     if k == "send":
         return send_last(c, v)
+    if k == "faxopt" and v == "pause":
+        faxopt.pause(c.uid)
+        return c.send(texts.build("faxopt_paused", 更新日=store.renew_date(c.u)))
+    if k == "faxopt" and v == "keep":
+        return c.send(line.text("承知しました。このままFAXでもお届けします。"))
     if k == "commercial" and v == "go":
         return pool.submit(_safe_pending, c, "commercial")
     if k == "addfax":
@@ -590,11 +596,35 @@ def deliver(c, jid):
         pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
         if delivery.send_mail(d["email"], job["title"], pdf, pdf_url):
             return c.send(img, texts.build("deliver_mail", メールアドレス=d["email"], **common))
-    if method == "fax" and d.get("fax") and delivery.fax_ready():
-        pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
-        if delivery.send_fax(d["fax"], pdf):
+    if method == "fax" and d.get("fax") and delivery.fax_ready() and fax_allowed(u) and faxopt.can_send(u):
+        n = send_fax_job(c, jid, job)
+        if n:
+            mid = faxopt.note(n)
+            if mid:
+                common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, faxopt_text(mid, n)) if x)
+            if mid == "faxopt_over":
+                common["extra_buttons"] = list(common["extra_buttons"] or []) + texts.buttons_of("faxopt_over")
             return c.send(img, texts.build("deliver_fax", FAX番号=d["fax"], **common))
     c.send(img, texts.build("deliver_line", リンク=pdf_url, 有効期限=f"{exp.month}月{exp.day}日", **common))
+
+
+def fax_allowed(u):
+    """FAXで資料を受け取れるか。受け取り用FAXオプションの加入者と、無料お試し中の方。"""
+    return bool(u.get("fax_option")) or (u.get("plan") or "free") == "free"
+
+
+def send_fax_job(c, jid, job):
+    """資料の2ページ（帯替え図面＋概算書）をFAXで送り、ページを数える。戻り値は送ったあとの今月のページ数（失敗は None）。"""
+    job = {**job, "_id": jid}
+    pdf = faxopt.build_pdf(company_for_render(c.uid, c.u), job)
+    if not delivery.send_fax((c.u.get("delivery") or {})["fax"], pdf):
+        return None
+    return faxopt.record(c.uid)[0]
+
+
+def faxopt_text(mid, n):
+    left = max(0, faxopt.PAGES - n)
+    return texts.raw(mid, FAX残=left, FAX残件=left // faxopt.PER_DOC)
 
 
 def send_last(c, how):
@@ -617,15 +647,17 @@ def send_last(c, how):
             return c.send(texts.build("send_mail_done", メールアドレス=d["email"]))
         return c.send(line.text("ただいまメールでのお届けを準備中です。もうしばらくお待ちください。"))
     if how == "fax":
-        trial = (c.u.get("plan") or "free") == "free"
-        if not (c.u.get("fax_option") or trial):
+        if not fax_allowed(c.u):
             return c.send(texts.build("send_fax_option", urls=plan_urls(c)))
         if not d.get("fax"):
             store.update_user(c.uid, {"reg_queue": ["faxto"], "reg_mode": "edit", "reg_edit_name": "FAXの送り先"})
             return c.send(texts.build("reg_faxto"))
-        pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
-        if delivery.fax_ready() and delivery.send_fax(d["fax"], pdf):
-            return c.send(texts.build("send_fax_done", FAX番号=d["fax"]))
+        n = send_fax_job(c, jid, job) if delivery.fax_ready() else None
+        if n:
+            mid = faxopt.note(n)
+            msg = texts.build("send_fax_done", FAX番号=d["fax"], append=faxopt_text(mid, n) if mid else "",
+                              extra_buttons=texts.buttons_of("faxopt_over") if mid == "faxopt_over" else None)
+            return c.send(msg)
         return c.send(line.text("ただいまFAXでのお届けを準備中です。もうしばらくお待ちください。"))
 
 
