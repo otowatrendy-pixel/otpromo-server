@@ -245,13 +245,22 @@ def ensure_webhook():
     url = f"{config.BASE_URL}/stripe/webhook"
     if not (config.STRIPE_SECRET_KEY and url.startswith("https://") and "example.invalid" not in url):
         return
-    if webhook_secret():
-        return
-    # 複数のインスタンスが同時に作らないよう、先に場所を取る
-    # （失敗しても1時間たてばやり直せるよう、時間ごとの名前にする）
-    if not store.db().create("meta", "stripe_webhook_lock_" + store.now().strftime("%Y%m%d%H"), {"at": store.now()}):
+    if config.STRIPE_WEBHOOK_SECRET:
         return
     s = _stripe()
+    doc = store.db().get("meta", "stripe_webhook") or {}
+    if doc.get("id"):
+        try:
+            # キーを別のStripeアカウントのものに替えたときは見つからないので、作り直す
+            if plain(s.WebhookEndpoint.retrieve(doc["id"])).get("url") == url:
+                return
+        except s.InvalidRequestError:
+            pass
+    # 複数のインスタンスが同時に作らないよう、先に場所を取る
+    # （失敗しても1時間たてばやり直せるよう、時間ごとの名前にする）
+    lock = "stripe_webhook_lock_" + store.now().strftime("%Y%m%d%H") + (doc.get("id") or "")
+    if not store.db().create("meta", lock, {"at": store.now()}):
+        return
     ep = plain(s.WebhookEndpoint.create(url=url, enabled_events=WEBHOOK_EVENTS, description="1分資料 サーバー"))
     store.db().set("meta", "stripe_webhook", {"id": ep["id"], "url": url, "secret": ep["secret"], "at": store.now()})
     log.info("Stripe の通知先を作りました %s", ep["id"])
