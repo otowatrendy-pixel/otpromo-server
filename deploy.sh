@@ -28,6 +28,19 @@ if [ "${1:-}" = "setup" ]; then
   exit 0
 fi
 
+# 毎日9時（日本時間）に /cron/daily を呼ぶ：bash deploy.sh schedule
+if [ "${1:-}" = "schedule" ]; then
+  gcloud services enable cloudscheduler.googleapis.com
+  URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)')
+  KEY=$(gcloud secrets versions access latest --secret=APP_SECRET)
+  ARGS=(--location=$REGION --schedule="0 9 * * *" --time-zone=Asia/Tokyo --uri="$URL/cron/daily"
+        --http-method=POST --headers="X-Cron-Key=$KEY" --attempt-deadline=300s)
+  gcloud scheduler jobs create http otpromo-daily "${ARGS[@]}" 2>/dev/null \
+    || gcloud scheduler jobs update http otpromo-daily "${ARGS[@]}"
+  echo "毎日9時（日本時間）の定期実行を設定しました。"
+  exit 0
+fi
+
 URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)' 2>/dev/null || true)
 SECRETS=""
 for s in MAISOKU_API_KEY LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET APP_SECRET; do
