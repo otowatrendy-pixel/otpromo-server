@@ -414,7 +414,7 @@ def on_text(c, t):
     if code in PROMO:
         if store.apply_promo(c.uid, code, int(PROMO[code])):
             n = config.FREE_SHEETS + int(PROMO[code])
-            return c.send(line.text(f"合言葉を受け付けました！\n無料でお試しいただけるのが、マイソク{n}件分になりました。"))
+            return c.send(line.text(f"合言葉を受け付けました！\n無料でお試しいただけるのが、募集図面{n}件分になりました。"))
         return c.send(line.text("合言葉は、おひとり様1回までのご利用です。"))
     c.send(texts.build("err_text"))
 
@@ -569,7 +569,7 @@ def run_pending(c, kind=None):
     p = c.u.get("pending")
     if not p or (kind and p.get("kind") != kind) or p["at"] < store.now() - timedelta(hours=24):
         if kind:
-            c.send(line.text("お預かりしていたマイソクの期限が切れました。お手数ですが、もう一度送ってください。"))
+            c.send(line.text("お預かりしていた募集図面の期限が切れました。お手数ですが、もう一度送ってください。"))
         return
     data = store.db().get_file(f"users/{c.uid}/pending.bin")
     if not data:
@@ -651,7 +651,7 @@ def send_last(c, how):
     jid = c.u.get("last_job")
     job = store.get_job(jid) if jid else None
     if not job or job.get("status") != "done":
-        return c.send(line.text("お送りできる資料が見つかりませんでした。マイソクを送ってください。"))
+        return c.send(line.text("お送りできる資料が見つかりませんでした。募集図面を送ってください。"))
     d = c.u.get("delivery") or {}
     if how == "line":
         exp = job["expires_at"].astimezone(store.JST)
@@ -695,7 +695,7 @@ def notify(uid, mid, kw):
     if mid == "plan_started":
         q = store.quota(u)
         import naiken
-        body = {"light": f"毎月、マイソク{config.LIGHT_SHEETS}件分の資料と内見申込FAX{naiken.LIMITS['light'][0]}回をお使いいただけます。",
+        body = {"light": f"毎月、募集図面{config.LIGHT_SHEETS}件分の資料と内見申込FAX{naiken.LIMITS['light'][0]}回をお使いいただけます。",
                 "unlimited": f"資料は件数を気にせず、内見申込FAXは月{naiken.LIMITS['unlimited'][0]}回までお使いいただけます。"}.get(q["plan"], "")
         kw = {"プラン名": billing.plan_name(u), "プランの内容": body, "更新日": store.billing_renew_date(u)}
     elif mid == "plan_canceled":

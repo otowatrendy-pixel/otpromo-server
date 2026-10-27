@@ -93,8 +93,8 @@ def _uid(t):
     return uid
 
 
-NAMES = {"light": "ライトプラン（月額1,480円（税込）・マイソク月50件分）", "unlimited": "使い放題プラン（月額2,980円（税込））",
-         "light_year": "ライトプラン 年払い（年額14,800円（税込）・マイソク月50件分）",
+NAMES = {"light": "ライトプラン（月額1,480円（税込）・募集図面 月50件分）", "unlimited": "使い放題プラン（月額2,980円（税込））",
+         "light_year": "ライトプラン 年払い（年額14,800円（税込）・募集図面 月50件分）",
          "unlimited_year": "使い放題プラン 年払い（年額29,800円（税込））"}
 
 
@@ -144,7 +144,7 @@ def portal(t: str = ""):
     url = billing.portal(uid)
     if not url:
         return page("料金プラン", f"""<p>まだ有料プランのお申し込みはありません。</p>
-<a class=btn href="/pay/light?t={html.escape(t)}">ライトプラン（月額1,480円（税込）・マイソク月50件分）</a>
+<a class=btn href="/pay/light?t={html.escape(t)}">ライトプラン（月額1,480円（税込）・募集図面 月50件分）</a>
 <a class=btn href="/pay/unlimited?t={html.escape(t)}">使い放題プラン（月額2,980円（税込））</a>
 <a class=btn href="/pay/light_year?t={html.escape(t)}">ライトプラン 年払い（年額14,800円（税込））</a>
 <a class=btn href="/pay/unlimited_year?t={html.escape(t)}">使い放題プラン 年払い（年額29,800円（税込））</a>""")
@@ -200,7 +200,7 @@ def naiken_file(fid: str, token: str, name: str):
 def file(jid: str, token: str, name: str):
     data = store.read_file(jid, token, name)
     if data == "expired":
-        return page("リンクの期限が切れました", "<p>お手数ですが、もう一度マイソクを送って資料を作り直してください。</p>", 410)
+        return page("リンクの期限が切れました", "<p>お手数ですが、もう一度募集図面を送って資料を作り直してください。</p>", 410)
     if not data:
         raise HTTPException(404)
     headers = {"Cache-Control": "private, max-age=3600"}

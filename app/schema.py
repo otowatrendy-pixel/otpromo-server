@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 class Money(BaseModel):
     """マイソクの記載をそのまま残しつつ、計算用の数字も持つ。"""
-    記載: Optional[str] = Field(None, description="マイソクに書いてある表記そのまま。書いていなければ null")
+    記載: Optional[str] = Field(None, description="募集図面に書いてある表記そのまま。書いていなければ null")
     金額円: Optional[int] = Field(None, description="円で書いてあれば整数。書いていなければ null")
     ヶ月: Optional[float] = Field(None, description="『1ヶ月』のように月数で書いてあればその数。なければ null")
 
@@ -26,7 +26,7 @@ class Facts(BaseModel):
         "マイソク", description="物件の募集図面なら「マイソク」。物件資料でない写真は「マイソクではない」。ぼやけ・暗い・一部しか写っていないなどで主な項目が読めなければ「読み取れない」")
     用途: Literal["居住用", "事業用", "不明"] = Field(
         "居住用", description="マンション・アパート・戸建などは居住用。事務所・店舗・倉庫・駐車場などは事業用")
-    取引: Literal["賃貸", "賃貸以外"] = Field(description="賃貸専門のサービス。売買などのマイソクなら「賃貸以外」")
+    取引: Literal["賃貸", "賃貸以外"] = Field(description="賃貸専門のサービス。売買などの募集図面なら「賃貸以外」")
     物件種別: Optional[str] = Field(None, description="マンション、アパート、戸建、店舗、事務所など")
     物件名: Optional[str] = None
     所在地: Optional[str] = None
@@ -71,13 +71,13 @@ class Band(BaseModel):
 class Point(BaseModel):
     見出し: str = Field(description="15字程度")
     説明: str = Field("", description="60字程度。お客様にそのまま話せる言葉で")
-    根拠: str = Field("", description="マイソクのどの記載にもとづくか")
+    根拠: str = Field("", description="募集図面のどの記載にもとづくか")
 
 
 class QA(BaseModel):
     質問: str
     参考回答: str
-    要確認: bool = Field(description="マイソクに答えが書いておらず、元付業者などへの確認が必要なら true")
+    要確認: bool = Field(description="募集図面に答えが書いておらず、元付業者などへの確認が必要なら true")
 
 
 class Result(BaseModel):

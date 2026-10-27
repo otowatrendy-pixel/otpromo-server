@@ -144,7 +144,7 @@ def confirm(c, pre=()):
     to = d["to"]
     wishes = [naiken.wish_label(w) for w in d.get("wishes", [])]
     kw = {"管理会社": to_text(to), "FAX番号": naiken.fax_display(to["fax"]),
-          "読み取り元": "（マイソクから読み取りました）" if to.get("from_maisoku") else "",
+          "読み取り元": "（募集図面から読み取りました）" if to.get("from_maisoku") else "",
           "物件名": (d.get("prop") or {}).get("name", ""), "号室": (d.get("prop") or {}).get("room") or "",
           "人数": d.get("guests") or "", "ご案内担当": d.get("guide") or co.get("担当者名") or ""}
     for i in range(3):
@@ -251,8 +251,8 @@ def on_postback(c, v):
         since = store.now() - timedelta(days=7)
         rec = [r for r in (c.u.get("recent_jobs") or []) if not r.get("at") or r["at"] >= since][:12]
         if not rec:
-            return c.send(line.text("最近お作りした物件がありません。マイソクを送ってください。",
-                                    quick=[{"type": "action", "action": {"type": "camera", "label": "マイソクを送る"}}]))
+            return c.send(line.text("最近お作りした物件がありません。募集図面を送ってください。",
+                                    quick=[{"type": "action", "action": {"type": "camera", "label": "募集図面を送る"}}]))
         q = [line.qr_postback(short_label(r["title"]), f"naiken=from_last&doc={r['id']}") for r in rec]
         return c.send(texts.build("naiken_recent", text=texts.raw("naiken_recent")) | {"quickReply": {"items": q}})
     if v == "history":

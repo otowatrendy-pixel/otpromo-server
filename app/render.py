@@ -134,7 +134,7 @@ def obikae(img: Image.Image, r: Result, company: dict) -> Image.Image:
 
 def _src(m) -> str:
     """マイソクに記載があれば「マイソクより」、なければ「要確認」。"""
-    return "マイソクより" if (m.記載 or m.金額円 is not None or m.ヶ月 is not None) else "要確認"
+    return "募集図面より" if (m.記載 or m.金額円 is not None or m.ヶ月 is not None) else "要確認"
 
 
 def _money_text(m) -> str:
@@ -178,13 +178,17 @@ def estimate_section(f, company: dict, name: str) -> str:
     tel = " ／ ".join(x for x in (f"TEL {company['電話']}" if company.get("電話") else "",
                                   f"FAX {company['FAX']}" if company.get("FAX") else "") if x)
     notes = [
-        "※本書はマイソクの条件をもとにした概算です。正式な金額は貸主・管理会社の請求書にてご確認ください。",
+        "※本書は募集図面の条件をもとにした概算です。正式な金額は貸主・管理会社の請求書にてご確認ください。",
         "※入居日が決まりましたら、日割り賃料を加えた金額をご案内します。",
         "※保証会社の保証料と火災保険料は、各社の審査・見積により金額が変わります。",
         "※端数はすべて切り捨てで計算しています。",
         f"※お問い合わせ：{shop}　{tel}" if tel else f"※お問い合わせ：{shop}",
     ]
-    return f"""<section class=est>
+    # 明細が多くても必ずA4 1枚に収める（受け取り用FAXの「1回＝2枚」を崩さないため）。
+    # 項目数と備考の長さで、文字・行間・余白を段階的に詰める（本文は9ptを下限）
+    weight = len(lines) + sum(len(l.メモ or "") > 22 for l in lines) * 0.5
+    dense = "" if weight <= 10 else " d1" if weight <= 14 else " d2" if weight <= 19 else " d3" if weight <= 25 else " d4"
+    return f"""<section class="est{dense}">
 <div class=band>初期費用概算書</div>
 <p class=made>{e(shop)}　／　作成日：{made}</p>
 <p class=cust><span></span>様</p>
@@ -229,7 +233,7 @@ def build_html(r: Result, obikae_png: bytes, company: dict, sections=ALL_SECTION
         for i, q in enumerate(r.想定QA, 1))
     shaky = ""
     if f.取引 != "賃貸":
-        shaky += "<p class=warn>賃貸以外のマイソクのようです。このサービスは賃貸物件専用のため、内容をよくご確認ください。</p>"
+        shaky += "<p class=warn>賃貸以外の募集図面のようです。このサービスは賃貸物件専用のため、内容をよくご確認ください。</p>"
     if f.読み取りに自信がない項目:
         shaky += f"<p class=warn>読み取りに自信がない項目：{e('、'.join(f.読み取りに自信がない項目))}</p>"
 
@@ -285,6 +289,20 @@ dt {{ font-weight: bold; margin-top: 8px; }} dd {{ margin: 2px 0 0 1.2em; }}
 .est .lines tfoot td.m {{ color: var(--ontext); font-size: 8.5pt; font-weight: normal; }}
 .est .notes {{ margin-top: 10px; font-size: 9pt; color: #444444; }}
 .est .notes p {{ margin: 2px 0; }}
+.est.d1 {{ font-size: 9.5pt; line-height: 1.35; }}
+.est.d1 th, .est.d1 td {{ padding: 2px 7px; }}
+.est.d1 h2 {{ margin: 8px 0 3px; }}
+.est.d2, .est.d3, .est.d4 {{ font-size: 9pt; line-height: 1.25; }}
+.est.d2 .band, .est.d3 .band, .est.d4 .band {{ font-size: 15pt; padding: 4px 0; }}
+.est.d2 th, .est.d2 td {{ padding: 1px 6px; }}
+.est.d2 h2, .est.d3 h2, .est.d4 h2 {{ font-size: 10pt; margin: 6px 0 2px; }}
+.est.d2 td.m, .est.d3 td.m, .est.d4 td.m {{ font-size: 8pt; }}
+.est.d2 .notes, .est.d3 .notes, .est.d4 .notes {{ font-size: 8pt; margin-top: 6px; }}
+.est.d2 .notes p, .est.d3 .notes p, .est.d4 .notes p {{ margin: 0; }}
+.est.d3 {{ line-height: 1.15; }}
+.est.d3 th, .est.d3 td, .est.d4 th, .est.d4 td {{ padding: 0 5px; }}
+.est.d3 .made, .est.d4 .made {{ margin: 2px 0 4px; }}
+.est.d4 {{ line-height: 1.1; zoom: .85; }}
 </style>
 {body}</html>"""
 

@@ -142,7 +142,7 @@ def seven_days_text(u, end):
     t = texts.raw("monitor_7days", 件数=n, 内見件数=k, 終了日=date_label(end))
     first = t.split("\n")[1] if "\n" in t else ""
     if n == 0:
-        t = t.replace(first, "この1か月、まだ資料をお作りしていません。よろしければ、お手元のマイソクを1枚送ってみてください。")
+        t = t.replace(first, "この1か月、まだ資料をお作りしていません。よろしければ、お手元の募集図面を1枚送ってみてください。")
     elif k == 0:
         t = t.replace(f"（内見申込書FAX {k}件を含みます）", "")
     return t
