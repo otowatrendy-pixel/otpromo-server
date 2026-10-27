@@ -213,7 +213,7 @@ def build(d, company):
 def usage(u):
     now = datetime.now(store.JST)
     c = u.get("naiken_count") or {}
-    month = c.get("m", {}).get(now.strftime("%Y-%m"), 0)
+    month = c.get("m", {}).get(store.period_key(u), 0)
     day = c.get("d", {}).get(now.strftime("%Y-%m-%d"), 0)
     return month, day
 
@@ -247,17 +247,17 @@ def limit_info(u):
     lim_m, lim_d = month_limit(u), LIMITS.get(u.get("plan") or "free", LIMITS["free"])[1]
     if day <= 0 and (month > 0 or packs > 0):
         return "本日", lim_d, "明日"
-    now = datetime.now(store.JST)
-    nxt = datetime(now.year + (now.month == 12), now.month % 12 + 1, 1)
-    return "今月", lim_m, f"{nxt.month}月{nxt.day}日"
+    return "今月", lim_m, store.renew_date(u)
 
 
 def count(uid, delta=1):
     """送信1回分を数える。今月の枠を先に使い、なくなったら追加購入分から使う。delta=-1 で取り消し。"""
     now = datetime.now(store.JST)
-    mk, dk = now.strftime("%Y-%m"), now.strftime("%Y-%m-%d")
+    dk = now.strftime("%Y-%m-%d")
 
     def fn(u):
+        # 月の区切りは資料の件数と同じ（有料は申込日と同じ日ごと、お試しは暦の月）
+        mk = store.period_key(u)
         c = u.get("naiken_count") or {}
         m = c.get("m", {}).get(mk, 0)
         lim_m = month_limit(u)

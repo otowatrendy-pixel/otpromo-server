@@ -31,6 +31,9 @@ STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET")
 PRICE_LIGHT = env("PRICE_LIGHT", "price_1UUsZOB542nWQrMKc0HZD2WL")
 PRICE_UNLIMITED = env("PRICE_UNLIMITED", "price_1UVHfFB542nWQrMKwZKbd3uZ")
+# 年払い（税込。件数・回数は月払いと同じく毎月戻す。途中解約は返金なし・期間の終わりまで使える）
+PRICE_LIGHT_YEAR = env("PRICE_LIGHT_YEAR", "price_1UVJygB542nWQrMKfPqpDrzx")          # 年額14,800円
+PRICE_UNLIMITED_YEAR = env("PRICE_UNLIMITED_YEAR", "price_1UVJyhB542nWQrMKZRxg4Gsd")  # 年額29,800円
 TAX_RATE = env("STRIPE_TAX_RATE")  # 消費税10%（外税）の txr_...。空なら起動時に探すか作る
 
 # フォームのリンクに付ける署名の鍵

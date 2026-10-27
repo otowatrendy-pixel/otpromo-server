@@ -197,23 +197,54 @@ def update_user(uid, data):
 
 # ---------- 枚数 ----------
 
+def _add_months(dt, n):
+    import calendar
+    y, m = divmod(dt.month - 1 + n, 12)
+    y, m = dt.year + y, m + 1
+    return dt.replace(year=y, month=m, day=min(dt.day, calendar.monthrange(y, m)[1]))
+
+
+def month_window(u):
+    """今の「月」の区切り (始まり, 終わり)。月払いは請求期間そのもの、年払いは申込日と同じ日ごとに1か月ずつ。"""
+    ps, pe = u.get("period_start"), u.get("period_end")
+    if not ps:
+        return None, None
+    if u.get("billing_interval") != "year":
+        return ps, pe
+    t, n = now(), 0
+    while _add_months(ps, n + 1) <= t and n < 12:
+        n += 1
+    end = _add_months(ps, n + 1)
+    return _add_months(ps, n), (min(end, pe) if pe else end)
+
+
 def period_key(u):
-    """枚数を数える区切り。有料プランは請求期間の始まり、それ以外は日本時間の暦の月。"""
-    ps = u.get("period_start")
-    if (u.get("plan") or "free") != "free" and ps:
-        return "P" + ps.astimezone(JST).strftime("%Y-%m-%d")
+    """枚数を数える区切り。有料プランは請求期間（年払いは月ごと）の始まり、それ以外は日本時間の暦の月。"""
+    if (u.get("plan") or "free") != "free":
+        start, _ = month_window(u)
+        if start:
+            return "P" + start.astimezone(JST).strftime("%Y-%m-%d")
     return month_key()
 
 
 def renew_date(u):
-    """次に枚数が戻る日（日本時間、表示用）。"""
-    pe = u.get("period_end")
-    if (u.get("plan") or "free") != "free" and pe:
+    """次に枚数が戻る日（日本時間、表示用）。年払いでも毎月の戻る日。"""
+    _, pe = month_window(u) if (u.get("plan") or "free") != "free" else (None, None)
+    if pe:
         d = pe.astimezone(JST)
     else:
         n = datetime.now(JST)
         d = datetime(n.year + (n.month == 12), n.month % 12 + 1, 1, tzinfo=JST)
     return f"{d.month}月{d.day}日"
+
+
+def billing_renew_date(u):
+    """次の請求（契約の更新）日。年払いは1年後。"""
+    pe = u.get("period_end")
+    if not pe:
+        return renew_date(u)
+    d = pe.astimezone(JST)
+    return f"{d.year}年{d.month}月{d.day}日" if u.get("billing_interval") == "year" else f"{d.month}月{d.day}日"
 
 
 # ライトのAI資料は毎期50枚。繰り越しなし（期が変わると残りは消えて、新しい50枚に入れ替わる）

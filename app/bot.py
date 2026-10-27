@@ -348,6 +348,10 @@ def on_postback(c, data):
 
 def plan_urls(c):
     return {"ライトを申し込む": billing.pay_url(c.uid, "light"),
+            "Stripe決済ページ（ライト月額）": billing.pay_url(c.uid, "light"),
+            "Stripe決済ページ（ライト年額）": billing.pay_url(c.uid, "light_year"),
+            "Stripe決済ページ（使い放題月額）": billing.pay_url(c.uid, "unlimited"),
+            "Stripe決済ページ（使い放題年額）": billing.pay_url(c.uid, "unlimited_year"),
             "使い放題を申し込む": billing.pay_url(c.uid, "unlimited"),
             "使い放題に切り替える": billing.pay_url(c.uid, "unlimited"),
             "変更・解約": billing.portal_url(c.uid),
@@ -373,7 +377,7 @@ def plan_status(c):
     month, packs, _ = naiken.remaining(c.u)
     live_packs = sorted([p for p in (c.u.get("fax_packs") or []) if p["exp"] > store.now() and p["used"] < p["n"]],
                         key=lambda p: p["exp"])
-    text = texts.raw("plan_status", プラン名=billing.PLAN_NAMES[q["plan"]],
+    text = texts.raw("plan_status", プラン名=billing.plan_name(c.u),
                      n="上限なし" if q["remaining"] is None else q["remaining"],
                      失効の案内="",
                      内見残=month, 追加FAXの案内=f"＋追加分{packs}回（{_md(live_packs[0]['exp'])}まで）" if packs else "",
@@ -693,11 +697,13 @@ def notify(uid, mid, kw):
         import naiken
         body = {"light": f"毎月、マイソク{config.LIGHT_SHEETS}件分の資料と内見申込FAX{naiken.LIMITS['light'][0]}回をお使いいただけます。",
                 "unlimited": f"資料は件数を気にせず、内見申込FAXは月{naiken.LIMITS['unlimited'][0]}回までお使いいただけます。"}.get(q["plan"], "")
-        kw = {"プラン名": billing.PLAN_NAMES[q["plan"]], "プランの内容": body, "更新日": store.renew_date(u)}
+        kw = {"プラン名": billing.plan_name(u), "プランの内容": body, "更新日": store.billing_renew_date(u)}
     elif mid == "plan_canceled":
         kw = {"期限": store.renew_date(u)}
     elif mid == "plan_payment_failed":
         kw = {"猶予日": "1週間後", "urls": {"お支払い情報を確認": billing.portal_url(uid)}}
+    elif mid == "plan_annual_renew":
+        kw["urls"] = {"変更・解約": billing.portal_url(uid), "Stripeのお客様ページ": billing.portal_url(uid)}
     urls = kw.pop("urls", None)
     line.push(u["line_uid"], [texts.build(mid, urls=urls, **kw)])
     if mid == "recvfax_done" and u.get("recvfax_wait"):

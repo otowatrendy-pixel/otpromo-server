@@ -93,7 +93,14 @@ def _uid(t):
     return uid
 
 
-NAMES = {"light": "ライトプラン（月額1,480円（税込）・マイソク月50件分）", "unlimited": "使い放題プラン（月額2,980円（税込））"}
+NAMES = {"light": "ライトプラン（月額1,480円（税込）・マイソク月50件分）", "unlimited": "使い放題プラン（月額2,980円（税込））",
+         "light_year": "ライトプラン 年払い（年額14,800円（税込）・マイソク月50件分）",
+         "unlimited_year": "使い放題プラン 年払い（年額29,800円（税込））"}
+
+
+def _plan(key):
+    """URLの名前から (プラン, 年払いか)。例 light_year → ("light", True)"""
+    return key.removesuffix("_year"), key.endswith("_year")
 
 
 @app.get("/pay/{plan}")
@@ -106,21 +113,27 @@ def pay(plan: str, t: str = ""):
     if plan not in NAMES:
         raise HTTPException(404)
     u = store.get_user(uid)
+    p, yearly = _plan(plan)
     if u.get("stripe_subscription"):
-        cur = u.get("plan")
-        if plan == cur:
+        if (p, yearly) == (u.get("plan"), u.get("billing_interval") == "year"):
             return page("ご契約中です", f"<p>すでに{NAMES[plan]}をご利用中です。</p>")
-        return page("ご契約内容の変更", f"""<p>{NAMES[plan]}に変更します。差額は日割りで次回のご請求に反映されます。</p>
+        if not billing.can_change(u, p, yearly):
+            return page("年払いをご利用中です", f"""<p>年払いの期間中は、使い放題（年払い）への切り替えだけを承っています。</p>
+<p>月払いや別のプランに変える場合は、「変更・解約」から年払いを解約してください。{store.billing_renew_date(u)}まではそのままお使いいただけます
+（途中解約による返金はありません）。</p>""")
+        note = "差額を今すぐお支払いいただき、今日から1年間の契約になります。" if yearly else "差額は日割りで次回のご請求に反映されます。"
+        return page("ご契約内容の変更", f"""<p>{NAMES[plan]}に変更します。{note}</p>
 <form method=post action="/pay/{plan}/change?t={html.escape(t)}"><button>変更する</button></form>""")
-    return RedirectResponse(billing.checkout(uid, plan), status_code=303)
+    return RedirectResponse(billing.checkout(uid, p, yearly), status_code=303)
 
 
 @app.post("/pay/{plan}/change")
 def pay_change(plan: str, t: str = ""):
     uid = _uid(t)
-    if plan not in NAMES:
+    p, yearly = _plan(plan)
+    if plan not in NAMES or not billing.can_change(store.get_user(uid), p, yearly):
         raise HTTPException(404)
-    billing.change_plan(uid, plan)
+    billing.change_plan(uid, p, yearly)
     bot.notify(uid, "plan_started", {})
     return page("変更しました", f"<p>{NAMES[plan]}に変更しました。LINEに戻って、そのままお使いください。</p>")
 
@@ -132,7 +145,9 @@ def portal(t: str = ""):
     if not url:
         return page("料金プラン", f"""<p>まだ有料プランのお申し込みはありません。</p>
 <a class=btn href="/pay/light?t={html.escape(t)}">ライトプラン（月額1,480円（税込）・マイソク月50件分）</a>
-<a class=btn href="/pay/unlimited?t={html.escape(t)}">使い放題プラン（月額2,980円（税込））</a>""")
+<a class=btn href="/pay/unlimited?t={html.escape(t)}">使い放題プラン（月額2,980円（税込））</a>
+<a class=btn href="/pay/light_year?t={html.escape(t)}">ライトプラン 年払い（年額14,800円（税込））</a>
+<a class=btn href="/pay/unlimited_year?t={html.escape(t)}">使い放題プラン 年払い（年額29,800円（税込））</a>""")
     return RedirectResponse(url, status_code=303)
 
 
@@ -150,7 +165,11 @@ def cron_daily(x_cron_key: str = Header("")):
     if not _hmac.compare_digest(x_cron_key, config.env("CRON_KEY") or config.APP_SECRET):
         raise HTTPException(403)
     import monitor
-    return {"monitor_sent": monitor.daily()}
+    renew = 0
+    for uid, kw in billing.annual_renew_notices():
+        bot.notify(uid, "plan_annual_renew", kw)
+        renew += 1
+    return {"monitor_sent": monitor.daily(), "annual_renew_sent": renew}
 
 
 @app.get("/paid")

@@ -16,6 +16,25 @@ log = logging.getLogger("billing")
 PLAN_NAMES = {"free": "無料お試し", "light": "ライトプラン", "unlimited": "使い放題プラン"}
 
 
+def plan_name(u):
+    """表示用のプラン名。年払いは「ライトプラン（年払い）」。"""
+    n = PLAN_NAMES[u.get("plan") or "free"]
+    return n + "（年払い）" if (u.get("plan") or "free") != "free" and u.get("billing_interval") == "year" else n
+
+
+def price_of(plan, yearly=False):
+    return {("light", False): config.PRICE_LIGHT, ("unlimited", False): config.PRICE_UNLIMITED,
+            ("light", True): config.PRICE_LIGHT_YEAR, ("unlimited", True): config.PRICE_UNLIMITED_YEAR}[(plan, yearly)]
+
+
+def plan_of_price(pid):
+    """価格IDから (プラン, 年払いか)。プランの価格でなければ (None, False)。"""
+    for (plan, yearly) in (("light", False), ("unlimited", False), ("light", True), ("unlimited", True)):
+        if pid == price_of(plan, yearly):
+            return plan, yearly
+    return None, False
+
+
 def _stripe():
     import stripe
     stripe.api_key = config.STRIPE_SECRET_KEY
@@ -139,22 +158,22 @@ def tax_rate(inclusive=False):
 
 def item_tax(price):
     """その価格に付ける税率。ライト・使い放題は税込。"""
-    return [tax_rate(inclusive=(price in (config.PRICE_LIGHT, config.PRICE_UNLIMITED)))]
+    return [tax_rate(inclusive=plan_of_price(price)[0] is not None)]
 
 
 # ---------- 申し込み ----------
 
-def checkout(uid, plan):
-    """プランの支払いページ（Checkout）のURLを作る。すでに契約中なら None。"""
+def checkout(uid, plan, yearly=False):
+    """プランの支払いページ（Checkout）のURLを作る。yearly=True は年払い。"""
     s = _stripe()
     u = store.get_user(uid)
-    price = {"light": config.PRICE_LIGHT, "unlimited": config.PRICE_UNLIMITED}[plan]
+    price = price_of(plan, yearly)
     items = [{"price": price, "quantity": 1, "tax_rates": item_tax(price)}]
     company = (u.get("company") or {}).get("会社名") or ""
     params = dict(
         mode="subscription", line_items=items, client_reference_id=uid,
         subscription_data={"metadata": {"uid": uid}},
-        metadata={"uid": uid, "plan": plan},
+        metadata={"uid": uid, "plan": plan, "interval": "year" if yearly else "month"},
         success_url=f"{config.BASE_URL}/paid?t={sign(uid)}",
         cancel_url=f"{config.BASE_URL}/canceled",
         locale="ja",
@@ -164,23 +183,33 @@ def checkout(uid, plan):
     elif u.get("delivery", {}).get("email"):
         params["customer_email"] = u["delivery"]["email"]
     sess = s.checkout.Session.create(**params)
-    log.info("checkout %s %s %s", uid, plan, company)
+    log.info("checkout %s %s %s %s", uid, plan, "year" if yearly else "month", company)
     return sess.url
 
 
-def change_plan(uid, plan):
-    """契約中のプランを変える（ライト⇔使い放題）。日割りで精算。"""
+def can_change(u, plan, yearly):
+    """契約中の変更ができるか。年払いの途中は返金しないので、使い放題への格上げだけ受ける。"""
+    cur, cur_year = u.get("plan"), u.get("billing_interval") == "year"
+    if (plan, yearly) == (cur, cur_year):
+        return False
+    if cur_year:
+        return yearly and plan == "unlimited" and cur == "light"
+    return True
+
+
+def change_plan(uid, plan, yearly=False):
+    """契約中のプランを変える。月払いの中は日割り、年払いへの切り替え・年払いの格上げは差額をすぐ請求。"""
     s = _stripe()
     u = store.get_user(uid)
     sub = plain(s.Subscription.retrieve(u["stripe_subscription"]))
     items = []
+    new = price_of(plan, yearly)
     for it in sub["items"]["data"]:
-        pid = it["price"]["id"]
-        if plan and pid in (config.PRICE_LIGHT, config.PRICE_UNLIMITED):
-            new = config.PRICE_UNLIMITED if plan == "unlimited" else config.PRICE_LIGHT
+        if plan_of_price(it["price"]["id"])[0]:
             items.append({"id": it["id"], "price": new, "tax_rates": item_tax(new)})
     if items:
-        s.Subscription.modify(sub["id"], items=items, proration_behavior="create_prorations")
+        s.Subscription.modify(sub["id"], items=items,
+                              proration_behavior="always_invoice" if yearly else "create_prorations")
     sync_subscription(s.Subscription.retrieve(sub["id"]))
 
 
@@ -216,17 +245,53 @@ def sync_subscription(sub):
     u = store.get_user(uid)
     prices = [it["price"]["id"] for it in sub["items"]["data"]]
     active = sub["status"] in ("active", "trialing", "past_due")
-    plan = "free"
+    plan, yearly = "free", False
     if active:
-        plan = "unlimited" if config.PRICE_UNLIMITED in prices else "light" if config.PRICE_LIGHT in prices else "free"
+        found = [plan_of_price(p) for p in prices if plan_of_price(p)[0]]
+        if found:
+            plan, yearly = found[0]
     start, end = _period(sub)
+    start_dt = datetime.fromtimestamp(start, timezone.utc) if start else None
     data = {"plan": plan, "plan_source": "stripe" if plan != "free" else u.get("plan_source"),
+            "billing_interval": "year" if yearly else "month",
             "stripe_customer": sub["customer"], "stripe_subscription": sub["id"] if active else None,
             "sub_status": sub["status"], "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
-            "period_start": datetime.fromtimestamp(start, timezone.utc) if start else None,
+            "period_start": start_dt,
             "period_end": datetime.fromtimestamp(end, timezone.utc) if end else None}
+    if yearly and start_dt and u.get("period_start") != start_dt:
+        data["year_base_docs"] = u.get("total_docs", 0)  # 年払いの更新案内で「この1年の件数」を出すため
     store.update_user(uid, data)
+    _track_yearly(uid, yearly and plan != "free")
     return uid, u.get("plan"), plan
+
+
+def _track_yearly(uid, on):
+    """年払いの方の一覧（更新30日前のお知らせ用）。"""
+    def fn(m):
+        ids = set(m.get("uids") or [])
+        (ids.add if on else ids.discard)(uid)
+        m["uids"] = sorted(ids)
+    if store.db().get("meta", "yearly") is None:
+        store.db().set("meta", "yearly", {"uids": []})
+    store.db().update_tx("meta", "yearly", fn)
+
+
+def annual_renew_notices():
+    """年払いの更新日の30日前の方へのお知らせ [(uid, 差し込み)]。1回の更新につき1度だけ。"""
+    out = []
+    today = datetime.now(store.JST).date()
+    for uid in (store.db().get("meta", "yearly") or {}).get("uids", []):
+        u = store.get_user(uid)
+        pe = (u or {}).get("period_end")
+        if not u or u.get("billing_interval") != "year" or not pe or u.get("cancel_at_period_end"):
+            continue
+        if (pe.astimezone(store.JST).date() - today).days != 30 or u.get("annual_notified") == pe.isoformat():
+            continue
+        store.update_user(uid, {"annual_notified": pe.isoformat()})
+        fee = {"light": "14,800円", "unlimited": "29,800円"}[u["plan"]]
+        out.append((uid, {"プラン名": PLAN_NAMES[u["plan"]], "更新日": store.billing_renew_date(u), "料金": fee,
+                          "年間件数": max(0, u.get("total_docs", 0) - u.get("year_base_docs", 0))}))
+    return out
 
 
 WEBHOOK_EVENTS = ["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated",

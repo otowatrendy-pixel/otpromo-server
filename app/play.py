@@ -14,7 +14,8 @@ import store
 log = logging.getLogger("play")
 PACKAGE = config.env("ANDROID_PACKAGE", "com.otpromo.ippunshiryo")
 API = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications"
-SUBS = {"lite_monthly": "light", "unlimited_monthly": "unlimited"}
+SUBS = {"lite_monthly": "light", "unlimited_monthly": "unlimited",
+        "lite_yearly": "light", "unlimited_yearly": "unlimited"}  # 年払いも件数・回数は毎月戻す
 FAX_PACK = "fax_10"            # 内見FAXの追加 10回（消費型）
 FAXRECV_PACK = "fax_receive_10"  # 受け取り用FAXの回数券 10回（消費型）
 
@@ -76,10 +77,12 @@ def sync_subscription(uid, token, sess=None):
     if not uid:
         return {"ok": False, "error": "利用者が見つかりません"}
     end = _ts(item.get("expiryTime"))
+    yearly = (pid or "").endswith("_yearly")
     data = {"plan": SUBS.get(pid, "free") if active else "free", "plan_source": "google_play",
             "play_token": token, "play_state": state, "period_end": end,
-            # 月額なので、期限の1か月前を今の期間の始まりとみなす（枚数の付与の区切りに使う）
-            "period_start": (end - timedelta(days=30)) if end else None}
+            "billing_interval": "year" if yearly else "month",
+            # 期限の1か月前（年払いは1年前）を今の期間の始まりとみなす（枚数の付与の区切りに使う）
+            "period_start": (store._add_months(end, -12) if yearly else end - timedelta(days=30)) if end else None}
     store.update_user(uid, data)
     if s.get("acknowledgementState") == "ACKNOWLEDGEMENT_STATE_PENDING":
         sess.post(f"{API}/{PACKAGE}/purchases/subscriptions/{pid}/tokens/{token}:acknowledge", json={})
