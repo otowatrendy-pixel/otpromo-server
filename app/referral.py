@@ -188,8 +188,13 @@ def establish(referred, rec, app=False):
             {"referred": referred, "at": now}]
         u["ref_rewarded"] = u.get("ref_rewarded", 0) + 1
     store.db().update_tx("users", referrer, fn)
-    if ru.get("plan_source") == "google_play":
+    if ru.get("plan_source") == "google_play" or (ru.get("firebase_uid") and not ru.get("line_uid")):
         # アプリ版の方は、割引の代わりに内見FAX+10回
+        if (ru.get("plan") or "free") == "free":
+            # 紹介した方がまだ無料体験中なら保留し、有料プランに入ったときに渡す（3か月の期限もそこから。10/28本人決定）
+            store.db().update_tx("users", referrer, lambda u: u.__setitem__(
+                "ref_app_pending", (u.get("ref_app_pending") or 0) + 1))
+            return []
         import naiken
         naiken.add_pack(referrer)
         d = (now + timedelta(days=naiken.PACK_DAYS)).astimezone(store.JST)
@@ -289,9 +294,25 @@ def on_play_paid(uid):
     return establish(uid, rec, app=True)
 
 
+def release_app_pending(uid):
+    """アプリ版で、無料体験中に紹介して保留していた特典（内見FAX+10回）を、有料プランに入ったときに渡す。"""
+    u = store.get_user(uid) or {}
+    n = u.get("ref_app_pending") or 0
+    if not n:
+        return 0
+    import naiken
+    for _ in range(n):
+        naiken.add_pack(uid)
+    store.update_user(uid, {"ref_app_pending": 0})
+    log.info("保留していた紹介特典を渡しました %s ×%s", uid, n)
+    return n
+
+
 def me(uid):
     u = store.get_user(uid) or {}
-    return {"code": code_of(uid), "referred_by": u.get("referred_by"), "rewarded": u.get("ref_rewarded", 0)}
+    return {"code": code_of(uid), "referred_by": u.get("referred_by"), "rewarded": u.get("ref_rewarded", 0),
+            # 無料体験中に紹介して、有料プランに入ったら渡す特典の数（アプリ版：内見FAX+10回 × この数）
+            "pending": u.get("ref_app_pending", 0)}
 
 
 # ---------- LINE ----------

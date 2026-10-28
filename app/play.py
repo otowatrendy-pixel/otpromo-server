@@ -87,6 +87,9 @@ def sync_subscription(uid, token, sess=None):
     if data["plan"] != "free":
         data["paid_before"] = True
     store.update_user(uid, data)
+    if data["plan"] != "free" and (before.get("plan") or "free") == "free":
+        import referral
+        referral.release_app_pending(uid)  # 無料体験中に紹介した分の特典を、ここで渡す
     if data["plan"] != "free" and not before.get("paid_before"):
         # 紹介された方の初めての有料プラン：双方に特典（アプリは内見FAX+10回）
         import bot
