@@ -57,3 +57,10 @@ FIREBASE_PROJECT = env("FIREBASE_PROJECT", "otpromo-maisoku")
 FREE_SHEETS = int(env("FREE_SHEETS", "5"))       # 最初の無料枚数（通算）
 LIGHT_SHEETS = int(env("LIGHT_SHEETS", "50"))    # ライトの月の枚数（繰り越しなし）
 FILE_DAYS = int(env("FILE_DAYS", "7"))           # PDFのリンクの有効日数
+
+# カード明細の表記（本番Stripeの短縮表記 OTOWA-T／オトワトレンディ／音羽トレンディ に続ける部分）。10/28本人了承
+# 都度払いは「OTOWA-T* OTPROMO」のように付く。契約（サブスク）は商品の明細表記（ローマ字のみ・22文字まで）
+DESCRIPTOR_SUFFIX = env("DESCRIPTOR_SUFFIX", "OTPROMO")
+DESCRIPTOR_SUFFIX_KANA = env("DESCRIPTOR_SUFFIX_KANA", "イップンシリョウ")
+DESCRIPTOR_SUFFIX_KANJI = env("DESCRIPTOR_SUFFIX_KANJI", "1分資料")
+DESCRIPTOR_SUBSCRIPTION = env("DESCRIPTOR_SUBSCRIPTION", "OTOWA-T OTPROMO")

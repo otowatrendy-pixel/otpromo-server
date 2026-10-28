@@ -30,7 +30,8 @@ def _setup_webhooks():
 
     def run():
         import richmenu
-        for name, fn in (("stripe", billing.ensure_webhook), ("line", line.ensure_webhook), ("richmenu", richmenu.ensure)):
+        for name, fn in (("stripe", billing.ensure_webhook), ("line", line.ensure_webhook), ("richmenu", richmenu.ensure),
+                         ("descriptor", billing.ensure_descriptors)):
             try:
                 fn()
             except Exception:

@@ -199,9 +199,33 @@ def _find_or_create_trn():
 
 def _invoice_for_payment(params):
     """都度払い（追加FAXなど）にも、登録番号入りの請求書（領収書）を付ける。"""
+    # カード明細に「OTOWA-T* OTPROMO」のようにサービス名を付ける（日本のカードはカナ・漢字の表記も）
+    params.setdefault("payment_intent_data", {})["statement_descriptor_suffix"] = config.DESCRIPTOR_SUFFIX
+    params.setdefault("payment_method_options", {})["card"] = {
+        "statement_descriptor_suffix_kana": config.DESCRIPTOR_SUFFIX_KANA,
+        "statement_descriptor_suffix_kanji": config.DESCRIPTOR_SUFFIX_KANJI}
     if account_tax_ids():
         params["invoice_creation"] = {"enabled": True, "invoice_data": {"account_tax_ids": account_tax_ids()}}
     return params
+
+
+def ensure_descriptors():
+    """契約（サブスク）の商品に、カード明細の表記を入れる。サブスクの支払いには都度払いのような
+    明細の付け足しができないため、商品の statement_descriptor（ローマ字のみ）で表す。起動時に1回。"""
+    s = _stripe()
+    want = config.DESCRIPTOR_SUBSCRIPTION
+    done = set()
+    for price in (config.PRICE_LIGHT, config.PRICE_UNLIMITED, config.PRICE_LIGHT_YEAR, config.PRICE_UNLIMITED_YEAR,
+                  config.PRICE_GROUP_LIGHT, config.PRICE_GROUP_UNLIMITED):
+        if not price:
+            continue
+        prod = plain(s.Price.retrieve(price))["product"]
+        if prod in done:
+            continue
+        done.add(prod)
+        if plain(s.Product.retrieve(prod)).get("statement_descriptor") != want:
+            s.Product.modify(prod, statement_descriptor=want)
+    return sorted(done)
 
 
 # ---------- 申し込み ----------
