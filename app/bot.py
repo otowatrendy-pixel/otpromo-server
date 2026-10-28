@@ -334,6 +334,9 @@ def on_postback(c, data):
         return send_last(c, v)
     if k == "store":
         return campaign.on_postback(c, v)
+    if k == "referral":
+        import referral
+        return c.send(*referral.menu_messages(c.uid))
     if k == "recvfax":
         return c.send(texts.build("recvfax_show", urls=plan_urls(c)))
     if k == "commercial" and v == "go":
@@ -376,8 +379,11 @@ def plan_urls(c):
 def plan_show(c):
     """料金プランの案内。新人さん応援の期間中は、初めての方に案内を先に付ける（同じ応答で1通分）。"""
     msgs = [texts.build("plan_show", urls=plan_urls(c))]
+    import referral
     if campaign.newbie_eligible(c.u):
         msgs.insert(0, texts.build("shinjin_plan_note"))
+    elif referral.eligible(c.u):
+        msgs.insert(0, texts.build("referral_plan_note"))
     return msgs
 
 
@@ -407,6 +413,9 @@ def plan_status(c):
 
 def on_text(c, t):
     if campaign.on_text(c, t):
+        return
+    import referral
+    if referral.on_text(c, t):
         return
     step = current_step(c.u)
     if step:

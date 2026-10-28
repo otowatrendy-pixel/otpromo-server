@@ -57,7 +57,32 @@ def me(authorization: str = Header("")):
             # 番号が未登録なら null
             "fax_receive": {"number": (u.get("delivery") or {}).get("fax"), "left": faxopt.left(u),
                             "next_expiry": faxopt.next_expiry(u).isoformat() if faxopt.next_expiry(u) else None}
-            if (u.get("delivery") or {}).get("fax") else None}
+            if (u.get("delivery") or {}).get("fax") else None,
+            # 紹介：自分のコード・使った紹介コード・特典を渡した紹介の数
+            "referral": _referral_me(uid)}
+
+
+def _referral_me(uid):
+    import referral
+    return referral.me(uid)
+
+
+class ReferralIn(BaseModel):
+    code: str
+
+
+@router.post("/referral")
+def post_referral(body: ReferralIn, authorization: str = Header("")):
+    """紹介コードを登録する。ないコードは404、使えない（自分のコード・有料契約歴ありなど）は409。"""
+    import referral
+    uid, u = _me(authorization)
+    code = referral.parse(body.code)
+    res = referral.accept(uid, code) if code else "invalid"
+    if res == "invalid":
+        raise HTTPException(404, "紹介コードが見つかりません")
+    if res == "not_eligible":
+        raise HTTPException(409, "この紹介コードはお使いいただけません")
+    return {"ok": True, "referral": referral.me(uid)}
 
 
 class FaxReceiveIn(BaseModel):

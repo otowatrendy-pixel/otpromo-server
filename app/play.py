@@ -83,7 +83,19 @@ def sync_subscription(uid, token, sess=None):
             "billing_interval": "year" if yearly else "month",
             # 期限の1か月前（年払いは1年前）を今の期間の始まりとみなす（枚数の付与の区切りに使う）
             "period_start": (store._add_months(end, -12) if yearly else end - timedelta(days=30)) if end else None}
+    before = store.get_user(uid) or {}
+    if data["plan"] != "free":
+        data["paid_before"] = True
     store.update_user(uid, data)
+    if data["plan"] != "free" and not before.get("paid_before"):
+        # 紹介された方の初めての有料プラン：双方に特典（アプリは内見FAX+10回）
+        import bot
+        import referral
+        for nuid, mid, kw in referral.on_play_paid(uid):
+            try:
+                bot.notify(nuid, mid, kw)
+            except Exception:
+                log.exception("紹介のお知らせに失敗")
     if s.get("acknowledgementState") == "ACKNOWLEDGEMENT_STATE_PENDING":
         sess.post(f"{API}/{PACKAGE}/purchases/subscriptions/{pid}/tokens/{token}:acknowledge", json={})
     return {"ok": True, "plan": data["plan"]}

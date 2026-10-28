@@ -190,7 +190,14 @@ def checkout(uid, plan, yearly=False):
     elif u.get("delivery", {}).get("email"):
         params["customer_email"] = u["delivery"]["email"]
     import campaign
-    if not yearly and campaign.newbie_eligible(u):
+    import referral
+    newbie = not yearly and campaign.newbie_eligible(u)
+    ref = referral.checkout_discount(u, plan, yearly, newbie)
+    if ref:
+        # 紹介割引（新人さん応援と重なったら大きいほうだけ）
+        params["discounts"] = [{"coupon": ref}]
+        params["metadata"]["referral"] = "1"
+    elif newbie:
         # 新人さん応援：最初の月だけ半額（1回だけ50%引き）
         params["discounts"] = [{"coupon": newbie_coupon()}]
         params["metadata"]["newbie"] = "1"
@@ -293,6 +300,9 @@ def sync_subscription(sub):
         data = {"stripe_customer": sub["customer"], "stripe_subscription": None, "sub_status": sub["status"]}
     store.update_user(uid, data)
     _track_yearly(uid, yearly and plan != "free")
+    if plan == "free" and u.get("plan_source") == "stripe" and (u.get("plan") or "free") != "free":
+        import referral
+        referral.on_canceled(uid)  # 解約したら、まだ使っていない紹介割引は消える
     if plan == "free" and u.get("shop_code"):
         import campaign
         g = campaign.get_group(u["shop_code"])
@@ -331,7 +341,8 @@ def annual_renew_notices():
 
 
 WEBHOOK_EVENTS = ["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated",
-                  "customer.subscription.deleted", "invoice.payment_failed", "invoice.paid"]
+                  "customer.subscription.deleted", "invoice.payment_failed", "invoice.paid",
+                  "charge.refunded", "charge.dispute.created"]
 
 
 def webhook_secret():
@@ -353,7 +364,10 @@ def ensure_webhook():
     if doc.get("id"):
         try:
             # キーを別のStripeアカウントのものに替えたときは見つからないので、作り直す
-            if plain(s.WebhookEndpoint.retrieve(doc["id"])).get("url") == url:
+            ep = plain(s.WebhookEndpoint.retrieve(doc["id"]))
+            if ep.get("url") == url:
+                if set(ep.get("enabled_events") or []) != set(WEBHOOK_EVENTS):
+                    s.WebhookEndpoint.modify(doc["id"], enabled_events=WEBHOOK_EVENTS)  # 受け取る通知を増やしたとき
                 return
         except s.InvalidRequestError:
             pass
@@ -389,6 +403,9 @@ def handle_webhook(payload: bytes, sig: str):
         uid, before, after = sync_subscription(sub)
         if uid:
             notices.append((uid, "plan_started", {}))
+        if uid and md.get("referral"):
+            import referral
+            referral.on_checkout(uid, obj)
         if uid and md.get("newbie") and after in ("light", "unlimited"):
             import campaign
             full = campaign.NORMAL_YEN[after]
@@ -432,4 +449,15 @@ def handle_webhook(payload: bytes, sig: str):
         sid = obj.get("subscription") or ((obj.get("parent") or {}).get("subscription_details") or {}).get("subscription")
         if sid:
             sync_subscription(s.Subscription.retrieve(sid))
+            uid, _ = store.db().find("users", "stripe_customer", obj["customer"])
+            if uid:
+                import referral
+                notices += referral.on_invoice_paid(uid, obj)
+    elif t in ("charge.refunded", "charge.dispute.created"):
+        import referral
+        customer = obj.get("customer")
+        if not customer and obj.get("charge"):
+            customer = plain(s.Charge.retrieve(obj["charge"])).get("customer")
+        if customer:
+            referral.on_refund(customer)
     return notices
