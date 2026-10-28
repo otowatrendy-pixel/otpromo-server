@@ -24,6 +24,67 @@ def plan_name(u):
     return n + "（年払い）" if (u.get("plan") or "free") != "free" and u.get("billing_interval") == "year" else n
 
 
+# プランの価格。本番のキーに替えたときも、起動時に lookup_key で探して、なければ作る（ensure_prices）
+PLAN_PRICES = [  # (config の名前, lookup_key, 商品, 税込の金額, 間隔, 呼び名)
+    ("PRICE_LIGHT", "light_monthly", "light", 1480, "month", "ライト 月額1,480円（税込）"),
+    ("PRICE_UNLIMITED", "unlimited_monthly", "unlimited", 2980, "month", "使い放題 月額2,980円（税込）"),
+    ("PRICE_LIGHT_YEAR", "light_yearly", "light", 14800, "year", "ライト 年額14,800円（税込）"),
+    ("PRICE_UNLIMITED_YEAR", "unlimited_yearly", "unlimited", 29800, "year", "使い放題 年額29,800円（税込）"),
+    ("PRICE_GROUP_LIGHT", "group_light_monthly", "group", 1180, "month", "店舗まとめ割 ライト 1人1,180円（税込）"),
+    ("PRICE_GROUP_UNLIMITED", "group_unlimited_monthly", "group", 2480, "month", "店舗まとめ割 使い放題 1人2,480円（税込）"),
+]
+PRODUCTS = {
+    "light": {"name": "1分資料 ライトプラン",
+              "description": "資料づくりは募集図面 月50件分、内見申込FAXは月20回までご利用いただけます。年払いでも件数・回数は毎月同じです。",
+              "metadata": {"service": "maisoku", "plan": "light", "monthly_limit": "50", "naiken_fax_limit": "20"}},
+    "unlimited": {"name": "1分資料 使い放題プラン",
+                  "description": "資料づくりは件数を気にせず、内見申込FAXは月50回までご利用いただけます。年払いでも回数は毎月同じです。",
+                  "metadata": {"service": "maisoku", "plan": "unlimited", "naiken_fax_limit": "50"}},
+    "group": {"name": "1分資料 店舗まとめ割",
+              "description": "同じ店舗で3人以上のお申し込み。1人あたりの月額（税込）、お申し込みから6か月間",
+              "metadata": {"service": "maisoku", "kind": "group"}},
+}
+
+
+def ensure_prices():
+    """プランの価格IDを、いまのキー（サンドボックス／本番）のものにそろえる。環境変数で指定したものはそのまま。"""
+    import os
+    if not config.STRIPE_SECRET_KEY:
+        return
+    s = _stripe()
+    keys = [lk for _, lk, *_ in PLAN_PRICES]
+    found = {p["lookup_key"]: p for p in plain(s.Price.list(lookup_keys=keys, active=True, limit=20))["data"]}
+    products = {}
+    for attr, lk, kind, amount, interval, nick in PLAN_PRICES:
+        if os.environ.get(attr):
+            continue
+        p = found.get(lk)
+        if not p:
+            # これまでの価格（サンドボックス）が使えるなら、それに lookup_key を付ける
+            try:
+                cur = plain(s.Price.retrieve(getattr(config, attr)))
+                if cur.get("active") and cur.get("unit_amount") == amount:
+                    p = plain(s.Price.modify(cur["id"], lookup_key=lk))
+            except s.InvalidRequestError:
+                pass
+        if not p:
+            if not products:
+                for pr in s.Product.list(active=True, limit=100).auto_paging_iter():
+                    md = plain(pr).get("metadata") or {}
+                    if md.get("service") == "maisoku":
+                        products.setdefault(md.get("plan") or md.get("kind"), plain(pr)["id"])
+            if kind not in products:
+                info = PRODUCTS[kind]
+                products[kind] = plain(s.Product.create(name=info["name"], description=info["description"],
+                                                        metadata=info["metadata"],
+                                                        statement_descriptor=config.DESCRIPTOR_SUBSCRIPTION))["id"]
+            p = plain(s.Price.create(product=products[kind], currency="jpy", unit_amount=amount,
+                                     recurring={"interval": interval}, tax_behavior="inclusive",
+                                     lookup_key=lk, nickname=nick))
+            log.info("価格を作りました %s %s", lk, p["id"])
+        setattr(config, attr, p["id"])
+
+
 def price_of(plan, yearly=False):
     return {("light", False): config.PRICE_LIGHT, ("unlimited", False): config.PRICE_UNLIMITED,
             ("light", True): config.PRICE_LIGHT_YEAR, ("unlimited", True): config.PRICE_UNLIMITED_YEAR}[(plan, yearly)]
