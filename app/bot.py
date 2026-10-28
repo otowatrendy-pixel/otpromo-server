@@ -100,10 +100,16 @@ def handle(ev):
     if t == "unfollow":
         return store.update_user(c.uid, {"blocked": True, "blocked_at": store.now()})
     if t == "postback" and ev["postback"]["data"] == "terms=agree":
-        store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION})
+        held = c.u.get("terms_held")
+        store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION, "terms_held": None})
+        if held:
+            return handle({**held, "replyToken": ev.get("replyToken")})  # 止めていた処理（届いた募集図面など）を続ける
         return c.send(line.text("ありがとうございます。そのままお使いください。"))
     if t in ("postback", "message") and needs_terms(c.u):
-        return c.send(terms_message())
+        if not (t == "postback" and ev["postback"]["data"].startswith("help")):
+            store.update_user(c.uid, {"terms_held": {k: ev[k] for k in ("type", "source", "message", "postback",
+                                                                        "webhookEventId") if k in ev}})
+            return c.send(terms_message())
     if t == "postback":
         return on_postback(c, ev["postback"]["data"])
     if t != "message":
@@ -129,7 +135,10 @@ def needs_terms(u):
 
 def terms_message():
     if "terms_updated" in texts._MSG:
-        return texts.build("terms_updated", 規約URL=config.TERMS_URL)
+        y, m, d = map(int, config.TERMS_VERSION.split("-"))
+        import datetime as _dt
+        改定日 = f"{m}月{d}日（{'月火水木金土日'[_dt.date(y, m, d).weekday()]}）"
+        return texts.build("terms_updated", 規約URL=config.TERMS_URL, 改定日=改定日)
     return texts.build("follow", text=(f"利用規約を改めました。お手数ですが、内容をご確認のうえ「同意して続ける」を押してください。\n{config.TERMS_URL}"),
                        buttons=[{"label": "同意して続ける", "action": "postback terms=agree"}])
 
