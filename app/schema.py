@@ -19,14 +19,16 @@ class OtherCost(BaseModel):
     項目: str
     記載: str
     金額円: Optional[int] = None
+    時期: Literal["入居時", "月額", "更新時", "退去時", "不明"] = Field(
+        "入居時", description="いつ払う費用か。初期費用の合計には「入居時」だけを入れる")
 
 
 class Facts(BaseModel):
     資料の種類: Literal["マイソク", "マイソクではない", "読み取れない"] = Field(
         "マイソク", description="物件の募集図面なら「マイソク」。物件資料でない写真は「マイソクではない」。ぼやけ・暗い・一部しか写っていないなどで主な項目が読めなければ「読み取れない」")
-    用途: Literal["居住用", "事業用", "不明"] = Field(
-        "居住用", description="マンション・アパート・戸建などは居住用。事務所・店舗・倉庫・駐車場などは事業用")
     取引: Literal["賃貸", "賃貸以外"] = Field(description="賃貸専門のサービス。売買などの募集図面なら「賃貸以外」")
+    用途: Literal["居住用", "事業用", "不明"] = Field(
+        "不明", description="住まい用なら居住用。店舗・事務所・倉庫など事業向けなら事業用。どちらも賃貸として資料を作る")
     物件種別: Optional[str] = Field(None, description="マンション、アパート、戸建、店舗、事務所など")
     物件名: Optional[str] = None
     所在地: Optional[str] = None
@@ -43,7 +45,10 @@ class Facts(BaseModel):
     管理費_共益費: Money = Field(default_factory=Money)
     敷金: Money = Field(default_factory=Money)
     礼金: Money = Field(default_factory=Money)
-    保証金_償却: Optional[str] = None
+    保証金: Money = Field(default_factory=Money, description="事業用に多い。敷金と別に書いてあれば")
+    償却: Optional[str] = Field(None, description="保証金・敷金の償却や敷引の記載そのまま（例：償却2ヶ月、解約時20%）")
+    賃料_消費税: Literal["税込", "税別", "非課税", "記載なし"] = Field(
+        "記載なし", description="賃料・共益費の金額が税込か税別か。図面に書いてあるときだけ税込・税別・非課税")
     更新料: Optional[str] = None
     保証会社: Optional[str] = Field(None, description="加入要否・費用の記載をそのまま")
     火災保険: Optional[str] = None
@@ -54,9 +59,11 @@ class Facts(BaseModel):
     条件_備考: List[str] = Field(default_factory=list, description="ペット可、二人入居可、フリーレントなど")
     その他の費用: List[OtherCost] = Field(default_factory=list, description="鍵交換、消毒、24時間サポートなど費用の記載")
     元付業者: Optional[str] = None
-    元付業者_電話: Optional[str] = Field(None, description="帯に書いてある元付業者のTEL")
-    元付業者_FAX: Optional[str] = Field(None, description="帯に書いてある元付業者のFAX（内見申込書の送り先に使う）")
+    元付業者_電話: Optional[str] = Field(None, description="帯などに書いてある元付業者のTEL")
+    元付業者_FAX: Optional[str] = Field(None, description="帯などに書いてある元付業者のFAX。内見申込書FAXの宛先に使う")
+    号室: Optional[str] = Field(None, description="部屋番号の数字や記号だけ（例：203）。「号室」は付けない。物件名と分けて書いてあれば")
     取引態様: Optional[str] = None
+    仲介手数料_記載: Optional[str] = Field(None, description="手数料の負担・配分の記載そのまま（例：借主100%、当方不払い）。なければ null")
     広告転載: Optional[str] = Field(None, description="『広告転載可』『不可』など記載のまま。なければ null")
     読み取りに自信がない項目: List[str] = Field(default_factory=list)
 

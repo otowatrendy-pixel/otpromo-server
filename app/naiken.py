@@ -136,9 +136,15 @@ def from_job(job):
     r = Result.model_validate(job["result"]) if job.get("result") else None
     f = r.事実 if r else Facts(取引="賃貸")
     name, room = split_room(f.物件名 or job.get("title") or "")
+    if f.号室:
+        room = re.sub(r"\s*号室?$", "", f.号室.strip()) or room
+    # 読み取りに自信がない・空欄の宛先項目（確認か入力が済むまで送らない）
+    shaky = set(f.読み取りに自信がない項目)
+    check = [k for k, field, v in (("company", "元付業者", f.元付業者), ("fax", "元付業者_FAX", f.元付業者_FAX))
+             if field in shaky or not v]
     return {"job_id": job.get("_id"), "prop": {"name": name, "room": room, "address": f.所在地 or ""},
             "to": {"company": f.元付業者 or "", "branch": "", "fax": f.元付業者_FAX or "",
-                   "from_maisoku": bool(f.元付業者_FAX)},
+                   "from_maisoku": bool(f.元付業者_FAX), "check": check},
             "wishes": [], "guests": None, "guide": None}
 
 

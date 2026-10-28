@@ -133,7 +133,7 @@ def obikae(img: Image.Image, r: Result, company: dict) -> Image.Image:
 
 
 def _src(m) -> str:
-    """マイソクに記載があれば「マイソクより」、なければ「要確認」。"""
+    """募集図面に記載があれば「募集図面より」、なければ「要確認」。"""
     return "募集図面より" if (m.記載 or m.金額円 is not None or m.ヶ月 is not None) else "要確認"
 
 
@@ -148,22 +148,31 @@ def _money_text(m) -> str:
 def estimate_section(f, company: dict, name: str) -> str:
     """初期費用概算書。テナントショップ練馬のExcel版（A4縦・3区分・青の見出し帯）に合わせる。"""
     e = html.escape
-    lines, known, unknown = costs.estimate(f, company)
+    lines, known, unknown, later = costs.estimate(f, company)
     today = datetime.now(timezone(timedelta(hours=9)))
     made = f"{today.year}年{today.month}月{today.day}日"
     shop = "　".join(x for x in (company.get("会社名"), company.get("店舗名")) if x)
-    months = company.get("賃貸_仲介手数料_ヶ月", 1.0)
+    biz = f.用途 == "事業用"
+    months = company.get("事業用_仲介手数料_ヶ月" if biz else "賃貸_仲介手数料_ヶ月",
+                         company.get("賃貸_仲介手数料_ヶ月", 1.0))
 
-    info = [("物件名", f.物件名 or "記載なし"), ("所在地", f.所在地 or "記載なし"),
+    kind = "　".join(x for x in ({"居住用": "居住用", "事業用": "事業用"}.get(f.用途), f.物件種別) if x)
+    info = [("物件名", f.物件名 or "記載なし"), ("種別", kind or "記載なし"), ("所在地", f.所在地 or "記載なし"),
             ("間取り・面積", "　".join(x for x in (f.間取り, f.専有面積) if x) or "記載なし"),
             ("契約形態", f.契約期間 or "要確認"), ("入居時期", f.入居時期 or "要確認")]
     info_rows = "".join(f"<tr><th>{k}</th><td colspan=2>{e(v)}</td></tr>" for k, v in info)
 
     cond = [("月額賃料", _money_text(f.賃料), _src(f.賃料)),
             ("管理費・共益費", _money_text(f.管理費_共益費), _src(f.管理費_共益費)),
-            ("敷金", _money_text(f.敷金), _src(f.敷金)),
+            *([("賃料の消費税", f.賃料_消費税, "募集図面より" if f.賃料_消費税 != "記載なし" else "要確認")]
+              if biz or f.賃料_消費税 != "記載なし" else []),
+            *([("敷金", _money_text(f.敷金), _src(f.敷金))]
+              if _src(f.敷金) != "要確認" or _src(f.保証金) == "要確認" else []),
+            *([("保証金", _money_text(f.保証金), _src(f.保証金))] if _src(f.保証金) != "要確認" else []),
+            *([("償却・敷引", f.償却, "募集図面より")] if f.償却 else []),
             ("礼金", _money_text(f.礼金), _src(f.礼金)),
-            ("仲介手数料", f"{months:g}ヶ月", "弊社規定　※別途消費税"),
+            ("仲介手数料", f"{months:g}ヶ月",
+             "弊社規定　※別途消費税" + (f"（図面の記載：{f.仲介手数料_記載}）" if f.仲介手数料_記載 else "")),
             ("保証会社", f.保証会社 or "記載なし", "保証会社の規定による"),
             ("火災保険", f.火災保険 or "記載なし", "要見積")]
     cond_rows = "".join(
@@ -175,6 +184,12 @@ def estimate_section(f, company: dict, name: str) -> str:
     rows = "".join(
         f"<tr><td>{e(l.項目)}</td><td class=n>{amt(l.金額円)}</td><td class=m>{e(l.メモ)}</td></tr>" for l in lines)
 
+    later_html = ""
+    if later:
+        later_rows = "".join(
+            f"<tr><td>{e(l.項目)}</td><td class=n>{amt(l.金額円)}</td><td class=m>{e(l.メモ)}</td></tr>" for l in later)
+        later_html = f"""<h2>■ 入居後にかかる費用（参考・合計には含みません）</h2>
+<table class=lines><tbody>{later_rows}</tbody></table>"""
     tel = " ／ ".join(x for x in (f"TEL {company['電話']}" if company.get("電話") else "",
                                   f"FAX {company['FAX']}" if company.get("FAX") else "") if x)
     notes = [
@@ -182,11 +197,13 @@ def estimate_section(f, company: dict, name: str) -> str:
         "※入居日が決まりましたら、日割り賃料を加えた金額をご案内します。",
         "※保証会社の保証料と火災保険料は、各社の審査・見積により金額が変わります。",
         "※端数はすべて切り捨てで計算しています。",
+        *(["※事業用物件として計算しています。賃料・礼金などの消費税は、図面の記載と貸主の課税状況により変わります。"] if biz else []),
         f"※お問い合わせ：{shop}　{tel}" if tel else f"※お問い合わせ：{shop}",
     ]
     # 明細が多くても必ずA4 1枚に収める（受け取り用FAXの「1回＝2枚」を崩さないため）。
     # 項目数と備考の長さで、文字・行間・余白を段階的に詰める（本文は9ptを下限）
-    weight = len(lines) + sum(len(l.メモ or "") > 22 for l in lines) * 0.5
+    weight = len(lines) + len(later) + max(0, len(cond) - 7) + (1.5 if later else 0) \
+        + sum(len(l.メモ or "") > 22 for l in lines + later) * 0.5
     dense = "" if weight <= 10 else " d1" if weight <= 14 else " d2" if weight <= 19 else " d3" if weight <= 25 else " d4"
     return f"""<section class="est{dense}">
 <div class=band>初期費用概算書</div>
@@ -200,6 +217,7 @@ def estimate_section(f, company: dict, name: str) -> str:
 <table class=lines><thead><tr><th>項　目</th><th>金　額</th><th>備　考</th></tr></thead>
 <tbody>{rows}</tbody>
 <tfoot><tr><td>初期費用　合計（概算）</td><td class=n>{known:,}円</td><td class=m>{'要確認の項目は含みません' if unknown else ''}</td></tr></tfoot></table>
+{later_html}
 <div class=notes>{''.join(f'<p>{e(n)}</p>' for n in notes)}</div>
 </section>"""
 

@@ -42,6 +42,12 @@ def start_from_job(c, jid):
     d = naiken.from_job(job)
     to = d["to"]
     p = d.get("prop") or {}
+    if to.get("company") and naiken.fax_ok(to.get("fax")) and to.get("check"):
+        # 読み取りに自信がないときは、送る前に宛先を確かめてもらう
+        _set(c, nk=d, nk_step="to")
+        return c.send(texts.build("naiken_fax_unread", text=(
+            f"宛先を「{to['company']}　FAX {naiken.fax_display(to['fax'])}」と読み取りましたが、"
+            "読み取りに自信がありません。\n誤送信を防ぐため、管理会社の名前とFAX番号を、募集図面を見ながらもう一度送ってください。")))
     if not (to.get("company") and naiken.fax_ok(to.get("fax"))):
         _set(c, nk=d, nk_step="to")
         msg = texts.build("naiken_fax_unread", 物件名=room_text(d))

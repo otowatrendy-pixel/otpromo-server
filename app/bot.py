@@ -533,13 +533,12 @@ def process(c, data, held=None):
         else:
             a = core.analyze(data)
             v = core.verdict(a["result"])
-            if v != "ok":
+            # 事業用の賃貸も、そのまま作る（お届けのときに一言添える）
+            if v not in ("ok", "commercial"):
                 done.set()
                 store.update_job(jid, {"status": "failed", "error": v, "log": a["log"]})
-                if v == "commercial":
-                    hold(c, data, "commercial", json.loads(a["result"].model_dump_json()), a["pages"])
                 return c.send(texts.build({"blurry": "err_blurry", "not_maisoku": "err_not_maisoku",
-                                           "sale": "err_sale", "commercial": "err_commercial"}[v]))
+                                           "sale": "err_sale"}[v]))
         if not store.try_consume(c.uid):
             done.set()
             store.update_job(jid, {"status": "failed", "error": "quota"})
@@ -548,7 +547,8 @@ def process(c, data, held=None):
         out = core.render_documents(company_for_render(c.uid, c.u), a["img"], a["result"], a["pages"], a["log"])
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "title": out["title"], "texts": out["texts"], "log": out["log"],
-                               "pages": out["pages"], "result": out["result"]})
+                               "pages": out["pages"], "result": out["result"],
+                               "verdict": core.verdict(a["result"])})
         recent = [{"id": jid, "title": out["title"], "at": store.now()}] + [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
         store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:12]})
         c.refresh()
@@ -609,27 +609,34 @@ def deliver(c, jid):
     remain = remain_note(u)
     pdf_url = store.file_url(jid, job, "shiryou.pdf")
     img = line.image(store.file_url(jid, job, "obikae.jpg"), store.file_url(jid, job, "preview.jpg"))
+    if job.get("verdict") == "commercial":
+        # 事業用のときは、資料の前に一言（同じ応答なので通数は増えない）
+        img = [texts.build("err_commercial"), img]
     remain = "\n\n".join(x for x in extra + [remain] if x)
     # 何枚か続けて送られても、各資料の「この物件で内見FAX」はその物件で始まるよう資料IDを入れる
     common = dict(物件名=job["title"], のこり枚数の案内=remain, extra_buttons=remain_buttons(u), 資料ID=jid)
     if method == "email" and d.get("email"):
         pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
         if delivery.send_mail(d["email"], job["title"], pdf, pdf_url):
-            return c.send(img, texts.build("deliver_mail", メールアドレス=d["email"], **common))
+            return c.send(*_as_list(img), texts.build("deliver_mail", メールアドレス=d["email"], **common))
     if method == "fax":
         how, n = recvfax_send(c.uid, u, jid, job)
         if how == "sent":
             add, btns = recvfax_low(c.uid, n)
             common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, add) if x)
             common["extra_buttons"] = list(common["extra_buttons"] or []) + btns
-            return c.send(img, texts.build("deliver_fax", FAX番号=d["fax"], **common))
+            return c.send(*_as_list(img), texts.build("deliver_fax", FAX番号=d["fax"], **common))
         if how == "empty":
             # 回数券がないときはFAXを送らずLINEで届け、買えばこの資料もFAXで送る
             store.update_user(c.uid, {"recvfax_wait": jid})
             common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, texts.raw("recvfax_empty")) if x)
             common["extra_buttons"] = list(common["extra_buttons"] or []) + texts.buttons_of("recvfax_empty")
             common["urls"] = plan_urls(c)
-    c.send(img, texts.build("deliver_line", リンク=pdf_url, 有効期限=f"{exp.month}月{exp.day}日", **common))
+    c.send(*_as_list(img), texts.build("deliver_line", リンク=pdf_url, 有効期限=f"{exp.month}月{exp.day}日", **common))
+
+
+def _as_list(x):
+    return x if isinstance(x, list) else [x]
 
 
 def recvfax_send(uid, u, jid, job):
