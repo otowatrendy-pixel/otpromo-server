@@ -58,6 +58,9 @@ def me(authorization: str = Header("")):
             "company": u.get("company") or {}, "delivery": u.get("delivery") or {},
             # 受け取り用FAX（回数券 10回1,000円・購入から3か月）。next_expiry は一番近い期限
             # 番号が未登録なら null
+            # お試し中の受け取り用FAXの無料のこり（最初の3件まで。有料プランでは null）
+            "fax_receive_trial_left": max(0, bot.TRIAL_FAX - (u.get("trial_fax_used") or 0))
+            if (u.get("plan") or "free") == "free" else None,
             "fax_receive": {"number": (u.get("delivery") or {}).get("fax"), "left": faxopt.left(u),
                             "next_expiry": faxopt.next_expiry(u).isoformat() if faxopt.next_expiry(u) else None}
             if (u.get("delivery") or {}).get("fax") else None,
@@ -188,20 +191,6 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     return {"ok": True}
 
 
-def _fax_receive(uid, jid):
-    """受け取り用FAXの番号がある方には、2枚（帯替え図面＋概算書）をFAXでも送る（回数券を1回使う）。
-    job の fax_receive は "sent"・"empty"（回数券なし）。"""
-    u = store.get_user(uid)
-    if not (u.get("delivery") or {}).get("fax"):
-        return
-    try:
-        res, n = bot.recvfax_send(uid, u, jid, store.get_job(jid))
-        if res:
-            store.update_job(jid, {"fax_receive": res, "fax_tickets_left": n})
-    except Exception:
-        log.exception("受け取り用FAXの送信で例外 uid=%s", uid)
-
-
 def _run_job(uid, jid, data):
     u = store.get_user(uid)
     consumed = False
@@ -226,7 +215,7 @@ def _run_job(uid, jid, data):
         latest = (store.get_job(jid) or {}).get("宛名") or ""
         if latest != atena:  # 作っている間に宛名が届いたとき
             bot.rerender_atena(uid, u, jid, latest)
-        _fax_receive(uid, jid)
+        # 受け取り用FAXは自動では送らない。帯替え図面を見てから POST /v1/jobs/{id}/fax-receive（10/28本人決定）
     except core.InputError as e:
         if consumed:
             store.refund(uid)
@@ -284,12 +273,15 @@ def job_fax_receive(jid: str, authorization: str = Header("")):
         raise HTTPException(404)
     if not (u.get("delivery") or {}).get("fax"):
         raise HTTPException(402, "受け取り用のFAX番号が登録されていません")
-    if not faxopt.can_send(u):
-        raise HTTPException(402, "受け取り用FAXの回数券がありません")
     if not delivery.fax_ready():
         raise HTTPException(503, "ただいまFAXでのお届けを準備中です")
-    n = faxopt.send_job(uid, u, jid, job, bot.company_for_render(uid, u))
-    if n is None:
+    # お試し中は最初の3件まで無料、そのあとは回数券（bot.recvfax_send と同じ）
+    res, n = bot.recvfax_send(uid, u, jid, job)
+    if res == "trial_over":
+        raise HTTPException(402, {"code": "trial_over", "message": texts.raw("recvfax_trial_over")})
+    if res == "empty":
+        raise HTTPException(402, {"code": "empty", "message": "受け取り用FAXの回数券がありません"})
+    if res != "sent":
         raise HTTPException(502, "FAXを送れませんでした。時間をおいてもう一度お試しください")
     store.update_job(jid, {"fax_receive": "sent", "fax_tickets_left": n})
     return get_job(jid, authorization)
