@@ -4,7 +4,7 @@ POST /v1/jobs            画像かPDF（multipart の file）→ {job_id}
 GET  /v1/jobs/{id}       → {status, pdf_url（全部）, customer_pdf_url（お客様向け）, staff_pdf_url（社内向け）, obikae_url, texts, error}
 PUT  /v1/jobs/{id}/atena {"atena":"山田 太郎"} 初期費用概算書の宛名（""で空欄。でき上がり後なら作り直す。409 失敗した資料）
 POST /v1/jobs/{id}/fix   {"request":"右下の連絡先を消して"} 業者向け情報の消し直し（無料・件数に数えない）
-GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, company}
+GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, ask_cancel_reason, company}
 POST /v1/me/cancel-reason {"reason":"price|nouse|accuracy|other_service|other"} 解約の理由
 PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方・宛名を聞く）。担当者名・携帯は必須（422 name_required/mobile_check/name_check、429 name_locked）
 POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課金（あとで実装）
@@ -56,6 +56,8 @@ def me(authorization: str = Header("")):
             "naiken_month_left": month, "naiken_pack_left": packs,
             "naiken_day_left": day,
             "free_left": q["free_left"], "registered": u.get("registered", False),
+            # 解約済みでまだ理由を受け取っていないとき true。アプリはこのときだけ1回聞く
+            "ask_cancel_reason": bool(u.get("ask_cancel_reason")),
             "company": u.get("company") or {}, "delivery": u.get("delivery") or {},
             # 受け取り用FAX（回数券 10回1,000円・購入から3か月）。next_expiry は一番近い期限
             # 番号が未登録なら null

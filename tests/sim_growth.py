@@ -73,3 +73,11 @@ assert naiken.opted_out("03(1111)2222")
 naiken.optout_remove("03-1111-2222")
 assert not naiken.opted_out("03-1111-2222")
 print("OK")
+
+print("\n=== アプリ：解約理由を聞くかどうか ===")
+store.update_user("LUabc", {"ask_cancel_reason": False})
+bot.notify("LUabc", "plan_canceled", {})
+assert store.get_user("LUabc")["ask_cancel_reason"] is True
+growth.on_cancel_reason("LUabc", "nouse")
+assert store.get_user("LUabc")["ask_cancel_reason"] is False
+print("OK2")

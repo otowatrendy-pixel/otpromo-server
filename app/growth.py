@@ -99,7 +99,11 @@ def run_due():
         import bot
         urls = bot.plan_urls(type("C", (), {"uid": uid})())
         if "nudge_free_used" in texts._MSG:
-            msg = texts.build("nudge_free_used", urls=urls)
+            # 文面の {urls} の行はボタンにする（長いURLを文に出さない）
+            msg = texts.build("nudge_free_used", urls=urls,
+                              text=texts._MSG["nudge_free_used"]["text"].replace("\n{urls}", ""),
+                              buttons=[{"label": "ライトを申し込む", "action": "uri Stripe決済ページ（ライト月額）"},
+                                       {"label": "使い放題を申し込む", "action": "uri Stripe決済ページ（使い放題月額）"}])
         else:
             msg = texts.build("plan_show", urls=urls) if "plan_show" in texts._MSG else line.text("料金プランのご案内です。")
         line.push(u["line_uid"], [msg])
@@ -119,7 +123,7 @@ def cancel_question():
 def on_cancel_reason(uid, key):
     if key not in CANCEL_REASONS:
         return None
-    store.update_user(uid, {"cancel_reason": key, "cancel_reason_at": store.now()})
+    store.update_user(uid, {"cancel_reason": key, "cancel_reason_at": store.now(), "ask_cancel_reason": False})
     usage.count("cancel_" + key)
     return _msg("cancel_reason_thanks", "お答えいただき、ありがとうございました。\nまたお役に立てる機会がありましたら、いつでもお待ちしております。")
 
@@ -139,12 +143,14 @@ def idle_paid(users=None):
 
 
 def send_idle_tips(idle):
-    """使っていない有料の方へ、使い方のコツを1回だけ（同じ空白期間には2回送らない）。"""
+    """使っていない有料の方へ、使い方のコツを1回だけ（同じ空白期間には2回送らず、60日に1回まで）。"""
     n = 0
     for uid, u, last in idle:
         if u.get("idle_tip_for") == last or not u.get("line_uid"):
             continue
-        store.update_user(uid, {"idle_tip_for": last})
+        if u.get("idle_tip_at") and u["idle_tip_at"] > store.now() - timedelta(days=60):
+            continue  # 同じ方には60日に1回まで
+        store.update_user(uid, {"idle_tip_for": last, "idle_tip_at": store.now()})
         line.push(u["line_uid"], [_msg("idle_tip",
             "いつもご利用ありがとうございます。\n1分資料の使い方のコツをお届けします。\n\n"
             "・ポータルで見つけた物件も、募集図面のPDFを送るだけで資料になります\n"

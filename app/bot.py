@@ -1111,6 +1111,8 @@ def send_fax_done(uid, number, n):
 
 def notify(uid, mid, kw):
     u = store.get_user(uid)
+    if u and mid == "plan_canceled":
+        store.update_user(uid, {"ask_cancel_reason": True})  # アプリは /v1/me でこれを見て1回聞く
     if not u or not u.get("line_uid"):
         return
     if mid == "plan_started":
