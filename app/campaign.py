@@ -592,12 +592,11 @@ def join(c, code, confirmed=False):
     apply_member(c.uid, g)
     c.refresh()
     import bot
-    import naiken_bot
     bot.link_menu(c.line_uid, True)
     name = _remember_name(code, c.uid)
     _notify_joined(g, name)
-    naiken_bot._set(c, nk={"card_only": True, "member": True}, nk_step="card_name")
-    c.send(texts.build("store_code_accepted", 店舗名=g["name"]), naiken_bot.ask_card("card_name"))
+    bot.start_steps(c, ["staff", "mobile", "receive"], "member",
+                    prefix=texts.build("store_code_accepted", 店舗名=g["name"]))
 
 
 def _notify_full(c, g):
@@ -615,17 +614,6 @@ def _notify_joined(g, name):
     mid = "store_all_joined" if len(g["members"]) >= g["seats"] else "store_member_joined"
     line.push(owner["line_uid"], [texts.build(mid, メンバー名=name, 店舗名=g["name"], 人数=g["seats"],
                                               加入人数=len(g["members"]))])
-
-
-def member_after_card(c):
-    """名刺の情報を聞き終えたメンバー：受け取り方を聞く。"""
-    import bot
-    import naiken_bot
-    naiken_bot._set(c, nk={}, nk_step=None)
-    co = dict(c.u.get("company") or {})
-    if co.get("担当者名") and c.u.get("shop_code"):
-        _set_name(c.u["shop_code"], c.uid, co["担当者名"])
-    bot.start_steps(c, ["receive"], "member")
 
 
 def member_done(c):

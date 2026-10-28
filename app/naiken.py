@@ -171,14 +171,15 @@ def missing(d):
     return None
 
 
-CARD_STEPS = ["card_name", "card_roman", "card_role", "card_contact", "card_fax"]
+CARD_STEPS = ["card_name", "card_roman", "card_role", "card_contact", "card_fax"]  # card_name は以前の方だけ
 
 
 def card_missing(company):
     """名刺の情報で、まだ聞いていない項目。"""
     if company.get("名刺済み"):
         return [] if company.get("FAX") else ["card_fax"]
-    steps = ["card_name", "card_roman", "card_role", "card_contact"]
+    # 担当者名と携帯は初回登録で必須（10/28）。名前がまだない以前の方だけ名前から聞く
+    steps = ([] if company.get("担当者名") else ["card_name"]) + ["card_roman", "card_role", "card_contact"]
     if not company.get("FAX"):
         steps.append("card_fax")
     return steps

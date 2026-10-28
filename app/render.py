@@ -95,14 +95,27 @@ def _font(size):
 
 def draw_band(w: int, h: int, company: dict) -> Image.Image:
     """自社の帯。登録時に帯の画像をもらえればそれを使い、なければ文字で作る。"""
+    staff = staff_line(company)
     if company.get("帯画像"):
-        return Image.open(company["帯画像"]).convert("RGB").resize((w, h))
+        img = Image.open(company["帯画像"]).convert("RGB").resize((w, h))
+        if not staff:
+            return img
+        # 登録した帯の画像の下に、担当者の行を足す
+        sh = max(int(h * 0.28), 14)
+        out = Image.new("RGB", (w, h + sh), "white")
+        out.paste(img, (0, 0))
+        d = ImageDraw.Draw(out)
+        f = _font(int(sh * 0.62))
+        d.text((w - int(sh * 0.4) - d.textlength(staff, font=f), h + (sh - f.size) // 2), staff, font=f,
+               fill=theme(company)["main"])
+        return out
     band = Image.new("RGB", (w, h), theme(company)["main"])
     d = ImageDraw.Draw(band)
     big, small = _font(int(h * 0.36)), _font(int(h * 0.2))
     pad = int(h * 0.15)
     d.text((pad, pad), company["会社名"], font=big, fill="white")
-    d.text((pad, h - pad - small.size), company["免許"], font=small, fill="white")
+    left = company["免許"] + (f"　{staff}" if staff else "")
+    d.text((pad, h - pad - small.size), left, font=small, fill="white")
     right = f"TEL {company['電話']}"
     tw = d.textlength(right, font=big)
     d.text((w - pad - tw, pad), right, font=big, fill="white")
@@ -110,6 +123,14 @@ def draw_band(w: int, h: int, company: dict) -> Image.Image:
     sw = d.textlength(sub, font=small)
     d.text((w - pad - sw, h - pad - small.size), sub, font=small, fill="white")
     return band
+
+
+def staff_line(company: dict) -> str:
+    """帯に載せる「担当：山田 花子／090-1234-5678」。"""
+    name, mobile = company.get("担当者名"), company.get("携帯")
+    if not name:
+        return ""
+    return f"担当：{name}" + (f"／{mobile}" if mobile else "")
 
 
 def obikae(img: Image.Image, r: Result, company: dict) -> Image.Image:

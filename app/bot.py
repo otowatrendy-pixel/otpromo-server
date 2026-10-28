@@ -34,13 +34,13 @@ RICHMENU_REGISTERED = config.env("RICHMENU_REGISTERED")
 RICHMENU_UNREGISTERED = config.env("RICHMENU_UNREGISTERED")
 
 # 登録の質問の順番と、項目ごとの「変更」で聞く質問
-REG_STEPS = ["company", "shop", "license", "tel", "fax", "address", "fee", "color", "font", "obi", "receive"]
-EDIT_STEPS = {"company": ["company", "shop"], "license": ["license"], "tel": ["tel", "fax"],
+REG_STEPS = ["company", "shop", "staff", "mobile", "license", "tel", "fax", "address", "fee", "color", "font", "obi", "receive"]
+EDIT_STEPS = {"company": ["company", "shop"], "staff": ["staff", "mobile"], "mobile": ["mobile"], "license": ["license"], "tel": ["tel", "fax"],
               "address": ["address"], "fee": ["fee"], "color": ["color"], "font": ["font"],
               "obi": ["obi"], "recv": ["receive"]}
-EDIT_NAMES = {"company": "会社名・店舗名", "license": "免許番号", "tel": "電話・FAX", "address": "住所",
+EDIT_NAMES = {"company": "会社名・店舗名", "staff": "担当者名・携帯", "mobile": "携帯番号", "license": "免許番号", "tel": "電話・FAX", "address": "住所",
               "fee": "仲介手数料", "color": "テーマ色", "font": "書体", "obi": "帯の画像", "recv": "受け取り方"}
-ASK = {"company": "reg_company", "shop": "reg_shop", "license": "reg_license", "tel": "reg_tel",
+ASK = {"company": "reg_company", "shop": "reg_shop", "staff": "reg_staff", "mobile": "reg_mobile", "license": "reg_license", "tel": "reg_tel",
        "fax": "reg_fax", "address": "reg_address", "fee": "reg_fee", "fee_other": "reg_fee_other",
        "color": "reg_color", "color_code": "reg_color_code", "font": "reg_font", "obi": "reg_obi",
        "receive": "reg_receive", "mail": "reg_mail", "faxto": "reg_faxto", "send_mail": "send_mail_ask"}
@@ -139,10 +139,10 @@ def link_menu(line_uid, registered):
 
 # ---------- 登録 ----------
 
-def start_steps(c, steps, mode):
-    store.update_user(c.uid, {"reg_queue": steps, "reg_mode": mode})
+def start_steps(c, steps, mode, prefix=None):
+    store.update_user(c.uid, {"reg_queue": steps, "reg_mode": mode, "name_retry": 0})
     c.refresh()
-    ask(c, steps[0])
+    ask(c, steps[0], prefix=prefix)
 
 
 def ask(c, step, prefix=None):
@@ -192,6 +192,7 @@ def confirm_message(u, mid="reg_confirm"):
     d = u.get("delivery") or {}
     recv = {"line": "LINE", "email": f"メール（{d.get('email', '')}）", "fax": f"FAX（{d.get('fax', '')}）"}
     return texts.build(mid, 会社名=co.get("会社名", ""), 店舗名=co.get("店舗名") or "なし",
+                       担当者名=co.get("担当者名", ""), 携帯番号=co.get("携帯", ""),
                        免許番号=co.get("免許", ""), 電話=co.get("電話", ""), FAX=co.get("FAX") or "なし",
                        住所=co.get("住所", ""), ヶ月=f"{co.get('賃貸_仲介手数料_ヶ月', 1.0):g}",
                        色=co.get("テーマ色", "青"), 書体=co.get("書体", "ゴシック"),
@@ -220,6 +221,19 @@ def reg_text(c, step, t):
         set_company(c, 会社名=t[:60])
     elif step == "shop":
         set_company(c, 店舗名="" if t in ("なし", "無し", "ない") else t[:40])
+    elif step == "staff":
+        import person
+        if person.try_name(c.uid, c.u, t) == "retry":
+            return c.send(texts.build("reg_staff_retry"))
+        c.refresh()
+        if c.u.get("shop_code"):
+            campaign._set_name(c.u["shop_code"], c.uid, c.u["company"]["担当者名"])
+    elif step == "mobile":
+        import person
+        m = person.normalize_mobile(t)
+        if not m:
+            return c.send(texts.build("reg_mobile_retry"))
+        set_company(c, 携帯=m)
     elif step == "license":
         if not LICENSE_RE.search(t):
             store.update_user(c.uid, {"reg_license_draft": t[:60]})
@@ -312,6 +326,13 @@ def on_postback(c, data):
         return c.send(texts.build("reg_edit"))
     if k == "reg" and v == "show":
         return c.send(confirm_message(c.u))
+    if k == "edit" and v == "staff" and c.u.get("registered"):
+        import person
+        until = person.change_wait(c.u)
+        if until:
+            d = until.astimezone(store.JST)
+            return c.send(texts.build("reg_staff_locked",
+                                      変更できる日時=f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）{d.hour}時"))
     if k == "edit" and v in EDIT_STEPS:
         store.update_user(c.uid, {"reg_edit_name": EDIT_NAMES[v]})
         mode = "edit" if c.u.get("registered") else "new"

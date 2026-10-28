@@ -44,6 +44,19 @@ def send_mail(to, title, pdf: bytes, pdf_url: str) -> bool:
     return r.status_code < 300
 
 
+def send_notice(to, subject, text) -> bool:
+    """運営あてのお知らせメール（確認リストなど）。"""
+    if not RESEND_API_KEY:
+        log.info("メール未設定のため送らない（お知らせ） %s", subject)
+        return False
+    r = requests.post("https://api.resend.com/emails", timeout=30,
+                      headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                      json={"from": MAIL_FROM, "to": [to], "subject": subject, "text": text})
+    if r.status_code >= 300:
+        log.warning("お知らせメール失敗 %s %s", r.status_code, r.text[:300])
+    return r.status_code < 300
+
+
 def send_fax(number, pdf: bytes) -> bool:
     log.info("FAX未設定のため送らない to=%s", number)
     return False

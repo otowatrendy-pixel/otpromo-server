@@ -295,11 +295,15 @@ def try_consume(uid):
         u["total_docs"] = u.get("total_docs", 0) + 1
         if q["plan"] == "free":
             u["free_used"] = u.get("free_used", 0) + 1
-        if q["plan"] == "unlimited" and u["month_used"] == UNLIMITED_SOFT_CAP:
-            import logging
-            logging.getLogger("store").warning("使い放題の目安 %s 枚に達しました uid=%s", UNLIMITED_SOFT_CAP, uid)
+        over[:] = [q["plan"] == "unlimited" and u["month_used"] == UNLIMITED_SOFT_CAP + 1]
         return True
-    return db().update_tx("users", uid, fn)
+    over = [False]
+    ok = db().update_tx("users", uid, fn)
+    if ok and over[0]:
+        # 止めずに確認リストへ載せ、運営から一度ご連絡する（10/28本人決定）
+        import person
+        person.flag(uid, get_user(uid), "使い放題の目安超え", f"今月 {UNLIMITED_SOFT_CAP} 件分を超えました")
+    return ok
 
 
 def refund(uid):

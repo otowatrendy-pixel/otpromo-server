@@ -3,7 +3,7 @@
 POST /v1/jobs            画像かPDF（multipart の file）→ {job_id}
 GET  /v1/jobs/{id}       → {status, pdf_url, obikae_url, texts, error}
 GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, company}
-PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方）
+PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方）。担当者名・携帯は必須（422 name_required/mobile_check/name_check、429 name_locked）
 POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課金（あとで実装）
 """
 import logging
@@ -17,6 +17,7 @@ import core
 import delivery
 import faxopt
 import store
+import texts
 
 router = APIRouter(prefix="/v1")
 log = logging.getLogger("api")
@@ -122,8 +123,30 @@ class CompanyIn(BaseModel):
 
 @router.put("/me/company")
 def put_company(body: CompanyIn, authorization: str = Header("")):
+    import person
     uid, u = _me(authorization)
     co = body.model_dump()
+    # 担当者名（姓・名）と携帯は必須。名前の確認と変更の制限はLINE版と同じ（10/28本人決定）
+    co["担当者名"] = person.normalize_name(co["担当者名"])
+    mobile = person.normalize_mobile(co["携帯"])
+    if not co["担当者名"]:
+        raise HTTPException(422, {"code": "name_required", "message": texts.raw("reg_staff")})
+    if not mobile:
+        raise HTTPException(422, {"code": "mobile_check", "message": texts.raw("reg_mobile_retry")})
+    co["携帯"] = mobile
+    if co["担当者名"] != (u.get("company") or {}).get("担当者名"):
+        until = person.change_wait(u)
+        if until:
+            d = until.astimezone(store.JST)
+            raise HTTPException(429, {"code": "name_locked", "message": texts.raw(
+                "reg_staff_locked", 変更できる日時=f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）{d.hour}時")})
+        if person.try_name(uid, {**u, "company": {**(u.get("company") or {}), **{k: co[k] for k in ("会社名", "店舗名")}}},
+                           co["担当者名"]) == "retry":
+            raise HTTPException(422, {"code": "name_check", "message": texts.raw("reg_staff_retry")})
+        u = store.get_user(uid)
+        if u.get("shop_code"):
+            import campaign
+            campaign._set_name(u["shop_code"], uid, co["担当者名"])
     delivery = {"method": co.pop("受け取り方"), "email": co.pop("メール"), "fax": co.pop("FAX送り先")}
     co["メール"] = co.pop("担当者メール")  # 名刺に載せるメール（受け取り用とは別）
     co["帯画像"] = (u.get("company") or {}).get("帯画像")

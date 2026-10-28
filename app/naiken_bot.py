@@ -176,8 +176,10 @@ CARD_ASK = {
 
 
 def ask_card(step, first=False):
-    if step == "card_name" and not first:
-        return line.text("ご担当者様のお名前を教えてください。\n（例：山田 花子）")
+    if step == "card_name":
+        return line.text("ご担当者様のお名前を、姓・名のフルネームで教えてください。\n（例：山田 花子）")
+    if step == "card_roman" and first:
+        return texts.build("naiken_card_intro")  # はじめての内見FAX：あいさつとローマ字をまとめて聞く
     return texts.build(CARD_ASK[step])
 
 
@@ -185,17 +187,24 @@ def card_text(c, step, t, co):
     none = t in ("なし", "無し", "ない")
     t = unicodedata.normalize("NFKC", t).strip() if step != "card_name" else t.strip()
     if step == "card_name":
-        co["担当者名"] = t[:20]
+        import person
+        if person.try_name(c.uid, c.u, t) == "retry":
+            return c.send(texts.build("reg_staff_retry"))
+        co = dict(store.get_user(c.uid).get("company") or {})
     elif step == "card_roman":
         co["ローマ字"] = "" if none else t[:40]
     elif step == "card_role":
         co["役職"] = "" if none else t[:40]
     elif step == "card_contact":
         if not none:
-            m = re.search(r"0[789]0-?\d{4}-?\d{4}", t)
+            # 携帯は登録で必須（ここではメールだけ聞く）。書いてあれば携帯も直す
+            import person
             e = re.search(r"[^@\s]+@[^@\s]+\.[^@\s]+", t)
-            co["携帯"] = m.group() if m else ""
             co["メール"] = e.group() if e else ""
+            if person.normalize_mobile(t):
+                co["携帯"] = person.normalize_mobile(t)
+        else:
+            co["メール"] = ""
     elif step == "card_fax":
         if not naiken.fax_ok(t):
             return c.send(texts.build("naiken_card_fax"))
@@ -220,7 +229,7 @@ def card_next(c, step):
     co = dict(c.u.get("company") or {})
     nxt = None
     for s in order[order.index(step) + 1:]:
-        if s == "card_fax" and (co.get("FAX") or (c.u.get("nk") or {}).get("member")):
+        if s == "card_fax" and co.get("FAX"):
             continue
         nxt = s
         break
@@ -230,9 +239,6 @@ def card_next(c, step):
     co["名刺済み"] = True
     store.update_user(c.uid, {"company": co})
     c.refresh()
-    if (c.u.get("nk") or {}).get("member"):
-        import campaign
-        return campaign.member_after_card(c)  # 店舗まとめ割のメンバー：次は受け取り方
     done = texts.build("naiken_card_done")
     if (c.u.get("nk") or {}).get("card_only"):
         _set(c, nk_step=None, nk={})
@@ -321,8 +327,9 @@ def on_postback(c, v):
 
 
 def edit_card(c):
-    _set(c, nk={"card_only": True}, nk_step="card_name")
-    c.send(ask_card("card_name"))
+    first = "card_roman" if (c.u.get("company") or {}).get("担当者名") else "card_name"
+    _set(c, nk={"card_only": True}, nk_step=first)
+    c.send(ask_card(first))
 
 
 def cancel(c):
