@@ -250,7 +250,9 @@ def get_job(jid: str, authorization: str = Header("")):
     job = store.get_job(jid)
     if not job or job["user_id"] != uid:
         raise HTTPException(404)
-    res = {"status": job["status"], "error": job.get("error"), "title": job.get("title"),
+    ca = job.get("created_at")
+    res = {"job_id": jid, "created_at": ca.isoformat() if hasattr(ca, "isoformat") else ca,
+           "status": job["status"], "error": job.get("error"), "title": job.get("title"),
            "pdf_url": None, "obikae_url": None, "texts": None}
     if job["status"] == "done":
         mz = (job.get("texts") or {}).get("motozuke") or {}
