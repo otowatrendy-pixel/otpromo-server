@@ -277,7 +277,7 @@ def estimate_section(f, company: dict, name: str) -> str:
     return f"""<section class="est{dense}">
 <div class=band>初期費用概算書</div>
 <p class=made>{e(shop)}　／　作成日：{made}</p>
-<p class=cust><span></span>様</p>
+<p class=cust><span>{e(company.get("宛名") or "")}</span>様</p>
 <h2>■ 物件情報</h2>
 <table class=kv>{info_rows}</table>
 <h2>■ 算出条件</h2>

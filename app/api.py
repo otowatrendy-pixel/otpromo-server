@@ -2,8 +2,10 @@
 
 POST /v1/jobs            画像かPDF（multipart の file）→ {job_id}
 GET  /v1/jobs/{id}       → {status, pdf_url, obikae_url, texts, error}
+PUT  /v1/jobs/{id}/atena {"atena":"山田 太郎"} 初期費用概算書の宛名（""で空欄。でき上がり後なら作り直す。409 失敗した資料）
+POST /v1/jobs/{id}/fix   {"request":"右下の連絡先を消して"} 業者向け情報の消し直し（無料・件数に数えない）
 GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, company}
-PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方）。担当者名・携帯は必須（422 name_required/mobile_check/name_check、429 name_locked）
+PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方・宛名を聞く）。担当者名・携帯は必須（422 name_required/mobile_check/name_check、429 name_locked）
 POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課金（あとで実装）
 """
 import logging
@@ -149,6 +151,7 @@ class CompanyIn(BaseModel):
     受け取り方: str = "app"
     メール: str = ""
     FAX送り先: str = ""
+    宛名を聞く: bool = True  # false なら初期費用概算書の宛名を聞かない（空欄で作る）
 
 
 @router.put("/me/company")
@@ -213,10 +216,16 @@ def _run_job(uid, jid, data):
             store.update_job(jid, {"status": "failed", "error": "quota"})
             return
         consumed = True
-        out = core.render_documents(bot.company_for_render(uid, u), a["img"], a["result"], a["pages"], a["log"])
+        # 読み取り中に宛名が届いていれば、初期費用概算書に入れる（PUT /v1/jobs/{id}/atena）
+        atena = (store.get_job(jid) or {}).get("宛名") or ""
+        out = core.render_documents({**bot.company_for_render(uid, u), "宛名": atena},
+                                    a["img"], a["result"], a["pages"], a["log"])
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "title": out["title"], "texts": out["texts"], "log": out["log"],
                                "pages": out["pages"], "verdict": v, "result": out["result"]})
+        latest = (store.get_job(jid) or {}).get("宛名") or ""
+        if latest != atena:  # 作っている間に宛名が届いたとき
+            bot.rerender_atena(uid, u, jid, latest)
         _fax_receive(uid, jid)
     except core.InputError as e:
         if consumed:
@@ -282,6 +291,34 @@ def job_fax_receive(jid: str, authorization: str = Header("")):
         raise HTTPException(502, "FAXを送れませんでした。時間をおいてもう一度お試しください")
     store.update_job(jid, {"fax_receive": "sent", "fax_tickets_left": n})
     return get_job(jid, authorization)
+
+
+class AtenaIn(BaseModel):
+    atena: str = ""
+
+
+@router.put("/jobs/{jid}/atena")
+def job_atena(jid: str, body: AtenaIn, authorization: str = Header("")):
+    """初期費用概算書の宛名（"" なら空欄）。読み取り中なら資料を作るときに使い、
+    できあがっていれば宛名だけ差し替えて作り直す（件数に数えない）。更新後の Job を返す。"""
+    uid, u = _me(authorization)
+    job = store.get_job(jid)
+    if not job or job["user_id"] != uid:
+        raise HTTPException(404)
+    atena = bot.parse_atena(body.atena)
+    if job["status"] == "done":
+        if not bot.rerender_atena(uid, u, jid, atena):
+            raise HTTPException(410, "資料の保存期間が過ぎたため、宛名を変えられませんでした")
+    elif job["status"] == "failed":
+        raise HTTPException(409, "この資料は作れませんでした")
+    else:
+        store.update_job(jid, {"宛名": atena})
+        # 書き込みの直前に資料ができあがっていた場合に備えて、もう一度確かめる
+        if (store.get_job(jid) or {}).get("status") == "done":
+            bot.rerender_atena(uid, u, jid, atena)
+    res = get_job(jid, authorization)
+    res["atena"] = atena
+    return res
 
 
 class FixIn(BaseModel):

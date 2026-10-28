@@ -8,6 +8,7 @@ import logging
 import re
 import tempfile
 import threading
+import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -24,6 +25,7 @@ import naiken_bot
 import store
 import texts
 from PIL import Image
+import schema
 from schema import Result
 
 log = logging.getLogger("bot")
@@ -363,7 +365,10 @@ def on_postback(c, data):
         show = (c.u.get("company") or {}).get("携帯を載せる", True)
         toggle = {"label": "携帯を図面に載せない" if show else "携帯を図面に載せる",
                   "action": "postback edit=mobile_hide" if show else "postback edit=mobile_show"}
-        return c.send(texts.build("reg_edit", extra_buttons=[toggle]))
+        ask = asks_name(c.u)
+        toggle2 = {"label": "宛名を聞かない" if ask else "宛名を毎回聞く",
+                   "action": "postback edit=atena_off" if ask else "postback edit=atena_on"}
+        return c.send(texts.build("reg_edit", extra_buttons=[toggle, toggle2]))
     if k == "edit" and v in ("mobile_hide", "mobile_show") and c.u.get("registered"):
         show = v == "mobile_show"
         set_company(c, 携帯を載せる=show)
@@ -371,6 +376,12 @@ def on_postback(c, data):
             "これから作る帯替え図面に、携帯番号を載せます。" if show else
             "これから作る帯替え図面には、携帯番号を載せません（「担当：お名前」だけ載ります）。\n"
             "内見申込書は管理会社への連絡用のため、携帯番号はこれまでどおり載ります。"))
+    if k == "edit" and v in ("atena_off", "atena_on") and c.u.get("registered"):
+        on = v == "atena_on"
+        set_company(c, 宛名を聞く=on)
+        return c.send(line.text(
+            "これから募集図面を送るたびに、初期費用概算書の宛名をお聞きします。" if on else
+            "これからは宛名をお聞きせず、初期費用概算書の宛名は空欄で作ります（手書きでご記入いただけます）。"))
     if k == "reg" and v == "show":
         return c.send(confirm_message(c.u))
     if k == "edit" and v == "staff" and c.u.get("registered"):
@@ -495,6 +506,9 @@ def on_text(c, t):
             store.update_user(c.uid, {"nk": {}, "nk_step": "free", "nk_fid": None})
             c.refresh()
         return naiken_bot.on_text(c, t)
+    if c.u.get("name_wait") and not FIX_WORDS.search(t) and norm(t) not in MENU_WORDS \
+            and norm(t).upper() not in PROMO and norm(t) != monitor.CODE and "@" not in t and "http" not in t:
+        return on_name(c, t)
     # リッチメニューが使えないときも、文字で登録内容の変更を開けるように
     if c.u.get("registered") and norm(t) in ("変更", "登録内容の変更", "登録変更", "設定", "メニュー"):
         return on_postback(c, "reg=edit")
@@ -602,6 +616,8 @@ def process(c, data, held=None):
 
     jid, job = store.new_job(c.uid, "line")
     store.update_job(jid, {"status": "processing"})
+    if not held and asks_name(c.u):
+        return analyze_and_ask(c, jid, data)
     done = threading.Event()
 
     def slow():
@@ -609,7 +625,6 @@ def process(c, data, held=None):
             c.send(texts.build("deliver_slow"))
     threading.Thread(target=slow, daemon=True).start()
 
-    consumed = False
     try:
         if held:
             img, _ = core.load_image(data)
@@ -623,35 +638,137 @@ def process(c, data, held=None):
                 store.update_job(jid, {"status": "failed", "error": v, "log": a["log"]})
                 return c.send(texts.build({"blurry": "err_blurry", "not_maisoku": "err_not_maisoku",
                                            "sale": "err_sale"}[v]))
-        if not store.try_consume(c.uid):
-            done.set()
-            store.update_job(jid, {"status": "failed", "error": "quota"})
-            return c.send(texts.build("plan_needed", urls=plan_urls(c)))
-        consumed = True
-        out = core.render_documents(company_for_render(c.uid, c.u), a["img"], a["result"], a["pages"], a["log"])
-        store.save_files(jid, out)
-        store.update_job(jid, {"status": "done", "title": out["title"], "texts": out["texts"], "log": out["log"],
-                               "pages": out["pages"], "result": out["result"],
-                               "verdict": core.verdict(a["result"])})
-        recent = [{"id": jid, "title": out["title"], "at": store.now()}] + [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
-        store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:12]})
-        c.refresh()
         done.set()
-        deliver(c, jid)
-        log.info("作成 %s %s", jid, json.dumps(out["log"], ensure_ascii=False))
+        finish(c, jid, a)
     except core.InputError as e:
         done.set()
-        if consumed:
-            store.refund(c.uid)
         store.update_job(jid, {"status": "failed", "error": str(e)})
         c.send(line.text(str(e) + "\n\n※今回の分は、件数に数えていません。"))
     except Exception as e:
         done.set()
         log.exception("資料づくりで例外")
+        store.update_job(jid, {"status": "failed", "error": repr(e)[:500]})
+        c.send(texts.build("err_system"))
+
+
+def finish(c, jid, a, atena="", after=()):
+    """読み取り結果から資料を作り、件数を1つ使って届ける。atena は初期費用概算書の宛名（空なら空欄）。"""
+    consumed = False
+    try:
+        if not store.try_consume(c.uid):
+            store.update_job(jid, {"status": "failed", "error": "quota"})
+            return c.send(texts.build("plan_needed", urls=plan_urls(c)), *after)
+        consumed = True
+        company = {**company_for_render(c.uid, c.u), "宛名": atena}
+        out = core.render_documents(company, a["img"], a["result"], a["pages"], a["log"])
+        store.save_files(jid, out)
+        store.update_job(jid, {"status": "done", "title": out["title"], "texts": out["texts"], "log": out["log"],
+                               "pages": out["pages"], "result": out["result"], "宛名": atena,
+                               "verdict": core.verdict(a["result"])})
+        recent = [{"id": jid, "title": out["title"], "at": store.now()}] + [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
+        store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:12]})
+        c.refresh()
+        deliver(c, jid, after=after)
+        log.info("作成 %s %s", jid, json.dumps(out["log"], ensure_ascii=False))
+    except Exception as e:
+        log.exception("資料づくりで例外")
         if consumed:
             store.refund(c.uid)
         store.update_job(jid, {"status": "failed", "error": repr(e)[:500]})
-        c.send(texts.build("err_system"))
+        c.send(texts.build("err_system"), *after)
+
+
+# ---------- 初期費用概算書の宛名（10/28本人決定） ----------
+# 募集図面が届いたらすぐ宛名を聞き、その間に読み取りを進める。返事の名前を概算書の「＿＿様」に入れる。
+# 「不要」なら空欄。「変更」から聞かない設定にできる（company.宛名を聞く）。
+
+NO_NAME = {"不要", "ふよう", "なし", "無し", "空欄", "いらない", "要らない", "結構です", "けっこうです", "スキップ"}
+NAME_WAIT_SECONDS = 90
+
+
+def asks_name(u):
+    return (u.get("company") or {}).get("宛名を聞く", True)
+
+
+def _job_label(jid):
+    """宛名をお聞きする物件の呼び方。読み取りが済んでいれば物件名。"""
+    f = ((store.get_job(jid) or {}).get("result") or {}).get("事実") or {}
+    name = " ".join(x for x in (f.get("物件名"), f.get("号室") and f"{f['号室']}号室") if x)
+    return f"「{name}」" if name else "先に送っていただいた募集図面"
+
+
+def name_question(queue=(), kind="first"):
+    """宛名の聞き方。kind: first（最初）・more（ほかに待ちがあるときに届いた）・next（1件届けたあと続けて）。"""
+    tail = "宛名を空欄のままでよい場合は「不要」と送ってください。"
+    if kind == "first" or not queue:
+        t = "お客様のお名前（初期費用概算書の宛名）を送ってください。\n" + tail
+    elif kind == "more":
+        t = (f"この募集図面も受け付けました（宛名をお待ちしているのは{len(queue)}件です）。\n"
+             f"届いた順にお聞きしています。まず{_job_label(queue[0])}の宛名を送ってください。\n" + tail)
+    else:
+        t = f"続けて、{_job_label(queue[0])}の宛名を送ってください（あと{len(queue)}件）。\n" + tail
+    msg = line.text(t)
+    msg["quickReply"] = {"items": [{"type": "action", "action": {"type": "message", "label": "不要", "text": "不要"}}]}
+    return msg
+
+
+def analyze_and_ask(c, jid, data):
+    """宛名を聞いてから、読み取りを先に進めておく。結果は job に保存し、宛名が届いたら finish する。"""
+    waiting = [j for j in (c.u.get("name_wait") or []) if j != jid]
+    store.update_user(c.uid, {"name_wait": waiting + [jid]})
+    c.send(name_question(waiting + [jid], "more") if waiting else name_question())
+    try:
+        a = core.analyze(data)
+        v = core.verdict(a["result"])
+        if v not in ("ok", "commercial"):
+            store.update_job(jid, {"status": "failed", "error": v, "log": a["log"]})
+            return
+        buf = io.BytesIO()
+        a["img"].save(buf, "PNG")
+        store.db().put_file(f"jobs/{jid}/analyzed.png", buf.getvalue(), "image/png")
+        store.update_job(jid, {"status": "analyzed", "result": schema.for_store(a["result"]),
+                               "pages": a["pages"], "log": a["log"]})
+    except core.InputError as e:
+        store.update_job(jid, {"status": "failed", "error": "input:" + str(e)})
+    except Exception as e:
+        log.exception("読み取りで例外")
+        store.update_job(jid, {"status": "failed", "error": repr(e)[:500]})
+
+
+def parse_atena(t):
+    s = unicodedata.normalize("NFKC", t or "").strip().strip("「」『』\"'")
+    if s in NO_NAME or norm(s) in NO_NAME:
+        return ""
+    s = re.sub(r"\s*(様|さま|サマ|殿)$", "", s)
+    return s[:30]
+
+
+def on_name(c, t):
+    """宛名の返事。いちばん古い待ちの資料に入れて作る。"""
+    queue = list(c.u.get("name_wait") or [])
+    jid = queue.pop(0)
+    store.update_user(c.uid, {"name_wait": queue})
+    c.refresh()
+    atena = parse_atena(t)
+    line.loading(c.line_uid, 60)
+    after = [name_question(queue, "next")] if queue else []
+    job = store.get_job(jid)
+    t0 = time.monotonic()
+    while job and job.get("status") == "processing" and time.monotonic() - t0 < NAME_WAIT_SECONDS:
+        time.sleep(1.5)
+        job = store.get_job(jid)
+    if not job or job.get("status") == "processing":
+        return c.send(texts.build("err_system"), *after)
+    if job["status"] == "failed":
+        err = job.get("error") or ""
+        if err.startswith("input:"):
+            return c.send(line.text(err[6:] + "\n\n※今回の分は、件数に数えていません。"), *after)
+        mid = {"blurry": "err_blurry", "not_maisoku": "err_not_maisoku", "sale": "err_sale"}.get(err, "err_system")
+        return c.send(texts.build(mid), *after)
+    png = store.db().get_file(f"jobs/{jid}/analyzed.png")
+    a = {"img": Image.open(io.BytesIO(png)).convert("RGB"), "pages": job.get("pages") or 0,
+         "result": Result.model_validate(job["result"]), "log": job.get("log") or {}}
+    finish(c, jid, a, atena, after)
 
 
 def _safe_pending(c, kind):
@@ -679,7 +796,7 @@ def run_pending(c, kind=None):
 
 # ---------- お届け ----------
 
-def deliver(c, jid):
+def deliver(c, jid, after=()):
     job = store.get_job(jid)
     u = c.u
     d = u.get("delivery") or {}
@@ -702,21 +819,21 @@ def deliver(c, jid):
     if method == "email" and d.get("email"):
         pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
         if delivery.send_mail(d["email"], job["title"], pdf, pdf_url):
-            return c.send(*_as_list(img), texts.build("deliver_mail", メールアドレス=d["email"], **common))
+            return c.send(*_as_list(img), texts.build("deliver_mail", メールアドレス=d["email"], **common), *after)
     if method == "fax":
         how, n = recvfax_send(c.uid, u, jid, job)
         if how == "sent":
             add, btns = recvfax_low(c.uid, n)
             common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, add) if x)
             common["extra_buttons"] = list(common["extra_buttons"] or []) + btns
-            return c.send(*_as_list(img), texts.build("deliver_fax", FAX番号=d["fax"], **common))
+            return c.send(*_as_list(img), texts.build("deliver_fax", FAX番号=d["fax"], **common), *after)
         if how == "empty":
             # 回数券がないときはFAXを送らずLINEで届け、買えばこの資料もFAXで送る
             store.update_user(c.uid, {"recvfax_wait": jid})
             common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, texts.raw("recvfax_empty")) if x)
             common["extra_buttons"] = list(common["extra_buttons"] or []) + texts.buttons_of("recvfax_empty")
             common["urls"] = plan_urls(c)
-    c.send(*_as_list(img), texts.build("deliver_line", リンク=pdf_url, 有効期限=f"{exp.month}月{exp.day}日", **common))
+    c.send(*_as_list(img), texts.build("deliver_line", リンク=pdf_url, 有効期限=f"{exp.month}月{exp.day}日", **common), *after)
 
 
 def _as_list(x):
@@ -750,6 +867,8 @@ def recvfax_low(uid, n):
     return t, texts.buttons_of("recvfax_low")
 
 
+MENU_WORDS = {"変更", "登録内容の変更", "登録変更", "設定", "メニュー", "担当者", "担当者名", "担当者名の変更",
+              "名前の変更", "携帯の変更"}
 FIX_WORDS = re.compile(r"消して|消す|消去|削除|隠して|見えないように|外して|取って|塗りつぶ")
 
 
@@ -778,6 +897,20 @@ def do_fix(uid, u, jid, t):
     store.update_job(jid, {"result": out["result"], "log": out["log"], "fixes": fixes})
     log.info("直し %s %s", jid, json.dumps(r["log"], ensure_ascii=False, default=str))
     return {"status": "done", "texts": r["texts"], "note": r["note"]}
+
+
+def rerender_atena(uid, u, jid, atena):
+    """できあがった資料の宛名だけを差し替えて作り直す（AIは使わない・件数に数えない）。アプリの宛名入力用。"""
+    job = store.get_job(jid)
+    page = store.get_page(jid)
+    if not job or job.get("status") != "done" or not page:
+        return False
+    company = {**company_for_render(uid, u), "宛名": atena}
+    out = core.render_documents(company, Image.open(io.BytesIO(page)).convert("RGB"),
+                                Result.model_validate(job["result"]), job.get("pages") or 0, job.get("log") or {})
+    store.save_files(jid, out)
+    store.update_job(jid, {"宛名": atena, "log": out["log"]})
+    return True
 
 
 def fix_last(c, t):

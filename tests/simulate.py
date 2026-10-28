@@ -100,11 +100,19 @@ from PIL import Image  # noqa: E402
 im = Image.open(io.BytesIO(img)).convert("RGB")
 buf = io.BytesIO(); im.save(buf, "PDF", save_all=True, append_images=[im])
 image(buf.getvalue(), "maisoku.pdf")
+# 宛名の返事（届いた順）。1件目は名前、2件目は空欄
+text("山田 太郎 様")
+text("不要")
+_j = [store.get_job(r["id"]) for r in store.get_user("LUabc")["recent_jobs"][:2]]
+print("宛名:", [j.get("宛名") for j in _j])
+assert [j.get("宛名") for j in _j] == ["", "山田 太郎"], "宛名が入っていない"
 
 text("FAX15")
 pb("plan=status")
 pb("send=mail")
 text("test@example.com")
+pb("reg=edit")
+pb("edit=atena_off")   # 宛名を聞かない設定
 for _ in range(10):
     image(img)
 pb("edit=color")
