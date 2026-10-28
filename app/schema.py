@@ -71,6 +71,8 @@ class Facts(BaseModel):
 class Band(BaseModel):
     """元付業者の会社情報の帯（ふつうは下端）の位置。画像の高さを1とした割合。"""
     見つかった: bool
+    上端_写真: Optional[List[List[float]]] = Field(
+        None, description="写真のとき、帯の上の縁の左端と右端の位置。元の画像の幅・高さを1とした[x, y]を2つ")
     上端: Optional[float] = None
     下端: Optional[float] = None
 

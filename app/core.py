@@ -150,18 +150,32 @@ def make_page(img: Image.Image, result: Result, camera: bool = False) -> tuple:
     """帯替えに使う図面の画像を作る。スマホ写真なら、用紙の切り出し・台形補正・白さの補正をする。
     図面の文字は描き直さず、画素の位置と明るさだけを整える。戻り値は (画像, 補正の内容)。"""
     paper = result.用紙
+    out = None
     if paper.写真 and paper.四隅 and len(paper.四隅) == 4:
         try:
-            return scan.scan_with_corners(img, paper.四隅)
+            out = scan.scan_with_corners(img, paper.四隅)
         except Exception:  # 四隅がおかしいときは、画像から探す方法に切り替える
-            pass
-    im = img.copy()
-    if camera:
-        im.info["camera"] = True
-    try:
-        return scan.scan(im)
-    except Exception:
-        return img, "補正なし"
+            out = None
+    if out is None:
+        im = img.copy()
+        if camera:
+            im.info["camera"] = True
+        try:
+            out = scan.scan(im)
+        except Exception:
+            return img, "補正なし"
+    page, fix, M = out
+    # 帯の上の縁を、元の写真の位置から整えた図面の位置に移す（AIの「用紙に対する割合」より正確）
+    b = result.帯
+    if M is not None and b.見つかった and b.上端_写真 and len(b.上端_写真) == 2:
+        W, H = img.size
+        ys = [y for _, y in scan.to_page(M, [[x * W, y * H] for x, y in b.上端_写真])]
+        top = min(ys) / page.height
+        if 0.5 <= top < 0.98:
+            b.上端 = top
+            # 帯はふつう用紙の下端まで続くので、AIの下端が下のほうなら下端までにする
+            b.下端 = 1.0 if (b.下端 or 1.0) >= 0.85 else max(b.下端, min(1.0, top + 0.06))
+    return page, fix
 
 
 def verdict(result: Result) -> str:

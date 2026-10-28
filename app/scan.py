@@ -174,7 +174,7 @@ def clean(bgr: np.ndarray) -> np.ndarray:
     return cv2.addWeighted(out, 1.3, blur, -0.3, 0)
 
 
-def _trim_dark_edges(bgr: np.ndarray, limit: float = 0.03) -> np.ndarray:
+def _trim_dark_edges(bgr: np.ndarray, limit: float = 0.03):
     """用紙が写真の端まで写っているとき、外側に残ったモニターの枠などの暗い帯を切る（各辺最大3%）。"""
     g = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     h, w = g.shape
@@ -191,7 +191,7 @@ def _trim_dark_edges(bgr: np.ndarray, limit: float = 0.03) -> np.ndarray:
     bottom = min(count(g[::-1]), int(h * limit))
     left = min(count(g.T), int(w * limit))
     right = min(count(g.T[::-1]), int(w * limit))
-    return bgr[top:h - bottom, left:w - right]
+    return bgr[top:h - bottom, left:w - right], (left, top)
 
 
 def _looks_like_photo_of_page(bgr: np.ndarray, q: np.ndarray) -> bool:
@@ -210,45 +210,101 @@ def _looks_like_photo_of_page(bgr: np.ndarray, q: np.ndarray) -> bool:
     return g[inside == 0].mean() < 0.75 * g[inside == 1].mean()
 
 
-def scan(img: Image.Image) -> Tuple[Image.Image, str]:
-    """写真を整えた画像と、どんな補正をしたか（台形補正あり／明るさ補正のみ／補正なし）を返す。
+def scan(img: Image.Image):
+    """写真を整えた画像、どんな補正をしたか（台形補正あり／明るさ補正のみ／補正なし）、
+    元の写真の座標を整えた画像の座標に移す変換（3×3。台形補正しなければ None）を返す。
     PDFやスキャンした図面は、そのまま返す。"""
     bgr = cv2.cvtColor(np.asarray(img.convert("RGB")), cv2.COLOR_RGB2BGR)
     q = find_page(bgr)
     if q is not None and _looks_like_photo_of_page(bgr, q):
-        w, h = _size(q)
-        dst = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype="float32")
-        bgr = cv2.warpPerspective(bgr, cv2.getPerspectiveTransform(q, dst), (w, h),
-                                  flags=cv2.INTER_AREA, borderMode=cv2.BORDER_REPLICATE)
-        bgr = _trim_dark_edges(bgr)
-        status = "台形補正あり"
-    elif is_camera(img):
-        status = "明るさ補正のみ"
-    else:
-        return img, "補正なし"
-    out = clean(bgr)
-    return Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB)), status
+        out, M = _warp_and_clean(bgr, q)
+        return out, "台形補正あり", M
+    if is_camera(img):
+        return Image.fromarray(cv2.cvtColor(clean(bgr), cv2.COLOR_BGR2RGB)), "明るさ補正のみ", None
+    return img, "補正なし", None
 
 
-def scan_with_corners(img: Image.Image, corners) -> Tuple[Image.Image, str]:
+def _support(gray: np.ndarray, q: np.ndarray) -> float:
+    """四角形の4辺が、どれだけ実際の用紙の縁（内側が明るく外側が暗い境目）に沿っているか。"""
+    g = cv2.GaussianBlur(gray, (5, 5), 0).astype(np.float32)
+    h, w = g.shape
+    q = _order(q)
+    center = q.mean(0)
+    t = np.linspace(0.05, 0.95, 120)[:, None]
+    scores = []
+    for i in range(4):
+        a, b = q[i], q[(i + 1) % 4]
+        d = (b - a) / max(1e-6, np.linalg.norm(b - a))
+        n = np.array([-d[1], d[0]])
+        if np.dot(center - (a + b) / 2, n) < 0:
+            n = -n
+        pts = a + (b - a) * t
+        ok = (pts[:, 0] > 4) & (pts[:, 0] < w - 5) & (pts[:, 1] > 4) & (pts[:, 1] < h - 5)
+        if ok.sum() < 20:  # 辺が写真の外にある（用紙が写真の端で切れている）ときは中立に
+            scores.append(0.0)
+            continue
+        pts = pts[ok]
+        ins = np.rint(pts + n * 4).astype(int)
+        out = np.rint(pts - n * 4).astype(int)
+        scores.append(float(np.median(g[ins[:, 1], ins[:, 0]] - g[out[:, 1], out[:, 0]])))
+    return float(np.mean(scores))
+
+
+def _plausible(q: np.ndarray, size) -> bool:
+    """AIの四隅が四角形として不自然でないか（凸で、ある程度の大きさがあり、辺の長さが極端でない）。"""
+    w, h = size
+    if not cv2.isContourConvex(q.astype(np.int32)):
+        return False
+    if cv2.contourArea(q) < 0.15 * w * h:
+        return False
+    sides = [np.linalg.norm(q[i] - q[(i + 1) % 4]) for i in range(4)]
+    return min(sides[0], sides[2]) > 0.5 * max(sides[0], sides[2]) and \
+        min(sides[1], sides[3]) > 0.5 * max(sides[1], sides[3])
+
+
+def scan_with_corners(img: Image.Image, corners):
     """AIが答えた用紙の四隅（画像の幅・高さを1とした左上・右上・右下・左下）から整える。
-    四隅はおおよその位置なので、近く（2.5%以内）の実際の用紙の縁に合わせてから台形補正する。"""
+    四隅はおおよその位置なので、近く（5%以内）の実際の用紙の縁に合わせてから台形補正する。
+    画像処理で見つけた四隅のほうが用紙の縁によく沿っていれば、そちらを使う。"""
     bgr = cv2.cvtColor(np.asarray(img.convert("RGB")), cv2.COLOR_RGB2BGR)
     h, w = bgr.shape[:2]
     scale = 1000 / max(h, w)
     small = cv2.resize(bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-    q = np.array([[x * small.shape[1], y * small.shape[0]] for x, y in corners], dtype="float32")
-    q = _refine(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), q, radius=0.025, paper_check=False) / scale
-    return _warp_and_clean(bgr, _order(q)), "台形補正あり（AIの四隅）"
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    cands = []
+    q = _order(np.array([[x * small.shape[1], y * small.shape[0]] for x, y in corners], dtype="float32"))
+    if _plausible(q, small.shape[1::-1]):
+        q = _refine(gray, q, radius=0.05, paper_check=False)
+        cands.append((_support(gray, q), q, "台形補正あり（AIの四隅）"))
+    cv_q = find_page(bgr)
+    if cv_q is not None and _looks_like_photo_of_page(bgr, cv_q):
+        sq = cv_q * scale
+        cands.append((_support(gray, sq), sq, "台形補正あり"))
+    if not cands:
+        return scan(img)
+    # 画像処理の四隅は用紙の白さも確かめているので、縁への沿い方が同じくらいならそちらを優先する
+    if len(cands) == 2 and cands[1][0] >= 0.85 * cands[0][0]:
+        _, q, status = cands[1]
+    else:
+        _, q, status = max(cands, key=lambda c: c[0])
+    out, M = _warp_and_clean(bgr, _order(q / scale))
+    return out, status, M
 
 
-def _warp_and_clean(bgr: np.ndarray, q: np.ndarray) -> Image.Image:
+def _warp_and_clean(bgr: np.ndarray, q: np.ndarray):
     w, h = _size(q)
     dst = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype="float32")
-    bgr = cv2.warpPerspective(bgr, cv2.getPerspectiveTransform(q, dst), (w, h),
-                              flags=cv2.INTER_AREA, borderMode=cv2.BORDER_REPLICATE)
-    bgr = _trim_dark_edges(bgr)
-    return Image.fromarray(cv2.cvtColor(clean(bgr), cv2.COLOR_BGR2RGB))
+    M = cv2.getPerspectiveTransform(q, dst)
+    bgr = cv2.warpPerspective(bgr, M, (w, h), flags=cv2.INTER_AREA, borderMode=cv2.BORDER_REPLICATE)
+    bgr, (dx, dy) = _trim_dark_edges(bgr)
+    M = np.array([[1, 0, -dx], [0, 1, -dy], [0, 0, 1]], dtype=np.float64) @ M
+    return Image.fromarray(cv2.cvtColor(clean(bgr), cv2.COLOR_BGR2RGB)), M
+
+
+def to_page(M, pts):
+    """元の写真の点 [[x, y], ...]（ピクセル）を、整えた画像の点に移す。"""
+    a = cv2.perspectiveTransform(np.array([pts], dtype=np.float64), M)
+    return a[0].tolist()
 
 
 def is_camera(img: Image.Image) -> bool:

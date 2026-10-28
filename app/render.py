@@ -111,8 +111,13 @@ def draw_band(w: int, h: int, company: dict) -> Image.Image:
         return out
     band = Image.new("RGB", (w, h), theme(company)["main"])
     d = ImageDraw.Draw(band)
-    big, small = _font(int(h * 0.36)), _font(int(h * 0.2))
     pad = int(h * 0.15)
+    # 帯が縦に長いときに文字が大きくなりすぎて、会社名と電話番号が重ならないよう幅で抑える
+    size = int(h * 0.36)
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    while size > 10 and probe.textlength(company["会社名"] + f"TEL {company['電話']}", font=_font(size)) > w - pad * 4:
+        size -= 2
+    big, small = _font(size), _font(min(int(h * 0.2), int(size * 0.6)))
     d.text((pad, pad), company["会社名"], font=big, fill="white")
     left = company["免許"] + (f"　{staff}" if staff else "")
     d.text((pad, h - pad - small.size), left, font=small, fill="white")
@@ -134,25 +139,36 @@ def staff_line(company: dict) -> str:
     return f"担当：{name}" + (f"／{mobile}" if mobile and show else "")
 
 
-def _snap_top(img: Image.Image, top: int) -> int:
+def _snap_top(img: Image.Image, top: int, window: float = 0.03) -> int:
     """AIが答える帯の上端はおおよその位置なので、画像の中の実際の境目に合わせる。
     近く（高さの±3%）に帯の枠線（横幅の半分以上ある横線）があればそのすぐ上に、
     なければ文字のない行（行間）に合わせる。どちらもなければ、少し上に広げる。"""
     w, h = img.size
     g = ImageOps.grayscale(img).resize((min(w, 800), h))
     sw = g.size[0]
-    lo, hi = max(0, top - int(h * 0.03)), min(h - 1, top + int(h * 0.03))
+    lo, hi = max(0, top - int(h * window)), min(h - 1, top + int(h * window))
     rows = g.crop((0, lo, sw, hi + 1))
     data = list(rows.getdata()) if hasattr(rows, "getdata") else []
     ink = [sum(1 for v in data[i * sw:(i + 1) * sw] if v < 200) / sw for i in range(hi - lo + 1)]
     lines = [lo + i for i, f in enumerate(ink) if f > 0.5]
     if lines:
         y = min(lines, key=lambda r: abs(r - top))
-        return max(0, y - 2)
+        return _above_cut_text(ink, lo, max(0, y - 2), int(h * 0.04))
     gaps = [lo + i for i, f in enumerate(ink) if f < 0.003 and lo + i <= top]
     if gaps:
         return max(gaps)
-    return max(0, top - int(h * 0.01))
+    return _above_cut_text(ink, lo, max(0, top - int(h * 0.01)), int(h * 0.04))
+
+
+def _above_cut_text(ink, lo: int, top: int, reach: int) -> int:
+    """帯のすぐ上の行に文字がかかっていたら（上半分だけ残るのを防ぐため）、
+    上に向かっていちばん文字の少ない行（行間）まで帯を広げる。"""
+    i = top - lo - 1
+    if i < 0 or i >= len(ink) or ink[i] < 0.01:
+        return top
+    stop = max(0, i - reach)
+    best = min(range(stop, i + 1), key=lambda k: (ink[k], -k))
+    return lo + best if ink[best] < ink[i] * 0.5 else top
 
 
 def obikae(img: Image.Image, r: Result, company: dict) -> Image.Image:
@@ -162,7 +178,8 @@ def obikae(img: Image.Image, r: Result, company: dict) -> Image.Image:
     if b.見つかった and b.上端 is not None and b.下端 is not None and 0.6 <= b.上端 < b.下端 <= 1.0:
         top, bottom = int(h * b.上端), int(h * b.下端)
         # 読み取った位置を、近くの枠線か行間に合わせる（上の文字の行を切らない）
-        top = _snap_top(img, top)
+        # 写真から切り出した図面は、AIの答える帯の位置のずれが大きいので広めに探す
+        top = _snap_top(img, top, 0.03)
         band = draw_band(w, bottom - top if bottom - top > h * 0.06 else int(h * 0.08), company)
         out = img.copy()
         out.paste(band, (0, top))
