@@ -48,7 +48,14 @@ def send_mail(to, title, files, pdf_url: str) -> bool:
                                             for n, b in files]})
     if r.status_code >= 300:
         log.warning("メール送信失敗 %s %s", r.status_code, r.text[:300])
+    else:
+        _count()
     return r.status_code < 300
+
+
+def _count():
+    import usage
+    usage.count("mail")
 
 
 def _safe_name(name):
@@ -66,6 +73,8 @@ def send_notice(to, subject, text) -> bool:
                       json={"from": MAIL_FROM, "to": [to], "subject": subject, "text": text})
     if r.status_code >= 300:
         log.warning("お知らせメール失敗 %s %s", r.status_code, r.text[:300])
+    else:
+        _count()
     return r.status_code < 300
 
 

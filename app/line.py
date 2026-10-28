@@ -35,10 +35,19 @@ def reply(token, messages) -> bool:
     return r.status_code == 200
 
 
+# push のたびに呼ぶ（usage.on_push：通数を数える・上限で送れなかったらためる）
+on_push = None
+
+
 def push(to, messages) -> bool:
     r = requests.post(f"{API}/message/push", headers=_h(), json={"to": to, "messages": messages[:5]}, timeout=20)
     if r.status_code != 200:
         log.warning("push失敗 %s %s", r.status_code, r.text[:300])
+    if on_push:
+        try:
+            on_push(to, messages[:5], r.status_code, r.text)
+        except Exception:
+            log.exception("on_push")
     return r.status_code == 200
 
 

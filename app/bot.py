@@ -24,6 +24,7 @@ import monitor
 import naiken_bot
 import store
 import texts
+import usage
 from PIL import Image
 import schema
 from schema import Result
@@ -87,7 +88,13 @@ class Ctx:
     def send(self, *messages):
         with self.lock:
             tok, self.token = self.token, None
-        return line.reply_or_push(tok, self.line_uid, list(messages))
+        messages = list(messages)
+        if tok and self.u.get("held_pushes"):
+            # 通数の上限で送れなかったお知らせを、応答（通数に数えない）と一緒に届ける
+            messages, rest = usage.with_held(self.u, messages)
+            store.update_user(self.uid, {"held_pushes": rest, "held_pushes_at": self.u.get("held_pushes_at") if rest else None})
+            self.u = {**self.u, "held_pushes": rest}
+        return line.reply_or_push(tok, self.line_uid, messages)
 
     def refresh(self):
         self.u = store.get_user(self.uid)
@@ -833,17 +840,25 @@ def deliver(c, jid, after=()):
     remain = "\n\n".join(x for x in extra + [remain] if x)
     # 何枚か続けて送られても、各資料の「この物件で内見FAX」はその物件で始まるよう資料IDを入れる
     common = dict(物件名=job["title"], のこり枚数の案内=remain, extra_buttons=remain_buttons(u), 資料ID=jid)
+    pre = []
     if method == "email" and d.get("email"):
         if delivery.send_mail(d["email"], job["title"], store.pdf_files(jid, job, job["title"]),
                               store.file_url(jid, job, "shiryou.pdf")):
             return c.send(*_as_list(img), texts.build("deliver_mail", メールアドレス=d["email"], **common), *after)
+        if delivery.mail_ready():
+            # 上限超えなどで送れなかったときは、LINEで届けて一言添える（運営にも知らせる）
+            usage.count("mail_fallback")
+            usage.notify_admin("メールが送れず、資料をLINEで届けました",
+                               f"お客様ID：{c.uid}\n送り先：{d['email']}\n物件：{job['title']}\n"
+                               f"Resendの上限（1日100通・月3,000通）に達したか、送り先の誤りの可能性があります。")
+            pre = [line.text(texts.note("deliver_mail_failed") or "メールでお送りできなかったため、LINEでお届けします。")]
     if method == "fax" and d.get("fax"):
         # FAXの前に帯替え図面を見てもらい、「このままFAXする」で送る（10/28本人決定）
         t = store.now()
         store.update_job(jid, {"recvfax": "confirm", "recvfax_at": t})
         store.update_user(c.uid, {"recvfax_confirming": jid, "recvfax_remind_at": t + timedelta(minutes=REMIND_MINUTES)})
         return c.send(*_as_list(img), recvfax_confirm(jid, job), *after)
-    c.send(*_as_list(img), texts.build("deliver_line", お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
+    c.send(*pre, *_as_list(img), texts.build("deliver_line", お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
                                        有効期限=f"{exp.month}月{exp.day}日", **common), *after)
 
 
@@ -1103,12 +1118,35 @@ def notify(uid, mid, kw):
     elif mid == "plan_annual_renew":
         kw["urls"] = {"変更・解約": billing.portal_url(uid), "Stripeのお客様ページ": billing.portal_url(uid)}
     urls = kw.pop("urls", None)
-    line.push(u["line_uid"], [texts.build(mid, urls=urls, **kw)])
+    if not line.push(u["line_uid"], [texts.build(mid, urls=urls, **kw)]):
+        push_failed(uid, u, mid, kw, urls)
     if mid == "recvfax_done" and u.get("recvfax_wait"):
         pool.submit(_send_waiting_fax, uid)
     if mid == "plan_started" and u.get("pending"):
         c = Ctx({"source": {"userId": u["line_uid"]}})
         pool.submit(_safe_pending, c, None)
+
+
+# お金にかかわるお知らせは、LINEで送れなかったときメールでも送る（10/28本人決定）
+MONEY_NOTICES = {"plan_payment_failed", "plan_started", "plan_upgraded", "plan_downgrade_scheduled", "plan_canceled",
+                 "plan_annual_renew", "recvfax_done", "addfax_done", "shinjin_started"}
+IMPORTANT_NOTICES = {"naiken_sent", "naiken_failed"}
+
+
+def push_failed(uid, u, mid, kw, urls=None):
+    """push が送れなかったとき（上限など）。お知らせ自体は usage.hold でためてあり、次の応答で届く。"""
+    if mid in MONEY_NOTICES:
+        to = (u.get("delivery") or {}).get("email") or (u.get("company") or {}).get("担当者メール")
+        if to:
+            body = texts.raw(mid, **kw)
+            if urls:
+                body += "\n\n" + "\n".join(f"{k}：{v}" for k, v in urls.items())
+            delivery.send_notice(to, "【1分資料】大切なお知らせ", body + "\n\n――――――――――\n1分資料（otpromo.com）\n"
+                                 "LINEでお送りできなかったため、メールでお届けしました。")
+    if mid in IMPORTANT_NOTICES:
+        usage.notify_admin("内見申込FAXの結果をLINEで送れませんでした",
+                           f"お客様ID：{uid}\n会社：{(u.get('company') or {}).get('会社名', '')}\n"
+                           f"お知らせ：{mid}\n\n{texts.raw(mid, **kw)}")
 
 
 def _send_waiting_fax(uid):

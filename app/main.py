@@ -17,6 +17,9 @@ import bot
 import config
 import line
 import store
+import usage
+
+line.on_push = usage.on_push  # push の通数を数える・上限で送れなかったお知らせをためる
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("main")
@@ -199,6 +202,11 @@ def cron_daily(x_cron_key: str = Header("")):
     for uid, mid, kw in store_notices:
         bot.notify(uid, mid, kw)
     import retention
+    import usage
+    try:
+        usage.daily_report()  # 毎朝9時の日報【1分資料 日報】
+    except Exception:
+        log.exception("日報")
     return {"monitor_sent": monitor.daily(), "annual_renew_sent": renew, "store_notices": len(store_notices),
             "purged": retention.daily()}
 
@@ -209,8 +217,31 @@ def cron_often(x_cron_key: str = Header("")):
     import hmac as _hmac
     if not _hmac.compare_digest(x_cron_key, config.env("CRON_KEY") or config.APP_SECRET):
         raise HTTPException(403)
-    return {"recvfax_remind": bot.remind_recvfax(), "pending_purged": bot.purge_pending(),
+    import usage
+    return {"usage_alerts": usage.check(), "recvfax_remind": bot.remind_recvfax(), "pending_purged": bot.purge_pending(),
             "grace_ended": billing.end_grace()}
+
+
+@app.get("/admin/usage")
+def admin_usage(key: str = ""):
+    """LINE push・メールの通数（読み取り専用、合言葉 ADMIN_USAGE_KEY）。"""
+    import hmac as _hmac
+    import usage
+    want = config.env("ADMIN_USAGE_KEY")
+    if not (want and _hmac.compare_digest(key, want)):
+        raise HTTPException(403)
+    return usage.stats()
+
+
+@app.post("/admin/line/webhook")
+async def admin_line_webhook(request: Request, x_line_signature: str = Header("")):
+    """運営専用LINE「1分資料 運営通知」の Webhook。友だちになった運営の方のIDを覚える。"""
+    import json as _json
+    import usage
+    body = await request.body()
+    if not usage.admin_line_webhook(body, x_line_signature, _json.loads(body or b"{}").get("events", [])):
+        raise HTTPException(400)
+    return {"ok": True}
 
 
 @app.get("/paid")

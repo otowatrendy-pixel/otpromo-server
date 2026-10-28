@@ -123,6 +123,12 @@ class _Local:
         p = self.dir / key
         return p.read_bytes() if p.exists() else None
 
+    def incr(self, col, id, fields):
+        with self.lock:
+            d = self.docs[col].setdefault(id, {})
+            for k, n in fields.items():
+                d[k] = d.get(k, 0) + n
+
     def delete_file(self, key):
         p = self.dir / key
         if p.exists():
@@ -182,6 +188,9 @@ class _GCP:
             return b.download_as_bytes()
         except Exception:
             return None
+
+    def incr(self, col, id, fields):
+        self.fs.collection(col).document(id).set({k: self.firestore.Increment(n) for k, n in fields.items()}, merge=True)
 
     def delete_file(self, key):
         try:

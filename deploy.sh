@@ -47,8 +47,15 @@ if [ "${1:-}" = "schedule" ]; then
 fi
 
 URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)' 2>/dev/null || true)
+# 通数を返すURL（/admin/usage）の合言葉。なければ作ってしまっておく
+if ! gcloud secrets versions list ADMIN_USAGE_KEY --limit=1 --format='value(name)' 2>/dev/null | grep -q .; then
+  gcloud secrets create ADMIN_USAGE_KEY --replication-policy=automatic 2>/dev/null || true
+  openssl rand -hex 24 | tr -d '\n' | gcloud secrets versions add ADMIN_USAGE_KEY --data-file=- >/dev/null
+  gcloud secrets add-iam-policy-binding ADMIN_USAGE_KEY --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor >/dev/null
+fi
 SECRETS=""
-for s in MAISOKU_API_KEY LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET APP_SECRET RESEND_API_KEY; do
+# ADMIN_LINE_TOKEN・ADMIN_LINE_SECRET は運営専用LINE「1分資料 運営通知」（登録されていれば使う）
+for s in MAISOKU_API_KEY LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET APP_SECRET RESEND_API_KEY ADMIN_USAGE_KEY ADMIN_LINE_TOKEN ADMIN_LINE_SECRET; do
   if gcloud secrets versions list $s --limit=1 --format='value(name)' 2>/dev/null | grep -q .; then
     SECRETS="${SECRETS}${SECRETS:+,}$s=$s:latest"
   fi
