@@ -310,7 +310,6 @@ def menu_messages(uid):
 def on_text(c, t):
     """紹介コードが送られてきたら受け付ける。扱ったら True。"""
     import texts
-    import line
     code = parse(t)
     if not code:
         return False
@@ -322,7 +321,6 @@ def on_text(c, t):
     else:
         msgs = [texts.build("referral_code_accepted")]
         if not c.u.get("registered"):
-            msgs.append(line.text("はじめに、資料の帯に入れる会社情報を登録します（2〜3分ほどで終わります）。",
-                                  quick=[line.qr_postback("同意して登録をはじめる", "reg=start")]))
+            msgs.append(texts.build("referral_reg_prompt"))
         c.send(*msgs)
     return True
