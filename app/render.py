@@ -130,7 +130,8 @@ def staff_line(company: dict) -> str:
     name, mobile = company.get("担当者名"), company.get("携帯")
     if not name:
         return ""
-    return f"担当：{name}" + (f"／{mobile}" if mobile else "")
+    show = company.get("携帯を載せる", True)  # 帯替え図面から携帯を外す設定（名前はいつも載せる）
+    return f"担当：{name}" + (f"／{mobile}" if mobile and show else "")
 
 
 def obikae(img: Image.Image, r: Result, company: dict) -> Image.Image:

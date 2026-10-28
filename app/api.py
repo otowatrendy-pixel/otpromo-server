@@ -144,6 +144,7 @@ class CompanyIn(BaseModel):
     ローマ字: str = ""
     役職: str = ""
     携帯: str = ""
+    携帯を載せる: bool = True  # false なら帯替え図面に携帯を載せない（名前は載る、内見申込書には載る）
     担当者メール: str = ""
     受け取り方: str = "app"
     メール: str = ""

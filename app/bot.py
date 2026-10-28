@@ -358,7 +358,17 @@ def on_postback(c, data):
         return c.send(texts.build("reg_done"))
     if k == "reg" and v == "edit":
         store.update_user(c.uid, {"reg_queue": [], "reg_mode": None})
-        return c.send(texts.build("reg_edit"))
+        show = (c.u.get("company") or {}).get("携帯を載せる", True)
+        toggle = {"label": "携帯を図面に載せない" if show else "携帯を図面に載せる",
+                  "action": "postback edit=mobile_hide" if show else "postback edit=mobile_show"}
+        return c.send(texts.build("reg_edit", extra_buttons=[toggle]))
+    if k == "edit" and v in ("mobile_hide", "mobile_show") and c.u.get("registered"):
+        show = v == "mobile_show"
+        set_company(c, 携帯を載せる=show)
+        return c.send(line.text(
+            "これから作る帯替え図面に、携帯番号を載せます。" if show else
+            "これから作る帯替え図面には、携帯番号を載せません（「担当：お名前」だけ載ります）。\n"
+            "内見申込書は管理会社への連絡用のため、携帯番号はこれまでどおり載ります。"))
     if k == "reg" and v == "show":
         return c.send(confirm_message(c.u))
     if k == "edit" and v == "staff" and c.u.get("registered"):
