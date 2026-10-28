@@ -181,12 +181,20 @@ def account_tax_ids():
     if not config.INVOICE_TRN:
         return []
     if "id" not in _trn:
-        s = _stripe()
-        found = [t for t in (plain(x) for x in s.TaxId.list(owner={"type": "self"}, limit=20).auto_paging_iter())
-                 if t["type"] == "jp_trn" and t["value"] == config.INVOICE_TRN]
-        _trn["id"] = found[0]["id"] if found else plain(s.TaxId.create(type="jp_trn", value=config.INVOICE_TRN,
-                                                                         owner={"type": "self"}))["id"]
+        try:
+            _trn["id"] = _find_or_create_trn()
+        except Exception:
+            log.exception("登録番号を Stripe に用意できなかった（請求書には載らない）")
+            return []
     return [_trn["id"]]
+
+
+def _find_or_create_trn():
+    s = _stripe()
+    found = [t for t in (plain(x) for x in s.TaxId.list(owner={"type": "self"}, limit=20).auto_paging_iter())
+             if t["type"] == "jp_trn" and t["value"] == config.INVOICE_TRN]
+    return found[0]["id"] if found else plain(s.TaxId.create(type="jp_trn", value=config.INVOICE_TRN,
+                                                               owner={"type": "self"}))["id"]
 
 
 def _invoice_for_payment(params):
