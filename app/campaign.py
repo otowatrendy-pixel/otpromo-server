@@ -486,17 +486,21 @@ def on_postback(c, v):
         m = p["m"]
         if m not in others:
             return c.send(members_message(g))
-        if g["seats"] - 1 < MIN_SEATS:
-            return c.send(texts.build("store_reduce_too_few", 人数=MIN_SEATS))
-        kw = money_kw(g, g["seats"] - 1)
+        # メンバーは外せるが、請求は3人分を下回らない（10/28本人決定）
+        new = max(MIN_SEATS, g["seats"] - 1)
+        kw = money_kw(g, new)
+        if g["seats"] - 1 >= MIN_SEATS:
+            fee = f"人数は{new}人になり、次の請求から{kw['合計']}円（税込）になります。"
+        else:
+            fee = (f"お支払いは3人分からのため、料金は{kw['合計']}円（税込）のまま変わりません。"
+                   "空いた枠には、あとから別の方を招待できます。")
         return c.send(texts.build("store_remove_confirm", メンバー名=(g.get("names") or {}).get(m, "メンバー"),
-                                  メンバーID=m, 新しい人数=g["seats"] - 1, **{k: v for k, v in kw.items() if k != "人数"}))
+                                  メンバーID=m, 新しい人数=new, 料金の案内=fee,
+                                  **{k: v for k, v in kw.items() if k != "人数"}))
     if act == "remove_ok":
         m = p.get("m")
         if m not in g["members"] or m == g["owner"]:
             return c.send(members_message(g))
-        if g["seats"] - 1 < MIN_SEATS:
-            return c.send(texts.build("store_reduce_too_few", 人数=MIN_SEATS))
         until = g.get("period_end") or store.now()
 
         def fn(d):
@@ -504,12 +508,15 @@ def on_postback(c, v):
             d["leaving"] = (d.get("leaving") or []) + [{"uid": m, "until": until}]
         store.db().update_tx("groups", g["code"], fn)
         _release(m, keep_until=until)
-        g = change_seats(get_group(g["code"]), g["seats"] - 1)
+        g = get_group(g["code"])
+        reduced = g["seats"] > MIN_SEATS
+        if reduced:
+            g = change_seats(g, g["seats"] - 1)
         mu = store.get_user(m) or {}
         if mu.get("line_uid"):
             line.push(mu["line_uid"], [texts.build("store_removed_member", 店舗名=g["name"],
                                                    最終日=ymdw(_jst_date(until) - timedelta(days=1)))])
-        return c.send(_reduced(g))
+        return c.send(_reduced(g) if reduced else members_message(g))
     return c.send(members_message(g))
 
 
