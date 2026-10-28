@@ -476,6 +476,11 @@ def on_text(c, t):
             store.update_user(c.uid, {"nk": {}, "nk_step": "free", "nk_fid": None})
             c.refresh()
         return naiken_bot.on_text(c, t)
+    # リッチメニューが使えないときも、文字で登録内容の変更を開けるように
+    if c.u.get("registered") and norm(t) in ("変更", "登録内容の変更", "登録変更", "設定", "メニュー"):
+        return on_postback(c, "reg=edit")
+    if c.u.get("registered") and norm(t) in ("担当者", "担当者名", "担当者名の変更", "名前の変更", "携帯の変更"):
+        return on_postback(c, "edit=staff")
     if norm(t) == monitor.CODE:
         if not c.u.get("registered"):
             return c.send(texts.build("reg_first"))
