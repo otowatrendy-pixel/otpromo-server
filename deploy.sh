@@ -33,15 +33,15 @@ if [ "${1:-}" = "schedule" ]; then
   gcloud services enable cloudscheduler.googleapis.com
   URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)')
   KEY=$(gcloud secrets versions access latest --secret=APP_SECRET)
-  ARGS=(--location=$REGION --schedule="0 9 * * *" --time-zone=Asia/Tokyo --uri="$URL/cron/daily"
-        --http-method=POST --headers="X-Cron-Key=$KEY" --attempt-deadline=300s)
-  gcloud scheduler jobs create http otpromo-daily "${ARGS[@]}" 2>/dev/null \
-    || gcloud scheduler jobs update http otpromo-daily "${ARGS[@]}"
-  # 5分ごと：受取りFAXの確認のお知らせ（10分後に1回）・預かった募集図面の削除・お支払いの猶予切れ
-  ARGS=(--location=$REGION --schedule="*/5 * * * *" --time-zone=Asia/Tokyo --uri="$URL/cron/often"
-        --http-method=POST --headers="X-Cron-Key=$KEY" --attempt-deadline=120s)
-  gcloud scheduler jobs create http otpromo-often "${ARGS[@]}" 2>/dev/null \
-    || gcloud scheduler jobs update http otpromo-often "${ARGS[@]}"
+  # update は --headers を受け付けないため、あれば消して作り直す
+  job() {
+    gcloud scheduler jobs delete "$1" --location=$REGION --quiet >/dev/null 2>&1 || true
+    gcloud scheduler jobs create http "$1" --location=$REGION --schedule="$2" --time-zone=Asia/Tokyo \
+      --uri="$URL$3" --http-method=POST --headers="X-Cron-Key=$KEY" --attempt-deadline="$4" >/dev/null
+  }
+  job otpromo-daily "0 9 * * *" /cron/daily 300s
+  # 5分ごと：受取りFAXの確認のお知らせ（10分後に1回）・預かった募集図面の削除・お支払いの猶予切れ・通数の警告
+  job otpromo-often "*/5 * * * *" /cron/often 120s
   echo "毎日9時と5分ごと（日本時間）の定期実行を設定しました。"
   exit 0
 fi
