@@ -15,6 +15,13 @@ for name in "${names[@]}"; do
     read -r -p "  先頭「${v:0:7}…」全${#v}文字。これで登録しますか？（y=はい / n=やり直す）: " ok
     [ "$ok" = y ] && break
   done
+  # まだない名前なら、入れ物を作ってサーバーが読めるようにする
+  if ! gcloud secrets describe "$name" >/dev/null 2>&1; then
+    gcloud secrets create "$name" --replication-policy=automatic >/dev/null
+    gcloud secrets add-iam-policy-binding "$name" \
+      --member="serviceAccount:otpromo-api@$(gcloud config get-value project 2>/dev/null).iam.gserviceaccount.com" \
+      --role=roles/secretmanager.secretAccessor >/dev/null
+  fi
   if printf %s "$v" | gcloud secrets versions add "$name" --data-file=- >/dev/null; then
     echo "  → ${name} を登録しました"
   else

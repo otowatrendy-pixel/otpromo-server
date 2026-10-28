@@ -20,7 +20,7 @@ if [ "${1:-}" = "setup" ]; then
   gcloud iam service-accounts create otpromo-api --display-name="1分資料 API" 2>/dev/null || true
   gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$SA --role=roles/datastore.user --condition=None >/dev/null
   gcloud storage buckets add-iam-policy-binding gs://$BUCKET --member=serviceAccount:$SA --role=roles/storage.objectAdmin >/dev/null
-  for s in MAISOKU_API_KEY LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET APP_SECRET; do
+  for s in MAISOKU_API_KEY LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET APP_SECRET RESEND_API_KEY; do
     gcloud secrets create $s --replication-policy=automatic 2>/dev/null || true
     gcloud secrets add-iam-policy-binding $s --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor >/dev/null
   done
@@ -43,7 +43,7 @@ fi
 
 URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)' 2>/dev/null || true)
 SECRETS=""
-for s in MAISOKU_API_KEY LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET APP_SECRET; do
+for s in MAISOKU_API_KEY LINE_CHANNEL_SECRET LINE_CHANNEL_ACCESS_TOKEN STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET APP_SECRET RESEND_API_KEY; do
   if gcloud secrets versions list $s --limit=1 --format='value(name)' 2>/dev/null | grep -q .; then
     SECRETS="${SECRETS}${SECRETS:+,}$s=$s:latest"
   fi
