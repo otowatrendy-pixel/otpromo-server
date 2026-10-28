@@ -99,11 +99,7 @@ def run_due():
         import bot
         urls = bot.plan_urls(type("C", (), {"uid": uid})())
         if "nudge_free_used" in texts._MSG:
-            # 文面の {urls} の行はボタンにする（長いURLを文に出さない）
-            msg = texts.build("nudge_free_used", urls=urls,
-                              text=texts._MSG["nudge_free_used"]["text"].replace("\n{urls}", ""),
-                              buttons=[{"label": "ライトを申し込む", "action": "uri Stripe決済ページ（ライト月額）"},
-                                       {"label": "使い放題を申し込む", "action": "uri Stripe決済ページ（使い放題月額）"}])
+            msg = texts.build("nudge_free_used", urls=urls)  # ボタン2つ（ライト・使い放題の月払い）
         else:
             msg = texts.build("plan_show", urls=urls) if "plan_show" in texts._MSG else line.text("料金プランのご案内です。")
         line.push(u["line_uid"], [msg])

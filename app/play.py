@@ -113,4 +113,8 @@ def rtdn(body: dict):
     sn = n.get("subscriptionNotification")
     if sn and sn.get("purchaseToken"):
         res = sync_subscription(None, sn["purchaseToken"])
+        if sn.get("notificationType") == 3:  # SUBSCRIPTION_CANCELED：アプリで解約の理由を1回聞く
+            uid, _ = store.db().find("users", "play_token", sn["purchaseToken"])
+            if uid:
+                store.update_user(uid, {"ask_cancel_reason": True})
         log.info("RTDN %s %s", sn.get("notificationType"), res)
