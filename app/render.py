@@ -134,14 +134,35 @@ def staff_line(company: dict) -> str:
     return f"担当：{name}" + (f"／{mobile}" if mobile and show else "")
 
 
+def _snap_top(img: Image.Image, top: int) -> int:
+    """AIが答える帯の上端はおおよその位置なので、画像の中の実際の境目に合わせる。
+    近く（高さの±3%）に帯の枠線（横幅の半分以上ある横線）があればそのすぐ上に、
+    なければ文字のない行（行間）に合わせる。どちらもなければ、少し上に広げる。"""
+    w, h = img.size
+    g = ImageOps.grayscale(img).resize((min(w, 800), h))
+    sw = g.size[0]
+    lo, hi = max(0, top - int(h * 0.03)), min(h - 1, top + int(h * 0.03))
+    rows = g.crop((0, lo, sw, hi + 1))
+    data = list(rows.getdata()) if hasattr(rows, "getdata") else []
+    ink = [sum(1 for v in data[i * sw:(i + 1) * sw] if v < 200) / sw for i in range(hi - lo + 1)]
+    lines = [lo + i for i, f in enumerate(ink) if f > 0.5]
+    if lines:
+        y = min(lines, key=lambda r: abs(r - top))
+        return max(0, y - 2)
+    gaps = [lo + i for i, f in enumerate(ink) if f < 0.003 and lo + i <= top]
+    if gaps:
+        return max(gaps)
+    return max(0, top - int(h * 0.01))
+
+
 def obikae(img: Image.Image, r: Result, company: dict) -> Image.Image:
     img = ImageOps.exif_transpose(img).convert("RGB")
     w, h = img.size
     b = r.帯
     if b.見つかった and b.上端 is not None and b.下端 is not None and 0.6 <= b.上端 < b.下端 <= 1.0:
         top, bottom = int(h * b.上端), int(h * b.下端)
-        # 読み取り位置の誤差に備えて少し広めに覆う
-        top = max(0, top - int(h * 0.01))
+        # 読み取った位置を、近くの枠線か行間に合わせる（上の文字の行を切らない）
+        top = _snap_top(img, top)
         band = draw_band(w, bottom - top if bottom - top > h * 0.06 else int(h * 0.08), company)
         out = img.copy()
         out.paste(band, (0, top))

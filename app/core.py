@@ -14,6 +14,7 @@ from PIL import Image, ImageOps
 
 import config
 import render
+import scan
 from prompt import SYSTEM, USER
 from schema import Result
 
@@ -131,8 +132,36 @@ def analyze(data: bytes) -> dict:
             # JSONの形が崩れたときは1回だけやり直す（pydantic の検証エラーも ValueError）
             result, usage = call_claude(jpeg)
     t2 = time.perf_counter()
-    log = {"秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "モデル": config.MODEL, **usage}
+    # AIには撮ったままの写真を送り、帯替えには補正した画像を使う。PDFはそのまま
+    fix = "補正なし"
+    if not pages:
+        try:
+            camera = scan.is_camera(Image.open(io.BytesIO(data)))
+        except Exception:
+            camera = False
+        img, fix = make_page(img, result, camera)
+    t3 = time.perf_counter()
+    log = {"秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "秒_写真補正": round(t3 - t2, 2),
+           "写真の補正": fix, "モデル": config.MODEL, **usage}
     return {"img": img, "pages": pages, "result": result, "log": log}
+
+
+def make_page(img: Image.Image, result: Result, camera: bool = False) -> tuple:
+    """帯替えに使う図面の画像を作る。スマホ写真なら、用紙の切り出し・台形補正・白さの補正をする。
+    図面の文字は描き直さず、画素の位置と明るさだけを整える。戻り値は (画像, 補正の内容)。"""
+    paper = result.用紙
+    if paper.写真 and paper.四隅 and len(paper.四隅) == 4:
+        try:
+            return scan.scan_with_corners(img, paper.四隅)
+        except Exception:  # 四隅がおかしいときは、画像から探す方法に切り替える
+            pass
+    im = img.copy()
+    if camera:
+        im.info["camera"] = True
+    try:
+        return scan.scan(im)
+    except Exception:
+        return img, "補正なし"
 
 
 def verdict(result: Result) -> str:
@@ -178,7 +207,7 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
         "motozuke": {"name": f.元付業者, "tel": f.元付業者_電話, "fax": f.元付業者_FAX},
     }
     log = {**(log or {}), "秒_資料": round(t3 - t2, 2)}
-    log["秒_合計"] = round(log.get("秒_準備", 0) + log.get("秒_AI", 0) + log["秒_資料"], 2)
+    log["秒_合計"] = round(log.get("秒_準備", 0) + log.get("秒_AI", 0) + log.get("秒_写真補正", 0) + log["秒_資料"], 2)
     return {
         "pdf": pdf, "obikae_png": ob_png,
         "obikae_jpg": _jpeg(ob, 3000, 88), "obikae_preview": _jpeg(ob, 1000, 80),

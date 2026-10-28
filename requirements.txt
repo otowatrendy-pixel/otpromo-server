@@ -11,3 +11,4 @@ requests==2.34.2
 stripe==16.0.0
 uvicorn[standard]==0.54.0
 Jinja2==3.1.6
+opencv-python-headless==4.10.0.84

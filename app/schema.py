@@ -75,6 +75,13 @@ class Band(BaseModel):
     下端: Optional[float] = None
 
 
+class Paper(BaseModel):
+    """スマホで撮った写真のときの、用紙（画面に映った図面なら図面のページ）の四隅。"""
+    写真: bool = Field(False, description="机の上の紙やパソコンの画面をカメラで撮った写真なら true。PDFやスキャンなら false")
+    四隅: Optional[List[List[float]]] = Field(
+        None, description="写真のとき、用紙の四隅の位置。画像の幅と高さを1とした[x, y]を左上・右上・右下・左下の順に4つ。用紙の外の机・画面の余白・枠は含めない")
+
+
 class Point(BaseModel):
     見出し: str = Field(description="15字程度")
     説明: str = Field("", description="60字程度。お客様にそのまま話せる言葉で")
@@ -89,6 +96,7 @@ class QA(BaseModel):
 
 class Result(BaseModel):
     事実: Facts
+    用紙: Paper = Field(default_factory=Paper)
     帯: Band = Field(default_factory=lambda: Band(見つかった=False))
     おすすめポイント: List[Point] = Field(default_factory=list, description="3〜5個")
     想定QA: List[QA] = Field(default_factory=list, description="8〜10個")
