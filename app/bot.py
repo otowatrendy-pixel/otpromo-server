@@ -753,41 +753,54 @@ def recvfax_low(uid, n):
 FIX_WORDS = re.compile(r"消して|消す|消去|削除|隠して|見えないように|外して|取って|塗りつぶ")
 
 
-def fix_last(c, t):
-    """「ここを消して」の直し。直近の資料の帯替え図面から、頼まれた文字を白で消して作り直す。
-    件数には数えない（10/28本人決定：何度でも無料）。"""
-    jid = c.u.get("last_job")
-    job = store.get_job(jid)
-    if not job or job.get("status") != "done" or job["expires_at"] < store.now():
-        return c.send(line.text("直せる資料が見つかりませんでした。お手数ですが、募集図面をもう一度送ってください。"))
+def do_fix(uid, u, jid, t):
+    """「ここを消して」の直し（LINE・アプリ共通）。頼まれた文字を白で消して資料を作り直す。
+    件数には数えない（10/28本人決定：何度でも無料）。
+    戻り値: {"status": "done" | "none" | "missing" | "expired", "texts": [...], "note": できないことの説明}"""
+    job = store.get_job(jid) if jid else None
+    if not job or job.get("status") != "done":
+        return {"status": "missing", "texts": [], "note": None}
+    if job["expires_at"] < store.now():
+        return {"status": "expired", "texts": [], "note": None}
     page = store.get_page(jid)
     ob = store.db().get_file(f"jobs/{jid}/obikae.png")
     if not page or not ob:
-        return c.send(line.text("この資料は作り直しのための図面が残っていないため、直せませんでした。お手数ですが、募集図面をもう一度送ってください。"))
+        return {"status": "expired", "texts": [], "note": None}
+    r = core.fix(company_for_render(uid, u), Image.open(io.BytesIO(page)).convert("RGB"),
+                 Result.model_validate(job["result"]), ob, t, job.get("pages") or 0)
+    fixes = (job.get("fixes") or []) + [{"at": store.now(), **{k: v for k, v in r["log"].items()
+                                                              if k in ("直しの依頼", "消す文字", "直せなかったこと", "原価_円")}}]
+    if not r["out"]:
+        store.update_job(jid, {"fixes": fixes})
+        return {"status": "none", "texts": [], "note": r["note"]}
+    out = r["out"]
+    store.save_files(jid, out)
+    store.update_job(jid, {"result": out["result"], "log": out["log"], "fixes": fixes})
+    log.info("直し %s %s", jid, json.dumps(r["log"], ensure_ascii=False, default=str))
+    return {"status": "done", "texts": r["texts"], "note": r["note"]}
+
+
+def fix_last(c, t):
+    """LINEで「〇〇を消して」と送られたとき。直近の資料を直して、帯替え図面とPDFを送り直す。"""
+    jid = c.u.get("last_job")
     line.loading(c.line_uid, 60)
     try:
-        r = core.fix(company_for_render(c.uid, c.u), Image.open(io.BytesIO(page)).convert("RGB"),
-                     Result.model_validate(job["result"]), ob, t, job.get("pages") or 0)
+        r = do_fix(c.uid, c.u, jid, t)
     except Exception:
         log.exception("直しで例外")
         return c.send(texts.build("err_system"))
-    note = r["note"]
-    if not r["out"]:
-        store.update_job(jid, {"fixes": (job.get("fixes") or []) + [{"at": store.now(), **r["log"]}]})
-        return c.send(line.text(note or "ご依頼の文字が図面の中に見つかりませんでした。消したいところを、図面に書いてある言葉でもう一度送ってください。"))
-    out = r["out"]
-    store.save_files(jid, out)
-    store.update_job(jid, {"result": out["result"], "log": out["log"],
-                           "fixes": (job.get("fixes") or []) + [{"at": store.now(), **r["log"]}]})
+    if r["status"] in ("missing", "expired"):
+        return c.send(line.text("直せる資料が見つかりませんでした（資料の保存期間が過ぎた可能性があります）。お手数ですが、募集図面をもう一度送ってください。"))
+    if r["status"] == "none":
+        return c.send(line.text(r["note"] or "ご依頼の文字が図面の中に見つかりませんでした。消したいところを、図面に書いてある言葉でもう一度送ってください。"))
     job = store.get_job(jid)
     exp = job["expires_at"].astimezone(store.JST)
     append = f"資料一式（PDF）も直しました：\n{store.file_url(jid, job, 'shiryou.pdf')}\n（{exp.month}月{exp.day}日まで）"
-    if note:
-        append = note + "\n\n" + append
-    img = line.image(store.file_url(jid, job, "obikae.jpg") + f"?v={len(job.get('fixes') or [])}",
-                     store.file_url(jid, job, "preview.jpg") + f"?v={len(job.get('fixes') or [])}")
+    if r["note"]:
+        append = r["note"] + "\n\n" + append
+    v = f"?v={len(job.get('fixes') or [])}"  # LINEに前の画像を出させないため
+    img = line.image(store.file_url(jid, job, "obikae.jpg") + v, store.file_url(jid, job, "preview.jpg") + v)
     c.send(img, texts.build("fix_done", 物件名=job.get("title") or "", 直した内容="、".join(r["texts"]), append=append))
-    log.info("直し %s %s", jid, json.dumps(r["log"], ensure_ascii=False, default=str))
 
 
 def send_last(c, how):

@@ -110,6 +110,12 @@ for _ in range(10):
 pb("edit=color")
 pb("color=code")
 text("#FFDD00")
+# ---- 「ここを消して」の直し（AIの答えはまねる）----
+import hide  # noqa: E402
+hide.ask = lambda img, req, m, e: (["賃料"], None, None, "mock")
+text("賃料のところを消して")
+hide.ask = lambda img, req, m, e: ([], "文字を書き換えることはできません。消すことだけ承っています。", None, "mock")
+text("賃料を書き換えて、礼金を消して")
 u = store.get_user("LUabc")
 print("\n最終状態:", json.dumps({k: u[k] for k in ("plan", "free_limit", "free_used", "month_used", "company", "delivery", "pending")}, ensure_ascii=False, default=str))
 

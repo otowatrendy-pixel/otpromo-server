@@ -284,6 +284,28 @@ def job_fax_receive(jid: str, authorization: str = Header("")):
     return get_job(jid, authorization)
 
 
+class FixIn(BaseModel):
+    text: str
+
+
+@router.post("/jobs/{jid}/fix")
+def job_fix(jid: str, body: FixIn, authorization: str = Header("")):
+    """「ここを消して」の直し。頼まれた文字を白で消して作り直し、更新後の Job を返す（件数に数えない）。
+    消せなかったときは fix.status が "none" で、fix.note に利用者へそのまま見せる説明が入る。"""
+    uid, u = _me(authorization)
+    job = store.get_job(jid)
+    if not job or job["user_id"] != uid:
+        raise HTTPException(404)
+    if not body.text.strip():
+        raise HTTPException(422, "消したいところを入力してください")
+    r = bot.do_fix(uid, u, jid, body.text.strip())
+    if r["status"] in ("missing", "expired"):
+        raise HTTPException(410, "直せる資料が見つかりませんでした。募集図面をもう一度送ってください")
+    res = get_job(jid, authorization)
+    res["fix"] = r
+    return res
+
+
 class PlayIn(BaseModel):
     productId: str
     purchaseToken: str
