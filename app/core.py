@@ -17,6 +17,7 @@ import hide
 import render
 import scan
 from prompt import SYSTEM, USER
+import schema
 from schema import Result
 
 # 1Mトークンあたりのドル（入力, 出力, キャッシュ読み出し）。2026-10時点の公表価格
@@ -232,7 +233,7 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
         "page_jpg": _jpeg(raw_page, 3000, 92),
         "obikae_jpg": _jpeg(ob, 3000, 88), "obikae_preview": _jpeg(ob, 1000, 80),
         "texts": texts, "title": title, "pages": pages, "log": log,
-        "result": json.loads(result.model_dump_json()),
+        "result": schema.for_store(result),
     }
 
 

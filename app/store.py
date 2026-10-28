@@ -54,6 +54,17 @@ def new_user(**ids):
 
 # ---------- 保存先の実装 ----------
 
+def _no_nested_arrays(x, path=""):
+    if isinstance(x, dict):
+        for k, v in x.items():
+            _no_nested_arrays(v, f"{path}.{k}")
+    elif isinstance(x, (list, tuple)):
+        for v in x:
+            if isinstance(v, (list, tuple)):
+                raise ValueError(f"Firestore に配列の中の配列は保存できません: {path}")
+            _no_nested_arrays(v, path)
+
+
 class _Local:
     def __init__(self):
         self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}, "referrals": {}}
@@ -66,6 +77,7 @@ class _Local:
         return copy.deepcopy(d) if d else None
 
     def set(self, col, id, data, merge=False):
+        _no_nested_arrays(data)  # 本番の Firestore と同じく、配列の中の配列は保存できないことにする
         with self.lock:
             if merge and id in self.docs[col]:
                 self.docs[col][id].update(copy.deepcopy(data))

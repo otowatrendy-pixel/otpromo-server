@@ -5,7 +5,7 @@ Claude にはこの型どおりの JSON を返してもらう（structured outpu
 """
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Money(BaseModel):
@@ -68,6 +68,13 @@ class Facts(BaseModel):
     読み取りに自信がない項目: List[str] = Field(default_factory=list)
 
 
+def _points(v):
+    """保存用の [{"x":…, "y":…}] を [[x, y]] に戻す（Firestore は配列の中に配列を入れられないため）。"""
+    if isinstance(v, list):
+        return [[p.get("x"), p.get("y")] if isinstance(p, dict) else p for p in v]
+    return v
+
+
 class Band(BaseModel):
     """元付業者の会社情報の帯（ふつうは下端）の位置。画像の高さを1とした割合。"""
     見つかった: bool
@@ -76,6 +83,8 @@ class Band(BaseModel):
     上端: Optional[float] = None
     下端: Optional[float] = None
 
+    _pts = field_validator("上端_写真", mode="before")(staticmethod(_points))
+
 
 class Paper(BaseModel):
     """スマホで撮った写真のときの、用紙（画面に映った図面なら図面のページ）の四隅。"""
@@ -83,6 +92,8 @@ class Paper(BaseModel):
     四隅: Optional[List[List[float]]] = Field(
         None, description="写真のとき、用紙の四隅の位置。画像の幅と高さを1とした[x, y]を左上・右上・右下・左下の順に4つ。用紙の外の机・画面の余白・枠は含めない")
 
+
+    _pts = field_validator("四隅", mode="before")(staticmethod(_points))
 
 class Point(BaseModel):
     見出し: str = Field(description="15字程度")
@@ -105,3 +116,13 @@ class Result(BaseModel):
         description="帯の外（備考欄など）に書かれた、元付業者と客付業者のあいだだけの情報を、図面に書いてあるとおり1行ずつ。なければ空")
     おすすめポイント: List[Point] = Field(default_factory=list, description="3〜5個")
     想定QA: List[QA] = Field(default_factory=list, description="8〜10個")
+
+
+def for_store(r: "Result") -> dict:
+    """Firestore に保存できる形の dict（四隅などの [[x, y]] を [{"x", "y"}] にする）。Result.model_validate で戻せる。"""
+    import json
+    d = json.loads(r.model_dump_json())
+    for parent, key in ((d.get("用紙") or {}, "四隅"), (d.get("帯") or {}, "上端_写真")):
+        if isinstance(parent.get(key), list):
+            parent[key] = [{"x": p[0], "y": p[1]} if isinstance(p, list) and len(p) >= 2 else p for p in parent[key]]
+    return d
