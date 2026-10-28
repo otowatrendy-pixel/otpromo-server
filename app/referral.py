@@ -188,7 +188,7 @@ def establish(referred, rec, app=False, release=False):
             {"referred": referred, "at": now}]
         u["ref_rewarded"] = u.get("ref_rewarded", 0) + 1
     store.db().update_tx("users", referrer, fn)
-    if ru.get("plan_source") == "google_play" or (ru.get("firebase_uid") and not ru.get("line_uid")):
+    if ru.get("plan_source") in ("google_play", "app_store") or (ru.get("firebase_uid") and not ru.get("line_uid")):
         # アプリ版の方は、割引の代わりに内見FAX+10回
         if (ru.get("plan") or "free") == "free":
             # 紹介した方がまだ無料体験中なら保留し、有料プランに入ったときに渡す（3か月の期限もそこから。10/28本人決定）

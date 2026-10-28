@@ -6,7 +6,8 @@ PUT  /v1/jobs/{id}/atena {"atena":"山田 太郎"} 初期費用概算書の宛�
 POST /v1/jobs/{id}/fix   {"request":"右下の連絡先を消して"} 業者向け情報の消し直し（無料・件数に数えない）
 GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, company}
 PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方・宛名を聞く）。担当者名・携帯は必須（422 name_required/mobile_check/name_check、429 name_locked）
-POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課金（あとで実装）
+POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課金
+POST /v1/billing/apple/verify, /v1/billing/apple/notify  … App Store の課金（iPhone版）
 """
 import logging
 
@@ -360,6 +361,29 @@ async def google_rtdn(request: Request, token: str = ""):
     if not _hmac.compare_digest(token, config.env("PUBSUB_TOKEN") or config.APP_SECRET):
         raise HTTPException(403)
     play.rtdn(await request.json())
+    return {"ok": True}
+
+
+class AppleIn(BaseModel):
+    productId: str
+    signedTransaction: str  # StoreKit 2 の jwsRepresentation
+
+
+@router.post("/billing/apple/verify")
+def apple_verify(body: AppleIn, authorization: str = Header("")):
+    import appstore
+    uid, u = _me(authorization)
+    res = appstore.verify(uid, body.productId, body.signedTransaction)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "確認できませんでした"))
+    return res
+
+
+@router.post("/billing/apple/notify")
+async def apple_notify(request: Request):
+    """App Store Server Notifications V2。中身は Apple の署名で確かめるので、URLの合言葉は不要。"""
+    import appstore
+    appstore.notify(await request.json())
     return {"ok": True}
 
 
