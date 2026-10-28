@@ -370,6 +370,14 @@ def save_files(jid, out):
     db().put_file(f"jobs/{jid}/obikae.png", out["obikae_png"], FILES["obikae.png"])
     db().put_file(f"jobs/{jid}/obikae.jpg", out["obikae_jpg"], FILES["obikae.jpg"])
     db().put_file(f"jobs/{jid}/preview.jpg", out["obikae_preview"], FILES["preview.jpg"])
+    if out.get("page_jpg"):
+        # 利用者には見せない（FILES に入れない）。作り直し用
+        db().put_file(f"jobs/{jid}/page.jpg", out["page_jpg"], "image/jpeg")
+
+
+def get_page(jid):
+    """作り直し用に保存した、帯を付ける前の図面。"""
+    return db().get_file(f"jobs/{jid}/page.jpg")
 
 
 def file_url(jid, job, name):

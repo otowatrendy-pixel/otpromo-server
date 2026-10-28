@@ -224,6 +224,8 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
     log["秒_合計"] = round(log.get("秒_準備", 0) + log.get("秒_AI", 0) + log.get("秒_写真補正", 0) + log["秒_資料"], 2)
     return {
         "pdf": pdf, "obikae_png": ob_png,
+        # 帯を付ける前の図面（写真は補正後）。「ここを消して」の直しで作り直すときに使う
+        "page_jpg": _jpeg(img, 3000, 92),
         "obikae_jpg": _jpeg(ob, 3000, 88), "obikae_preview": _jpeg(ob, 1000, 80),
         "texts": texts, "title": title, "pages": pages, "log": log,
         "result": json.loads(result.model_dump_json()),
