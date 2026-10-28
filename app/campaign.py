@@ -75,7 +75,8 @@ def store_open(d=None):
     start, end = store_window()
     if not start:
         return True  # 公開日を決める前（確認用）は受付中にしておく
-    return start <= (d or today()) <= end
+    # 公開前（開始日より前）は確認用に受け付ける。案内の文には開始日〜終了日を出す
+    return (d or today()) <= end
 
 
 def store_window_text():

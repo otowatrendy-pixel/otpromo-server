@@ -201,11 +201,11 @@ for x in ("LUabc", "LUm2", "LUm3"):
     print(x, v["plan"], v.get("plan_source"), v.get("shop_code"))
 
 print("\n========== 受付期間 ==========")
-config.STORE_CAMPAIGN_START = "2026-12-01"
-campaign.today = lambda: campaign.date(2027, 3, 1)
+config.STORE_CAMPAIGN_START = "2026-11-11"
+campaign.today = lambda: campaign.date(2027, 2, 11)
 print("受付期間:", campaign.store_window(), "3/1は受付中か:", campaign.store_open())
 pb("Um1", "store=start")
-campaign.today = lambda: campaign.date(2026, 12, 1)
+campaign.today = lambda: campaign.date(2026, 11, 11)
 pb("Um1", "store=start")
 
 print("\n========== 新人さん応援 ==========")
