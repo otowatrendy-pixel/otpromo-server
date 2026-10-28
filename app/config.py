@@ -37,6 +37,9 @@ PRICE_UNLIMITED_YEAR = env("PRICE_UNLIMITED_YEAR", "price_1UVJyhB542nWQrMKZRxg4G
 # 店舗まとめ割（1人あたり月額・税込）。受付はサービス公開日（STORE_CAMPAIGN_START）から3か月
 PRICE_GROUP_LIGHT = env("PRICE_GROUP_LIGHT", "price_1UVKSxB542nWQrMKvDBQepAF")          # 1,180円
 PRICE_GROUP_UNLIMITED = env("PRICE_GROUP_UNLIMITED", "price_1UVKSxB542nWQrMK8EVLk1FV")  # 2,480円
+INVOICE_TRN = env("INVOICE_TRN", "")  # 適格請求書発行事業者の登録番号（T＋13桁）。入れると領収書・請求書に載る
+TERMS_URL = env("TERMS_URL", "https://otpromo.com/terms-ippun.html")
+TERMS_VERSION = env("TERMS_VERSION", "2026-10-28")  # 規約を改めたら日付を変える（同意の記録と照らす）
 STORE_CAMPAIGN_START = env("STORE_CAMPAIGN_START", "2026-11-11")  # サービス開始日（10/28本人決定）。空なら受付中
 # 新人さん応援：期間中に初めて月払いを申し込んだ方は最初の月が半額（1回だけ50%引きのクーポン）
 NEWBIE_START = env("NEWBIE_START", "2027-03-01")

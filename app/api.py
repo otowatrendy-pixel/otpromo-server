@@ -60,7 +60,36 @@ def me(authorization: str = Header("")):
                             "next_expiry": faxopt.next_expiry(u).isoformat() if faxopt.next_expiry(u) else None}
             if (u.get("delivery") or {}).get("fax") else None,
             # 紹介：自分のコード・使った紹介コード・特典を渡した紹介の数
-            "referral": _referral_me(uid)}
+            "referral": _referral_me(uid),
+            # 利用規約：同意した版と今の版。needs_agree が true なら規約の画面を出して PUT /v1/me/terms
+            "terms": terms_state(u),
+            # 予約中のプラン変更（下げる・払い方の変更は次の更新日から）
+            "pending_change": _pending(u)}
+
+
+def terms_state(u):
+    agreed = u.get("terms_version") or (config.TERMS_VERSION if u.get("agreed_at") else None)
+    return {"url": config.TERMS_URL, "agreed_version": agreed, "current_version": config.TERMS_VERSION,
+            "needs_agree": agreed != config.TERMS_VERSION}
+
+
+def _pending(u):
+    p = u.get("pending_change")
+    return {"plan": p["plan"], "period": p["interval"], "at": p["at"].isoformat()} if p else None
+
+
+class TermsIn(BaseModel):
+    version: str
+
+
+@router.put("/me/terms")
+def put_terms(body: TermsIn, authorization: str = Header("")):
+    uid, u = _me(authorization)
+    if body.version != config.TERMS_VERSION:
+        raise HTTPException(409, {"code": "terms_changed", "message": "利用規約が改められました。最新の規約をご確認ください。",
+                                  "current_version": config.TERMS_VERSION})
+    store.update_user(uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION})
+    return {"ok": True}
 
 
 def _referral_me(uid):
@@ -322,6 +351,9 @@ def naiken_send(fid: str, authorization: str = Header("")):
     status = naiken.send(uid, fid)
     if status is None:
         raise HTTPException(404)
+    if status == "trial":
+        # 無料お試し中は内見申込書FAXを使えない（有料プランの機能）
+        raise HTTPException(403, {"code": "trial", "message": texts.raw("naiken_trial")})
     if status == "limit":
         raise HTTPException(402, "内見FAXの回数の上限に達しました")
     return {"status": status}

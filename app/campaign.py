@@ -232,6 +232,7 @@ def checkout_url(uid):
     price = config.PRICE_GROUP_LIGHT if d["plan"] == "light" else config.PRICE_GROUP_UNLIMITED
     md = {"uid": uid, "purpose": "group", "code": code, "shop": d["name"][:40], "plan": d["plan"]}
     params = dict(mode="subscription", client_reference_id=uid, locale="ja",
+                  custom_text={"submit": {"message": f"お申し込みにより、利用規約（{config.TERMS_URL}）に同意したものとします。"}},
                   line_items=[{"price": price, "quantity": d["seats"], "tax_rates": [billing.tax_rate(inclusive=True)]}],
                   subscription_data={"metadata": md}, metadata=md,
                   success_url=f"{config.BASE_URL}/paid?t={billing.sign(uid)}",

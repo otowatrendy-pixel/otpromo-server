@@ -86,6 +86,10 @@ class _Local:
                 return k, copy.deepcopy(v)
         return None, None
 
+    def before(self, col, field, cutoff):
+        """field が cutoff 以前の文書の (id, 中身)。"""
+        return [(k, copy.deepcopy(v)) for k, v in self.docs[col].items() if v.get(field) and v[field] <= cutoff]
+
     def update_tx(self, col, id, fn):
         """取り出し→fnで変更→保存を一度に行う。fn の戻り値をそのまま返す。"""
         with self.lock:
@@ -131,6 +135,10 @@ class _GCP:
         for s in self.fs.collection(col).where(filter=FieldFilter(field, "==", value)).limit(1).stream():
             return s.id, s.to_dict()
         return None, None
+
+    def before(self, col, field, cutoff):
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        return [(s.id, s.to_dict()) for s in self.fs.collection(col).where(filter=FieldFilter(field, "<=", cutoff)).stream()]
 
     def update_tx(self, col, id, fn):
         ref = self.fs.collection(col).document(id)

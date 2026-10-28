@@ -98,7 +98,12 @@ def handle(ev):
     if t == "follow":
         return on_follow(c)
     if t == "unfollow":
-        return store.update_user(c.uid, {"blocked": True})
+        return store.update_user(c.uid, {"blocked": True, "blocked_at": store.now()})
+    if t == "postback" and ev["postback"]["data"] == "terms=agree":
+        store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION})
+        return c.send(line.text("ありがとうございます。そのままお使いください。"))
+    if t in ("postback", "message") and needs_terms(c.u):
+        return c.send(terms_message())
     if t == "postback":
         return on_postback(c, ev["postback"]["data"])
     if t != "message":
@@ -115,10 +120,24 @@ def handle(ev):
     c.send(texts.build("err_other"))
 
 
+# ---------- 利用規約 ----------
+
+def needs_terms(u):
+    """登録済みの方が、前の版の規約に同意したままなら True（規約を改めたとき、次に使うときにもう一度同意をいただく）。"""
+    return bool(u.get("registered") and u.get("terms_version") and u["terms_version"] != config.TERMS_VERSION)
+
+
+def terms_message():
+    if "terms_updated" in texts._MSG:
+        return texts.build("terms_updated", 規約URL=config.TERMS_URL)
+    return texts.build("follow", text=(f"利用規約を改めました。お手数ですが、内容をご確認のうえ「同意して続ける」を押してください。\n{config.TERMS_URL}"),
+                       buttons=[{"label": "同意して続ける", "action": "postback terms=agree"}])
+
+
 # ---------- 友だち追加 ----------
 
 def on_follow(c):
-    store.update_user(c.uid, {"blocked": False})
+    store.update_user(c.uid, {"blocked": False, "blocked_at": None})
     if c.u.get("registered"):
         link_menu(c.line_uid, True)
         return c.send(texts.build("refollow", 会社名=c.u["company"].get("会社名", ""), のこり枚数の案内=remain_note(c.u)))
@@ -313,7 +332,7 @@ def reg_postback(c, k, v):
 def on_postback(c, data):
     k, _, v = data.partition("=")
     if k == "reg" and v == "start":
-        store.update_user(c.uid, {"agreed_at": store.now()})
+        store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION})
         return start_steps(c, list(REG_STEPS), "new")
     if k == "reg" and v == "done":
         if not c.u.get("company", {}).get("会社名"):

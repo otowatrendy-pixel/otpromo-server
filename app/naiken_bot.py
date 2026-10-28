@@ -28,12 +28,21 @@ def _set(c, **kv):
     c.refresh()
 
 
+def trial_message(c):
+    import bot
+    return texts.build("naiken_trial", urls=bot.plan_urls(c))
+
+
 def start(c):
+    if naiken.is_trial(c.u):
+        return c.send(trial_message(c))
     _set(c, nk={}, nk_step="free", nk_fid=None)
     c.send(texts.build("naiken_start"))
 
 
 def start_from_job(c, jid):
+    if naiken.is_trial(c.u):
+        return c.send(trial_message(c))
     job = store.get_job(jid) if jid else None
     if not job or job.get("status") != "done" or job.get("user_id") != c.uid:
         return c.send(line.text("お作りした資料が見つかりませんでした。物件名と号室を教えてください。"),
@@ -293,6 +302,9 @@ def on_postback(c, v):
         if status == "sending":
             _set(c, nk_step=None, last_naiken=fid)
             return c.send(texts.build("naiken_sending"))
+        if status == "trial":
+            _set(c, nk_step=None)
+            return c.send(trial_message(c))
         if status == "limit":
             import bot
             period, limit, nxt = naiken.limit_info(c.u)

@@ -23,8 +23,10 @@ log = logging.getLogger("naiken")
 WEEK = "月火水木金土日"
 
 # 送信回数の上限（設定で変えられる）。plan → (月, 日)
+# 無料お試し（最初の5件）の間は内見申込書FAXを使えない（10/28本人決定、正式入会を促す）。
+# モニター（ライトの無料期間）と店舗まとめ割のメンバーは plan が light/unlimited なので使える
 LIMITS = {
-    "free": (int(config.env("NAIKEN_FREE_MONTH", "2")), int(config.env("NAIKEN_DAY", "20"))),
+    "free": (int(config.env("NAIKEN_FREE_MONTH", "0")), int(config.env("NAIKEN_DAY", "20"))),
     "light": (int(config.env("NAIKEN_LIGHT_MONTH", "20")), int(config.env("NAIKEN_DAY", "20"))),
     "unlimited": (int(config.env("NAIKEN_UNLIMITED_MONTH", "50")), int(config.env("NAIKEN_DAY", "20"))),
 }
@@ -230,6 +232,11 @@ def pack_left(u):
     return sum(p["n"] - p["used"] for p in (u.get("fax_packs") or []) if p["exp"] > t)
 
 
+def is_trial(u):
+    """有料プランの契約がない（無料お試し中）なら True。"""
+    return (u.get("plan") or "free") == "free"
+
+
 def month_limit(u):
     """今月の内見FAXの上限。モニターからカード登録で続けた方は、最初の有料期間だけ＋10回。"""
     import monitor
@@ -329,6 +336,8 @@ def send(uid, fid):
     if not rec or rec["user_id"] != uid or rec["status"] not in ("preview", "failed"):
         return rec and rec["status"]
     u = store.get_user(uid)
+    if is_trial(u):
+        return "trial"
     if not can_send(u):
         return "limit"
     to = rec["draft"]["to"]

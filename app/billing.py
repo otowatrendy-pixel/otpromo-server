@@ -94,10 +94,13 @@ def fax_pack_checkout(uid):
     params = dict(mode="payment", line_items=[{"price": fax_pack_price(), "quantity": 1,
                                                "tax_rates": [tax_rate(inclusive=True)]}],
                   client_reference_id=uid, metadata={"uid": uid, "purpose": "fax_pack"}, locale="ja",
+                  custom_text={"submit": {"message": (
+                      "購入から3か月お使いいただけます。解約されたときは、お支払い済みの期間の終わりで使えなくなります"
+                      f"（返金はありません）。お申し込みにより、利用規約（{config.TERMS_URL}）に同意したものとします。")}},
                   success_url=f"{config.BASE_URL}/paid?t={sign(uid)}", cancel_url=f"{config.BASE_URL}/canceled")
     if u.get("stripe_customer"):
         params["customer"] = u["stripe_customer"]
-    return plain(s.checkout.Session.create(**params))["url"]
+    return plain(s.checkout.Session.create(**_invoice_for_payment(params)))["url"]
 
 
 def faxrecv_pack_price():
@@ -126,7 +129,7 @@ def faxrecv_pack_checkout(uid):
                   success_url=f"{config.BASE_URL}/paid?t={sign(uid)}", cancel_url=f"{config.BASE_URL}/canceled")
     if u.get("stripe_customer"):
         params["customer"] = u["stripe_customer"]
-    return plain(s.checkout.Session.create(**params))["url"]
+    return plain(s.checkout.Session.create(**_invoice_for_payment(params)))["url"]
 
 
 def pay_url(uid, plan):
@@ -168,6 +171,31 @@ def item_tax(price):
     return [tax_rate(inclusive=plan_of_price(price)[0] is not None)]
 
 
+# ---------- インボイスの登録番号 ----------
+
+_trn = {}
+
+
+def account_tax_ids():
+    """請求書・領収書に載せる当社の登録番号（Stripeの tax_id）。設定がなければ空。"""
+    if not config.INVOICE_TRN:
+        return []
+    if "id" not in _trn:
+        s = _stripe()
+        found = [t for t in (plain(x) for x in s.TaxId.list(owner={"type": "self"}, limit=20).auto_paging_iter())
+                 if t["type"] == "jp_trn" and t["value"] == config.INVOICE_TRN]
+        _trn["id"] = found[0]["id"] if found else plain(s.TaxId.create(type="jp_trn", value=config.INVOICE_TRN,
+                                                                         owner={"type": "self"}))["id"]
+    return [_trn["id"]]
+
+
+def _invoice_for_payment(params):
+    """都度払い（追加FAXなど）にも、登録番号入りの請求書（領収書）を付ける。"""
+    if account_tax_ids():
+        params["invoice_creation"] = {"enabled": True, "invoice_data": {"account_tax_ids": account_tax_ids()}}
+    return params
+
+
 # ---------- 申し込み ----------
 
 def checkout(uid, plan, yearly=False):
@@ -184,6 +212,7 @@ def checkout(uid, plan, yearly=False):
         success_url=f"{config.BASE_URL}/paid?t={sign(uid)}",
         cancel_url=f"{config.BASE_URL}/canceled",
         locale="ja",
+        custom_text={"submit": {"message": f"お申し込みにより、利用規約（{config.TERMS_URL}）に同意したものとします。"}},
     )
     if u.get("stripe_customer"):
         params["customer"] = u["stripe_customer"]
@@ -216,30 +245,72 @@ def newbie_coupon():
                                      duration="once", metadata={"service": "maisoku", "kind": "newbie"}))["id"]
 
 
-def can_change(u, plan, yearly):
-    """契約中の変更ができるか。年払いの途中は返金しないので、使い放題への格上げだけ受ける。"""
+YEN = {("light", False): "月額1,480円（税込）", ("unlimited", False): "月額2,980円（税込）",
+       ("light", True): "年額14,800円（税込）", ("unlimited", True): "年額29,800円（税込）"}
+
+
+def change_kind(u, plan, yearly):
+    """契約中の変更の種類（10/28本人決定）。
+    up＝ライト→使い放題（払い方は同じ）：すぐ切り替えて差額を日割りで請求。
+    later＝下げる・月払い⇔年払いの切り替え：次の更新日から。None＝変わらない。"""
     cur, cur_year = u.get("plan"), u.get("billing_interval") == "year"
     if (plan, yearly) == (cur, cur_year):
-        return False
-    if cur_year:
-        return yearly and plan == "unlimited" and cur == "light"
-    return True
+        return None
+    if cur == "light" and plan == "unlimited" and yearly == cur_year:
+        return "up"
+    return "later"
+
+
+def can_change(u, plan, yearly):
+    return change_kind(u, plan, yearly) is not None
+
+
+def _items_of(phase_or_sub_items):
+    out = []
+    for it in phase_or_sub_items:
+        price = it["price"] if isinstance(it["price"], str) else it["price"]["id"]
+        tr = [t if isinstance(t, str) else t["id"] for t in (it.get("tax_rates") or [])]
+        out.append({"price": price, "quantity": it.get("quantity") or 1, **({"tax_rates": tr} if tr else {})})
+    return out
+
+
+def _release_schedule(s, sub):
+    sch = sub.get("schedule")
+    if sch:
+        s.SubscriptionSchedule.release(sch if isinstance(sch, str) else sch["id"])
 
 
 def change_plan(uid, plan, yearly=False):
-    """契約中のプランを変える。月払いの中は日割り、年払いへの切り替え・年払いの格上げは差額をすぐ請求。"""
+    """契約中のプランを変える。戻り値は ("up", 差額) か ("later", 切り替わる日時)。"""
     s = _stripe()
     u = store.get_user(uid)
     sub = plain(s.Subscription.retrieve(u["stripe_subscription"]))
-    items = []
     new = price_of(plan, yearly)
-    for it in sub["items"]["data"]:
-        if plan_of_price(it["price"]["id"])[0]:
-            items.append({"id": it["id"], "price": new, "tax_rates": item_tax(new)})
-    if items:
-        s.Subscription.modify(sub["id"], items=items,
-                              proration_behavior="always_invoice" if yearly else "create_prorations")
-    sync_subscription(s.Subscription.retrieve(sub["id"]))
+    kind = change_kind(u, plan, yearly)
+    _release_schedule(s, sub)  # 前に予約した変更は取り消して、今回の内容にする
+    store.update_user(uid, {"pending_change": None})
+    if kind == "up":
+        items = [{"id": it["id"], "price": new, "tax_rates": item_tax(new)}
+                 for it in sub["items"]["data"] if plan_of_price(it["price"]["id"])[0]]
+        s.Subscription.modify(sub["id"], items=items, proration_behavior="always_invoice")
+        sub2 = plain(s.Subscription.retrieve(sub["id"], expand=["latest_invoice"]))
+        inv = sub2.get("latest_invoice") or {}
+        sync_subscription(sub2)
+        return "up", int(inv.get("amount_due") or 0)
+    # 下げる・払い方を変える：次の更新日から（日割りの返金なし）
+    sch = plain(s.SubscriptionSchedule.create(from_subscription=sub["id"]))
+    cur = sch["phases"][0]
+    now_items = _items_of(cur["items"])
+    next_items = [({**it, "price": new, "tax_rates": item_tax(new)} if plan_of_price(it["price"])[0] else it)
+                  for it in now_items]
+    s.SubscriptionSchedule.modify(sch["id"], end_behavior="release", proration_behavior="none", phases=[
+        {"items": now_items, "start_date": cur["start_date"], "end_date": cur["end_date"],
+         **({"trial_end": cur["trial_end"]} if cur.get("trial_end") else {})},
+        {"items": next_items, "proration_behavior": "none", "metadata": {"uid": uid}},
+    ], metadata={"uid": uid, "purpose": "plan_change"})
+    at = datetime.fromtimestamp(cur["end_date"], timezone.utc)
+    store.update_user(uid, {"pending_change": {"plan": plan, "interval": "year" if yearly else "month", "at": at}})
+    return "later", at
 
 
 def portal(uid):
@@ -268,6 +339,7 @@ def sync_subscription(sub):
     if (sub.get("metadata") or {}).get("purpose") == "group":
         import campaign
         uid = campaign.sync_group(sub)
+        _ensure_sub_tax_ids(sub, sub["status"] in ("active", "trialing", "past_due"))
         return uid, None, None
     uid = (sub.get("metadata") or {}).get("uid")
     if not uid:
@@ -293,22 +365,43 @@ def sync_subscription(sub):
             "period_end": datetime.fromtimestamp(end, timezone.utc) if end else None}
     if yearly and start_dt and u.get("period_start") != start_dt:
         data["year_base_docs"] = u.get("total_docs", 0)  # 年払いの更新案内で「この1年の件数」を出すため
+    pend = u.get("pending_change") or {}
+    if pend and (not active or (pend.get("plan"), pend.get("interval")) == (plan, "year" if yearly else "month")):
+        data["pending_change"] = None
     if plan != "free":
+        data["ended_at"] = None
         data["paid_before"] = True  # 新人さん応援は「初めての方」だけ
     if plan == "free" and u.get("plan_source") in ("group", "group_leaving"):
         # 店舗まとめ割で使っている方は、個人の契約の状態でプランを上書きしない
         data = {"stripe_customer": sub["customer"], "stripe_subscription": None, "sub_status": sub["status"]}
     store.update_user(uid, data)
+    _ensure_sub_tax_ids(sub, active)
     _track_yearly(uid, yearly and plan != "free")
     if plan == "free" and u.get("plan_source") == "stripe" and (u.get("plan") or "free") != "free":
         import referral
         referral.on_canceled(uid)  # 解約したら、まだ使っていない紹介割引は消える
+        # 解約したときの追加FAXの残りは、支払い済み期間の終わり（＝契約が終わった今）で使えなくなる（返金なし、10/28本人決定）
+        end_at = datetime.fromtimestamp(end, timezone.utc) if end else store.now()
+        end_at = min(end_at, store.now())
+        packs = [{**p, "exp": min(p["exp"], end_at)} for p in (u.get("fax_packs") or [])]
+        store.update_user(uid, {"fax_packs": packs, "ended_at": store.now()})
     if plan == "free" and u.get("shop_code"):
         import campaign
         g = campaign.get_group(u["shop_code"])
         if g and g.get("status") == "active":
             campaign.apply_member(uid, g)  # 個人の契約が終わったので、店舗のプランに切り替える
     return uid, u.get("plan"), plan
+
+
+def _ensure_sub_tax_ids(sub, active):
+    """契約の請求書に登録番号を載せる（まだなら）。"""
+    ids = account_tax_ids() if active else []
+    have = [t if isinstance(t, str) else t["id"] for t in ((sub.get("invoice_settings") or {}).get("account_tax_ids") or [])]
+    if ids and ids != have:
+        try:
+            _stripe().Subscription.modify(sub["id"], invoice_settings={"account_tax_ids": ids})
+        except Exception:
+            log.exception("登録番号を契約に付けられなかった %s", sub["id"])
 
 
 def _track_yearly(uid, on):

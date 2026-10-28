@@ -130,11 +130,11 @@ def pay(plan: str, t: str = ""):
     if u.get("stripe_subscription"):
         if (p, yearly) == (u.get("plan"), u.get("billing_interval") == "year"):
             return page("ご契約中です", f"<p>すでに{NAMES[plan]}をご利用中です。</p>")
-        if not billing.can_change(u, p, yearly):
-            return page("年払いをご利用中です", f"""<p>年払いの期間中は、使い放題（年払い）への切り替えだけを承っています。</p>
-<p>月払いや別のプランに変える場合は、「変更・解約」から年払いを解約してください。{store.billing_renew_date(u)}まではそのままお使いいただけます
-（途中解約による返金はありません）。</p>""")
-        note = "差額を今すぐお支払いいただき、今日から1年間の契約になります。" if yearly else "差額は日割りで次回のご請求に反映されます。"
+        if billing.change_kind(u, p, yearly) == "up":
+            note = "今日から切り替わり、今の期間の残りの日数分の差額を、ご登録のカードにすぐご請求します。"
+        else:
+            note = (f"次の更新日（{store.billing_renew_date(u)}）から切り替わります。それまでは今のプランのままお使いいただけます"
+                    "（日割りの返金はありません）。")
         return page("ご契約内容の変更", f"""<p>{NAMES[plan]}に変更します。{note}</p>
 <form method=post action="/pay/{plan}/change?t={html.escape(t)}"><button>変更する</button></form>""")
     return RedirectResponse(billing.checkout(uid, p, yearly), status_code=303)
@@ -146,9 +146,19 @@ def pay_change(plan: str, t: str = ""):
     p, yearly = _plan(plan)
     if plan not in NAMES or not billing.can_change(store.get_user(uid), p, yearly):
         raise HTTPException(404)
-    billing.change_plan(uid, p, yearly)
-    bot.notify(uid, "plan_started", {})
-    return page("変更しました", f"<p>{NAMES[plan]}に変更しました。LINEに戻って、そのままお使いください。</p>")
+    u = store.get_user(uid)
+    kind, val = billing.change_plan(uid, p, yearly)
+    new_name = NAMES[plan].split("（")[0]
+    if kind == "up":
+        u2 = store.get_user(uid)
+        bot.notify(uid, "plan_upgraded", {"新しいプラン名": new_name, "差額": f"{val:,}",
+                                          "更新日": store.billing_renew_date(u2), "新しい料金": billing.YEN[(p, yearly)]})
+        return page("変更しました", f"<p>{new_name}に変更しました。LINEに戻って、そのままお使いください。</p>")
+    d = val.astimezone(store.JST)
+    when = f"{d.month}月{d.day}日"
+    bot.notify(uid, "plan_downgrade_scheduled", {"更新日": when, "新しいプラン名": new_name,
+                                                 "新しい料金": billing.YEN[(p, yearly)], "プラン名": billing.plan_name(u)})
+    return page("承りました", f"<p>{when}から{new_name}に切り替わります。それまでは今のプランのままお使いいただけます。</p>")
 
 
 @app.get("/portal")
@@ -186,7 +196,9 @@ def cron_daily(x_cron_key: str = Header("")):
     store_notices = campaign.daily()
     for uid, mid, kw in store_notices:
         bot.notify(uid, mid, kw)
-    return {"monitor_sent": monitor.daily(), "annual_renew_sent": renew, "store_notices": len(store_notices)}
+    import retention
+    return {"monitor_sent": monitor.daily(), "annual_renew_sent": renew, "store_notices": len(store_notices),
+            "purged": retention.daily()}
 
 
 @app.get("/paid")
