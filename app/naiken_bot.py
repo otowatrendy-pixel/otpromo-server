@@ -214,7 +214,7 @@ def card_next(c, step):
     co = dict(c.u.get("company") or {})
     nxt = None
     for s in order[order.index(step) + 1:]:
-        if s == "card_fax" and co.get("FAX"):
+        if s == "card_fax" and (co.get("FAX") or (c.u.get("nk") or {}).get("member")):
             continue
         nxt = s
         break
@@ -224,6 +224,9 @@ def card_next(c, step):
     co["名刺済み"] = True
     store.update_user(c.uid, {"company": co})
     c.refresh()
+    if (c.u.get("nk") or {}).get("member"):
+        import campaign
+        return campaign.member_after_card(c)  # 店舗まとめ割のメンバー：次は受け取り方
     done = texts.build("naiken_card_done")
     if (c.u.get("nk") or {}).get("card_only"):
         _set(c, nk_step=None, nk={})

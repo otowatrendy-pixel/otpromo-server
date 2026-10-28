@@ -56,7 +56,7 @@ def new_user(**ids):
 
 class _Local:
     def __init__(self):
-        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}}
+        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}}
         self.lock = threading.Lock()
         self.dir = Path(config.LOCAL_DIR)
         self.dir.mkdir(parents=True, exist_ok=True)

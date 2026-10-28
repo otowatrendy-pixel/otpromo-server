@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import billing
+import campaign
 import config
 import core
 import delivery
@@ -176,6 +177,10 @@ def advance(c, insert=None):
     if mode == "edit":
         store.update_user(c.uid, {"reg_mode": None})
         return c.send(texts.build("reg_edit_done", 項目=c.u.get("reg_edit_name", "登録内容")))
+    if mode == "member":
+        store.update_user(c.uid, {"reg_mode": None})
+        c.refresh()
+        return campaign.member_done(c)
     if mode == "send_mail":
         store.update_user(c.uid, {"reg_mode": None})
         return send_last(c, "mail")
@@ -322,11 +327,13 @@ def on_postback(c, data):
         return c.send(texts.build({"usage": "help_usage", "contact": "help_contact", "share": "help_share",
                                    "menu": "help_menu"}.get(v, "help_usage")))
     if k == "plan" and v == "show":
-        return c.send(plan_show(c))
+        return c.send(*plan_show(c))
     if k == "plan" and v == "status":
         return c.send(plan_status(c))
     if k == "send":
         return send_last(c, v)
+    if k == "store":
+        return campaign.on_postback(c, v)
     if k == "recvfax":
         return c.send(texts.build("recvfax_show", urls=plan_urls(c)))
     if k == "commercial" and v == "go":
@@ -367,7 +374,11 @@ def plan_urls(c):
 
 
 def plan_show(c):
-    return texts.build("plan_show", urls=plan_urls(c))
+    """料金プランの案内。新人さん応援の期間中は、初めての方に案内を先に付ける（同じ応答で1通分）。"""
+    msgs = [texts.build("plan_show", urls=plan_urls(c))]
+    if campaign.newbie_eligible(c.u):
+        msgs.insert(0, texts.build("shinjin_plan_note"))
+    return msgs
 
 
 def plan_status(c):
@@ -389,12 +400,14 @@ def plan_status(c):
         text = re.sub(r"資料のこり：今月上限なし(枚|件分?)", f"資料：件数の上限なし（今月{q['month_used']}件）", text)
     elif q["plan"] == "free":
         text = text.replace("資料のこり：今月", "資料のこり：")  # お試しの枚数は月ごとではない
-    return texts.build("plan_status", urls=plan_urls(c), text=text)
+    return texts.build("plan_status", urls=plan_urls(c), text=text, drop=campaign.plan_status_drop(c.u))
 
 
 # ---------- 文字 ----------
 
 def on_text(c, t):
+    if campaign.on_text(c, t):
+        return
     step = current_step(c.u)
     if step:
         return reg_text(c, step, t)
@@ -702,6 +715,15 @@ def notify(uid, mid, kw):
         kw = {"期限": store.renew_date(u)}
     elif mid == "plan_payment_failed":
         kw = {"猶予日": "1週間後", "urls": {"お支払い情報を確認": billing.portal_url(uid)}}
+    elif mid == "store_paid":
+        g = campaign.get_group(u.get("shop_code")) or {}
+        if not g:
+            return
+        line.push(u["line_uid"], [texts.build("store_paid", **campaign.money_kw(g)),
+                                  texts.build("store_invite", **campaign.invite_kw(g))])
+        return
+    elif mid == "store_discount_ending":
+        kw["urls"] = {"変更・解約": billing.portal_url(uid), "Stripeのお客様ページ": billing.portal_url(uid)}
     elif mid == "plan_annual_renew":
         kw["urls"] = {"変更・解約": billing.portal_url(uid), "Stripeのお客様ページ": billing.portal_url(uid)}
     urls = kw.pop("urls", None)

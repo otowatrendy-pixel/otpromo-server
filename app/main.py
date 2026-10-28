@@ -110,9 +110,22 @@ def pay(plan: str, t: str = ""):
         return RedirectResponse(billing.fax_pack_checkout(uid), status_code=303)
     if plan == "faxrecv":
         return RedirectResponse(billing.faxrecv_pack_checkout(uid), status_code=303)
+    u = store.get_user(uid)
+    if plan == "store":
+        import campaign
+        if u.get("shop_code"):
+            return page("お申し込み済みです", f"<p>{html.escape(u.get('shop_name') or '')}の店舗まとめ割をご利用中です。</p>")
+        if not campaign.store_open():
+            return page("受付を終了しました", "<p>店舗まとめ割のお申し込みは終了しました。お一人ずつのプランは、いつでもお申し込みいただけます。</p>")
+        url = campaign.checkout_url(uid)
+        if not url:
+            return page("もう一度お試しください", "<p>お申し込みの内容が見つかりませんでした。LINEの「店舗まとめ割」から、もう一度お進みください。</p>")
+        return RedirectResponse(url, status_code=303)
     if plan not in NAMES:
         raise HTTPException(404)
-    u = store.get_user(uid)
+    if u.get("shop_code") or u.get("plan_source") == "group":
+        return page("店舗まとめ割をご利用中です", f"""<p>{html.escape(u.get('shop_name') or '店舗')}の店舗まとめ割でご利用中のため、
+個人のプランのお申し込みはいりません。人数やプランのご相談は、店舗の代表の方にお願いします。</p>""")
     p, yearly = _plan(plan)
     if u.get("stripe_subscription"):
         if (p, yearly) == (u.get("plan"), u.get("billing_interval") == "year"):
@@ -169,7 +182,11 @@ def cron_daily(x_cron_key: str = Header("")):
     for uid, kw in billing.annual_renew_notices():
         bot.notify(uid, "plan_annual_renew", kw)
         renew += 1
-    return {"monitor_sent": monitor.daily(), "annual_renew_sent": renew}
+    import campaign
+    store_notices = campaign.daily()
+    for uid, mid, kw in store_notices:
+        bot.notify(uid, mid, kw)
+    return {"monitor_sent": monitor.daily(), "annual_renew_sent": renew, "store_notices": len(store_notices)}
 
 
 @app.get("/paid")

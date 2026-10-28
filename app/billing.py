@@ -19,6 +19,8 @@ PLAN_NAMES = {"free": "無料お試し", "light": "ライトプラン", "unlimit
 def plan_name(u):
     """表示用のプラン名。年払いは「ライトプラン（年払い）」。"""
     n = PLAN_NAMES[u.get("plan") or "free"]
+    if (u.get("plan") or "free") != "free" and u.get("plan_source") == "group" and u.get("shop_name"):
+        return f"{n}（{u['shop_name']}・店舗まとめ割）"
     return n + "（年払い）" if (u.get("plan") or "free") != "free" and u.get("billing_interval") == "year" else n
 
 
@@ -32,6 +34,11 @@ def plan_of_price(pid):
     for (plan, yearly) in (("light", False), ("unlimited", False), ("light", True), ("unlimited", True)):
         if pid == price_of(plan, yearly):
             return plan, yearly
+    # 店舗まとめ割（1人あたりの月額）
+    if pid == config.PRICE_GROUP_LIGHT:
+        return "light", False
+    if pid == config.PRICE_GROUP_UNLIMITED:
+        return "unlimited", False
     return None, False
 
 
@@ -182,9 +189,24 @@ def checkout(uid, plan, yearly=False):
         params["customer"] = u["stripe_customer"]
     elif u.get("delivery", {}).get("email"):
         params["customer_email"] = u["delivery"]["email"]
+    import campaign
+    if not yearly and campaign.newbie_eligible(u):
+        # 新人さん応援：最初の月だけ半額（1回だけ50%引き）
+        params["discounts"] = [{"coupon": newbie_coupon()}]
+        params["metadata"]["newbie"] = "1"
     sess = s.checkout.Session.create(**params)
     log.info("checkout %s %s %s %s", uid, plan, "year" if yearly else "month", company)
     return sess.url
+
+
+def newbie_coupon():
+    """新人さん応援のクーポン（1回だけ50%引き）。なければ作る。"""
+    s = _stripe()
+    try:
+        return plain(s.Coupon.retrieve(config.NEWBIE_COUPON))["id"]
+    except s.InvalidRequestError:
+        return plain(s.Coupon.create(id=config.NEWBIE_COUPON, name="新人さん応援 最初の月半額", percent_off=50,
+                                     duration="once", metadata={"service": "maisoku", "kind": "newbie"}))["id"]
 
 
 def can_change(u, plan, yearly):
@@ -236,6 +258,10 @@ def _period(sub):
 def sync_subscription(sub):
     """Stripeの契約内容から、利用者のプラン・期間・FAXオプションを決める。戻り値は (uid, 変更前のプラン, 変更後)。"""
     sub = plain(sub)
+    if (sub.get("metadata") or {}).get("purpose") == "group":
+        import campaign
+        uid = campaign.sync_group(sub)
+        return uid, None, None
     uid = (sub.get("metadata") or {}).get("uid")
     if not uid:
         uid, _ = store.db().find("users", "stripe_customer", sub["customer"])
@@ -260,8 +286,18 @@ def sync_subscription(sub):
             "period_end": datetime.fromtimestamp(end, timezone.utc) if end else None}
     if yearly and start_dt and u.get("period_start") != start_dt:
         data["year_base_docs"] = u.get("total_docs", 0)  # 年払いの更新案内で「この1年の件数」を出すため
+    if plan != "free":
+        data["paid_before"] = True  # 新人さん応援は「初めての方」だけ
+    if plan == "free" and u.get("plan_source") in ("group", "group_leaving"):
+        # 店舗まとめ割で使っている方は、個人の契約の状態でプランを上書きしない
+        data = {"stripe_customer": sub["customer"], "stripe_subscription": None, "sub_status": sub["status"]}
     store.update_user(uid, data)
     _track_yearly(uid, yearly and plan != "free")
+    if plan == "free" and u.get("shop_code"):
+        import campaign
+        g = campaign.get_group(u["shop_code"])
+        if g and g.get("status") == "active":
+            campaign.apply_member(uid, g)  # 個人の契約が終わったので、店舗のプランに切り替える
     return uid, u.get("plan"), plan
 
 
@@ -339,13 +375,25 @@ def handle_webhook(payload: bytes, sig: str):
         return []
     t, obj = ev["type"], ev["data"]["object"]
     notices = []
-    if t == "checkout.session.completed" and obj.get("mode") == "subscription":
+    md = obj.get("metadata") or {}
+    if t == "checkout.session.completed" and md.get("purpose") == "group":
+        import campaign
+        notices += campaign.on_paid(obj)
+    elif t.startswith("customer.subscription.") and md.get("purpose") == "group":
+        import campaign
+        notices += campaign.on_sub_event(t, ev, obj)
+    elif t == "checkout.session.completed" and obj.get("mode") == "subscription":
         uid = obj.get("client_reference_id")
         store.update_user(uid, {"stripe_customer": obj["customer"]})
         sub = s.Subscription.retrieve(obj["subscription"])
         uid, before, after = sync_subscription(sub)
         if uid:
             notices.append((uid, "plan_started", {}))
+        if uid and md.get("newbie") and after in ("light", "unlimited"):
+            import campaign
+            full = campaign.NORMAL_YEN[after]
+            notices.append((uid, "shinjin_started", {"半額": f"{full // 2:,}", "通常料金": f"{full:,}",
+                                                     "更新日": store.billing_renew_date(store.get_user(uid))}))
     elif t == "checkout.session.completed" and (obj.get("metadata") or {}).get("purpose") == "fax_pack":
         import naiken
         uid = obj.get("client_reference_id")

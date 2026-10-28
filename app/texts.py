@@ -60,13 +60,15 @@ def _action(b, urls, kw=None):
     return None
 
 
-def build(mid, urls=None, extra_buttons=None, append="", text=None, **kw):
-    """文面IDからLINEのメッセージを1つ作る。urls はボタンのラベル→URL。text で文を差し替えられる。"""
+def build(mid, urls=None, extra_buttons=None, append="", text=None, drop=(), buttons=None, **kw):
+    """文面IDからLINEのメッセージを1つ作る。urls はボタンのラベル→URL。text で文を差し替えられる。
+    drop は出さないボタンの action（例 "postback store=start"）、buttons でボタンを丸ごと差し替え。"""
     m = _MSG[mid]
     text = text if text is not None else raw(mid, **kw)
     if append:
         text = text + "\n\n" + append
-    buttons = list(m.get("buttons", [])) + list(extra_buttons or [])
+    buttons = list(m.get("buttons", []) if buttons is None else buttons) + list(extra_buttons or [])
+    buttons = [b for b in buttons if b["action"] not in drop]
     acts = [a for a in (_action(b, urls or {}, kw) for b in buttons) if a]
     if any(a["type"] == "uri" for a in acts):
         return _card(text, acts)

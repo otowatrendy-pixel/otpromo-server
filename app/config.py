@@ -34,6 +34,14 @@ PRICE_UNLIMITED = env("PRICE_UNLIMITED", "price_1UVHfFB542nWQrMKwZKbd3uZ")
 # 年払い（税込。件数・回数は月払いと同じく毎月戻す。途中解約は返金なし・期間の終わりまで使える）
 PRICE_LIGHT_YEAR = env("PRICE_LIGHT_YEAR", "price_1UVJygB542nWQrMKfPqpDrzx")          # 年額14,800円
 PRICE_UNLIMITED_YEAR = env("PRICE_UNLIMITED_YEAR", "price_1UVJyhB542nWQrMKZRxg4Gsd")  # 年額29,800円
+# 店舗まとめ割（1人あたり月額・税込）。受付はサービス公開日（STORE_CAMPAIGN_START）から3か月
+PRICE_GROUP_LIGHT = env("PRICE_GROUP_LIGHT", "price_1UVKSxB542nWQrMKvDBQepAF")          # 1,180円
+PRICE_GROUP_UNLIMITED = env("PRICE_GROUP_UNLIMITED", "price_1UVKSxB542nWQrMK8EVLk1FV")  # 2,480円
+STORE_CAMPAIGN_START = env("STORE_CAMPAIGN_START")  # 例 2026-12-01。空なら受付中（公開前の確認用）
+# 新人さん応援：期間中に初めて月払いを申し込んだ方は最初の月が半額（1回だけ50%引きのクーポン）
+NEWBIE_START = env("NEWBIE_START", "2027-03-01")
+NEWBIE_END = env("NEWBIE_END", "2027-04-30")
+NEWBIE_COUPON = env("NEWBIE_COUPON", "newbie_half")
 TAX_RATE = env("STRIPE_TAX_RATE")  # 消費税10%（外税）の txr_...。空なら起動時に探すか作る
 
 # フォームのリンクに付ける署名の鍵
