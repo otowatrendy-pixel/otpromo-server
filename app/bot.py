@@ -536,7 +536,7 @@ def on_text(c, t):
         return on_postback(c, "edit=staff")
     if c.u.get("registered") and FIX_WORDS.search(t) and c.u.get("last_job"):
         return fix_last(c, t)
-    if norm(t) == monitor.CODE:
+    if monitor.ENABLED and norm(t) == monitor.CODE:
         if not c.u.get("registered"):
             return c.send(texts.build("reg_first"))
         mid = monitor.apply(c.uid)

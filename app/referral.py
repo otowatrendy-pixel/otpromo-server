@@ -166,8 +166,8 @@ def _used_referral(invoice):
     return False
 
 
-def establish(referred, rec, app=False):
-    """紹介が成立した（紹介された方の最初の支払い）。紹介した方へ特典。"""
+def establish(referred, rec, app=False, release=False):
+    """紹介が成立した（紹介された方の最初の支払い）。紹介した方へ特典。release は運営が保留を解いたとき。"""
     referrer = rec["referrer"]
     ru = store.get_user(referrer) or {}
     now = store.now()
@@ -177,7 +177,7 @@ def establish(referred, rec, app=False):
     if len(done) >= YEAR_LIMIT:
         store.db().set("referrals", referred, {"status": "limit", "established_at": now}, merge=True)
         return [(referrer, "referral_limit", {})]
-    if len(month) >= MONTH_HOLD:
+    if len(month) >= MONTH_HOLD and not release:
         store.db().set("referrals", referred, {"status": "hold", "established_at": now}, merge=True)
         log.warning("紹介が1か月に%s件を超えたため保留 %s", MONTH_HOLD, referrer)
         return [(referrer, "referral_hold", {})]
@@ -202,6 +202,32 @@ def establish(referred, rec, app=False):
     store.db().update_tx("users", referrer, lambda u: u.__setitem__(
         "ref_queue", (u.get("ref_queue") or []) + [{"referred": referred, "name": name or "", "at": now}]))
     return _apply_queue(referrer, joined=True)
+
+
+def held():
+    """1か月に5件を超えて保留している紹介の一覧（運営用）。"""
+    out = []
+    for referred, rec in store.db().all("referrals"):
+        if rec.get("status") != "hold":
+            continue
+        ru = store.get_user(rec.get("referrer")) or {}
+        du = store.get_user(referred) or {}
+        out.append({"referred": referred, "referrer": rec.get("referrer"), "code": rec.get("code"),
+                    "referrer_company": (ru.get("company") or {}).get("会社名", ""),
+                    "referred_company": (du.get("company") or {}).get("会社名", ""),
+                    "established_at": rec["established_at"].isoformat() if rec.get("established_at") else None})
+    return out
+
+
+def decide(referred, ok):
+    """運営が保留を判断する。ok なら特典を渡し、だめなら無効にする。戻り値は LINE で知らせる内容。"""
+    rec = store.db().get("referrals", referred)
+    if not rec or rec.get("status") != "hold":
+        return None
+    if not ok:
+        store.db().set("referrals", referred, {"status": "void", "decided_at": store.now()}, merge=True)
+        return []
+    return establish(referred, rec, release=True)
 
 
 def _apply_queue(uid, used=False, joined=False):

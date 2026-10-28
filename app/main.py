@@ -278,6 +278,29 @@ def admin_outage(body: OutageIn, key: str = ""):
     return {"on": body.on}
 
 
+@app.get("/admin/referrals/hold")
+def admin_referral_hold(key: str = ""):
+    """紹介が1か月に5件を超えて保留しているものの一覧（合言葉 ADMIN_OPS_KEY）。"""
+    import referral
+    _ops_key(key)
+    return {"hold": referral.held()}
+
+
+@app.post("/admin/referrals/{referred}/{action}")
+def admin_referral_decide(referred: str, action: str, key: str = ""):
+    """保留の判断。action は release（特典を渡す）か void（渡さない）。"""
+    import referral
+    _ops_key(key)
+    if action not in ("release", "void"):
+        raise HTTPException(422)
+    notices = referral.decide(referred, action == "release")
+    if notices is None:
+        raise HTTPException(404, "保留中の紹介が見つかりません")
+    for uid, mid, kw in notices:
+        bot.notify(uid, mid, kw)
+    return {"ok": True, "action": action, "notices": [m for _, m, _ in notices]}
+
+
 @app.post("/admin/line/webhook")
 async def admin_line_webhook(request: Request, x_line_signature: str = Header("")):
     """運営専用LINE「1分資料 運営通知」の Webhook。友だちになった運営の方のIDを覚える。"""

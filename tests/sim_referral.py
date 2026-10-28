@@ -92,3 +92,14 @@ h2 = {"Authorization": "Bearer dev:app2"}
 cl.get("/v1/me", headers=h2)
 c2 = store.user_by_firebase("app2")[1]
 print("自分のコード:", cl.post("/v1/referral", json={"code": store.get_user(store.user_by_firebase("app2")[0])["referral_code"]}, headers=h2).status_code)
+
+print("\n=== 保留（月5件超）を運営が解く ===")
+import referral as _ref
+_rec = {"referrer": "LUabc", "code": "OT-TEST1", "status": "hold", "established_at": store.now()}
+store.db().set("referrals", "Uheld1", _rec)
+store.db().set("referrals", "Uheld2", {**_rec, "code": "OT-TEST2"})
+print("保留:", [h["referred"] for h in _ref.held()])
+print("解く:", _ref.decide("Uheld1", True), "無効:", _ref.decide("Uheld2", False))
+assert store.db().get("referrals", "Uheld1")["status"] == "established"
+assert store.db().get("referrals", "Uheld2")["status"] == "void"
+assert _ref.decide("Uheld1", True) is None

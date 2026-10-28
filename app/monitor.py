@@ -18,6 +18,8 @@ import texts
 log = logging.getLogger("monitor")
 CAPACITY = int(config.env("MONITOR_CAPACITY", "40"))
 CODE = config.env("MONITOR_CODE", "モニター")
+# ご感想モニターは保留中（10/28本人決定）。MONITOR_ENABLED=1 にすると合言葉を受け付ける。お知らせの仕組みは残す
+ENABLED = config.env("MONITOR_ENABLED", "0") == "1"
 BONUS = int(config.env("MONITOR_BONUS", "10"))
 WEEK = "月火水木金土日"
 
