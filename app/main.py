@@ -29,7 +29,8 @@ def _setup_webhooks():
     import threading
 
     def run():
-        for name, fn in (("stripe", billing.ensure_webhook), ("line", line.ensure_webhook)):
+        import richmenu
+        for name, fn in (("stripe", billing.ensure_webhook), ("line", line.ensure_webhook), ("richmenu", richmenu.ensure)):
             try:
                 fn()
             except Exception:

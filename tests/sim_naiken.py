@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 os.environ.setdefault("STORE", "local")
+os.environ.setdefault("INVOICE_TRN", "")  # 手元では Stripe に登録番号を作りに行かない
 os.environ.setdefault("MOCK_RESULT", str(ROOT / "tests" / "fixtures" / "mihon-chintai.json"))
 import simulate as s  # 登録とマイソク10枚まで流れる
 import store

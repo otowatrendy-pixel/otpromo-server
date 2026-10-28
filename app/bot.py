@@ -99,6 +99,12 @@ def handle(ev):
         return on_follow(c)
     if t == "unfollow":
         return store.update_user(c.uid, {"blocked": True, "blocked_at": store.now()})
+    if c.u.get("registered") and t in ("message", "postback"):
+        import richmenu
+        rid = RICHMENU_REGISTERED or richmenu.menu_id(True)
+        if rid and c.u.get("menu_id") != rid:  # メニューを作り直したあとも、登録済みの方には大きいメニューを付ける
+            link_menu(c.line_uid, True)
+            store.update_user(c.uid, {"menu_id": rid})
     if t == "postback" and ev["postback"]["data"] == "terms=agree":
         held = c.u.get("terms_held")
         store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION, "terms_held": None})
@@ -156,7 +162,8 @@ def on_follow(c):
 
 
 def link_menu(line_uid, registered):
-    rid = RICHMENU_REGISTERED if registered else RICHMENU_UNREGISTERED
+    import richmenu
+    rid = (RICHMENU_REGISTERED if registered else RICHMENU_UNREGISTERED) or richmenu.menu_id(registered)
     if rid:
         try:
             import requests
