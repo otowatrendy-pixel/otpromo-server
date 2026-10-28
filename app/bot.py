@@ -127,6 +127,11 @@ def handle(ev):
             store.update_user(c.uid, {"terms_held": {k: ev[k] for k in ("type", "source", "message", "postback",
                                                                         "webhookEventId") if k in ev}})
             return c.send(terms_message())
+    if t in ("postback", "message"):
+        o = usage.outage()
+        if o:
+            # 「障害中」の間は、決まった一言を応答で返す（通数に数えない）
+            return c.send(texts.build("ops_outage_reply", **(o.get("values") or {})))
     if t in ("postback", "message") and c.u.get("recvfax_remind_at"):
         # 「このままFAXする」のお知らせは、その間にほかの操作があれば送らない
         store.update_user(c.uid, {"recvfax_remind_at": None})
@@ -851,7 +856,7 @@ def deliver(c, jid, after=()):
             usage.notify_admin("メールが送れず、資料をLINEで届けました",
                                f"お客様ID：{c.uid}\n送り先：{d['email']}\n物件：{job['title']}\n"
                                f"Resendの上限（1日100通・月3,000通）に達したか、送り先の誤りの可能性があります。")
-            pre = [line.text(texts.note("deliver_mail_failed") or "メールでお送りできなかったため、LINEでお届けします。")]
+            pre = [texts.build("deliver_mail_failed", メールアドレス=d["email"])]
     if method == "fax" and d.get("fax"):
         # FAXの前に帯替え図面を見てもらい、「このままFAXする」で送る（10/28本人決定）
         t = store.now()

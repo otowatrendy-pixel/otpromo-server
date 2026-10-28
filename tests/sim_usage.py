@@ -71,3 +71,15 @@ usage.daily_report()
 print(notices[0][1]); print(notices[0][2])
 assert notices[0][1] == "【1分資料 日報】"
 print("OK")
+
+print("\n=== 障害中スイッチ ===")
+usage.set_outage(True, {"影響": "資料の作成ができない状態になっています", "送った募集図面の扱い": "復旧後に順番にお作りします。"})
+s.text("こんにちは")
+usage.set_outage(False)
+print("\n=== 一斉送信の確認（送らない） ===")
+print(usage.broadcast_plan("ops_outage", "line", {"発生日時": "10月28日 15時", "影響": "資料の作成ができない状態になっています",
+                                                   "復旧見込み": "確認でき次第お知らせします", "送った募集図面の扱い": ""}))
+print(usage.broadcast_plan("ops_outage_mail", "mail", {"発生日時": "10月28日 15時"})["people"])
+notices.clear()
+print("送れた人数:", usage.broadcast("ops_maint_done", "line", {}))
+print("OK2")

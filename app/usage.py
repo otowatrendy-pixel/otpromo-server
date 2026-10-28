@@ -181,10 +181,34 @@ def stats():
         "line_push": {"month": push_used, "limit": push_limit, "percent": round(push_used * 100 / push_limit, 1),
                       "today": d.get("push", 0), "yesterday": y.get("push", 0), "forecast_month_end": forecast,
                       "held_now": _held_now(), "held_month": m.get("push_held", 0)},
+        "users": user_stats(),
         "mail": {"today": d.get("mail", 0), "yesterday": y.get("mail", 0), "day_limit": MAIL_DAY_LIMIT,
                  "month": m.get("mail", 0), "month_limit": MAIL_MONTH_LIMIT,
                  "fallback_to_line_month": m.get("mail_fallback", 0), "fallback_to_line_yesterday": y.get("mail_fallback", 0)},
     }
+
+
+def user_stats():
+    """利用者数（日報用）。有料はプランと払い方の内訳、お試し中、今月の新規登録、今月の解約。"""
+    t = _jst()
+    first = t.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    paid = {"light_month": 0, "light_year": 0, "unlimited_month": 0, "unlimited_year": 0}
+    trial = new = ended = blocked = 0
+    for _, u in store.db().all("users"):
+        plan = u.get("plan") or "free"
+        if plan in ("light", "unlimited"):
+            key = f"{plan}_{'year' if u.get('billing_interval') == 'year' else 'month'}"
+            paid[key] += 1
+        elif u.get("registered") and not u.get("blocked"):
+            trial += 1
+        if u.get("registered_at") and u["registered_at"] >= first:
+            new += 1
+        if u.get("ended_at") and u["ended_at"] >= first:
+            ended += 1
+        if u.get("blocked"):
+            blocked += 1
+    return {"paid": paid, "paid_total": sum(paid.values()), "trial": trial, "new_this_month": new,
+            "ended_this_month": ended, "blocked": blocked}
 
 
 def _held_now():
@@ -222,13 +246,86 @@ def check():
 def daily_report():
     """毎朝9時の日報【1分資料 日報】。"""
     s = stats()
-    p, ml = s["line_push"], s["mail"]
-    text = (f"{_jst().month}月{_jst().day}日 9時時点の数字です。\n\n"
+    p, ml, us = s["line_push"], s["mail"], s["users"]
+    text = (f"{_jst().month}月{_jst().day}日 {_jst().hour}時時点の数字です。\n\n"
             f"■LINE push\n今月：{p['month']}通／上限{p['limit']}通（{p['percent']}%）\n"
             f"昨日：{p['yesterday']}通\n月末の見込み：{p['forecast_month_end']}通\n\n"
             f"■メール\n昨日：{ml['yesterday']}通／1日{ml['day_limit']}通\n今月：{ml['month']}通／{ml['month_limit']}通\n\n"
+            f"■利用者\n有料：{us['paid_total']}人（ライト 月払い{us['paid']['light_month']}・年払い{us['paid']['light_year']}／"
+            f"使い放題 月払い{us['paid']['unlimited_month']}・年払い{us['paid']['unlimited_year']}）\n"
+            f"お試し中：{us['trial']}人\n今月の新規登録：{us['new_this_month']}人\n今月の解約：{us['ended_this_month']}人\n\n"
             f"■上限で送れずにためているLINEのお知らせ：{p['held_now'] if p['held_now'] is not None else '－'}件\n"
             f"■メールが送れずLINEで代わりに届けた件数：昨日{ml['fallback_to_line_yesterday']}件（今月{ml['fallback_to_line_month']}件）\n")
     import delivery
     delivery.send_notice(ADMIN_MAIL, "【1分資料 日報】", text)
     return s
+
+
+# ---------- 障害・メンテナンスのお知らせ（運営から全員へ） ----------
+
+_outage = {"at": 0, "v": None}
+
+
+def outage():
+    """「障害中」スイッチ（meta/outage）。30秒だけ覚えておき、イベントごとに読みに行かない。"""
+    import time
+    if time.monotonic() - _outage["at"] > 30:
+        _outage["v"] = _get("outage")
+        _outage["at"] = time.monotonic()
+    v = _outage["v"] or {}
+    return v if v.get("on") else None
+
+
+def set_outage(on, values=None):
+    store.db().set("meta", "outage", {"on": bool(on), "values": values or {}, "at": store.now()})
+    _outage["at"] = 0
+
+
+def _recipients(to):
+    out = []
+    for uid, u in store.db().all("users"):
+        if to == "line":
+            if u.get("line_uid") and not u.get("blocked"):
+                out.append((uid, u))
+        elif u.get("registered") and ((u.get("delivery") or {}).get("email") or (u.get("company") or {}).get("担当者メール")):
+            out.append((uid, u))
+    return out
+
+
+def broadcast_plan(mid, to, values):
+    """送る前の確認：人数・残りの通数で足りるか・文面の見本。"""
+    import texts
+    people = _recipients(to)
+    sample = texts.raw(mid, **{"会社名": "（会社名）", "担当者名": "（担当者名）", **(values or {})})
+    if to == "line":
+        used, limit = line_quota()
+        left = max(0, limit - used)
+        return {"to": "line", "people": len(people), "push_left": left, "enough": len(people) <= left, "preview": sample}
+    s = stats()["mail"]
+    left = max(0, MAIL_DAY_LIMIT - s["today"])
+    return {"to": "mail", "people": len(people), "mail_left_today": left, "enough": len(people) <= left,
+            "preview": sample}
+
+
+def broadcast(mid, to, values):
+    """一斉送信（呼び出し側で別スレッドにする）。送れた人数を返す。"""
+    import delivery
+    import texts
+    n = 0
+    for uid, u in _recipients(to):
+        co = u.get("company") or {}
+        kw = {"会社名": co.get("会社名", ""), "担当者名": co.get("担当者名", ""), **(values or {})}
+        try:
+            if to == "line":
+                ok = line.push(u["line_uid"], [texts.build(mid, **kw)])
+            else:
+                body = texts.raw(mid, **kw)
+                subject, _, rest = body.partition("\n")
+                subject = subject.removeprefix("件名：").strip()
+                addr = (u.get("delivery") or {}).get("email") or co.get("担当者メール")
+                ok = delivery.send_notice(addr, subject, rest.strip())
+            n += 1 if ok else 0
+        except Exception:
+            log.exception("一斉送信の失敗 %s", uid)
+    notify_admin(f"一斉送信が終わりました（{mid}）", f"宛先：{'LINE' if to == 'line' else 'メール'}\n送れた人数：{n}人", urgent=False)
+    return n

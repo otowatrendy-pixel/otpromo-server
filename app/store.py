@@ -123,6 +123,9 @@ class _Local:
         p = self.dir / key
         return p.read_bytes() if p.exists() else None
 
+    def all(self, col):
+        return [(k, copy.deepcopy(v)) for k, v in self.docs[col].items()]
+
     def incr(self, col, id, fields):
         with self.lock:
             d = self.docs[col].setdefault(id, {})
@@ -188,6 +191,9 @@ class _GCP:
             return b.download_as_bytes()
         except Exception:
             return None
+
+    def all(self, col):
+        return [(s.id, s.to_dict()) for s in self.fs.collection(col).stream()]
 
     def incr(self, col, id, fields):
         self.fs.collection(col).document(id).set({k: self.firestore.Increment(n) for k, n in fields.items()}, merge=True)

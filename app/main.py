@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 import api
 import billing
@@ -231,6 +232,50 @@ def admin_usage(key: str = ""):
     if not (want and _hmac.compare_digest(key, want)):
         raise HTTPException(403)
     return usage.stats()
+
+
+def _ops_key(key):
+    import hmac as _hmac
+    want = config.env("ADMIN_OPS_KEY")
+    if not (want and _hmac.compare_digest(key or "", want)):
+        raise HTTPException(403)
+
+
+class BroadcastIn(BaseModel):
+    id: str                 # 文面ID（ops_outage・ops_outage_mail など）
+    to: str = "line"        # line（LINE全員）か mail（メール全員）
+    values: dict = {}       # 差し込み（発生日時・影響など）
+    send: bool = False      # false なら送らずに、人数・残りの通数・見本だけ返す
+
+
+@app.post("/admin/broadcast")
+def admin_broadcast(body: BroadcastIn, key: str = ""):
+    """障害・メンテナンスのお知らせの一斉送信（合言葉 ADMIN_OPS_KEY）。まず send=false で確かめてから送る。"""
+    import threading
+    import texts
+    import usage
+    _ops_key(key)
+    if body.to not in ("line", "mail") or body.id not in texts._MSG or not body.id.startswith("ops_"):
+        raise HTTPException(422, "id は ops_ で始まる文面ID、to は line か mail")
+    plan = usage.broadcast_plan(body.id, body.to, body.values)
+    if not body.send:
+        return plan
+    threading.Thread(target=usage.broadcast, args=(body.id, body.to, body.values), daemon=True).start()
+    return {**plan, "started": True}
+
+
+class OutageIn(BaseModel):
+    on: bool
+    values: dict = {}       # ops_outage_reply の差し込み（影響・送った募集図面の扱い）
+
+
+@app.post("/admin/outage")
+def admin_outage(body: OutageIn, key: str = ""):
+    """「障害中」スイッチ。オンの間は、利用者からのメッセージに ops_outage_reply を応答で返す。"""
+    import usage
+    _ops_key(key)
+    usage.set_outage(body.on, body.values)
+    return {"on": body.on}
 
 
 @app.post("/admin/line/webhook")
