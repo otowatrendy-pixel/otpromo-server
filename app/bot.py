@@ -120,6 +120,9 @@ def handle(ev):
             store.update_user(c.uid, {"terms_held": {k: ev[k] for k in ("type", "source", "message", "postback",
                                                                         "webhookEventId") if k in ev}})
             return c.send(terms_message())
+    if t in ("postback", "message") and c.u.get("recvfax_remind_at"):
+        # 「このままFAXする」のお知らせは、その間にほかの操作があれば送らない
+        store.update_user(c.uid, {"recvfax_remind_at": None})
     if t == "postback":
         return on_postback(c, ev["postback"]["data"])
     if t != "message":
@@ -365,10 +368,11 @@ def on_postback(c, data):
         show = (c.u.get("company") or {}).get("携帯を載せる", True)
         toggle = {"label": "携帯を図面に載せない" if show else "携帯を図面に載せる",
                   "action": "postback edit=mobile_hide" if show else "postback edit=mobile_show"}
+        # 「宛名を聞かない／聞く」は今の設定に合わせた名前で出す
         ask = asks_name(c.u)
-        toggle2 = {"label": "宛名を聞かない" if ask else "宛名を毎回聞く",
-                   "action": "postback edit=atena_off" if ask else "postback edit=atena_on"}
-        return c.send(texts.build("reg_edit", extra_buttons=[toggle, toggle2]))
+        btns = [dict(b, label="宛名を聞かない" if ask else "宛名を毎回聞く") if b["action"] == "postback edit=atena" else b
+                for b in texts.buttons_of("reg_edit")]
+        return c.send(texts.build("reg_edit", buttons=btns, extra_buttons=[toggle]))
     if k == "edit" and v in ("mobile_hide", "mobile_show") and c.u.get("registered"):
         show = v == "mobile_show"
         set_company(c, 携帯を載せる=show)
@@ -376,12 +380,14 @@ def on_postback(c, data):
             "これから作る帯替え図面に、携帯番号を載せます。" if show else
             "これから作る帯替え図面には、携帯番号を載せません（「担当：お名前」だけ載ります）。\n"
             "内見申込書は管理会社への連絡用のため、携帯番号はこれまでどおり載ります。"))
-    if k == "edit" and v in ("atena_off", "atena_on") and c.u.get("registered"):
-        on = v == "atena_on"
+    if k == "edit" and v in ("atena", "atena_off", "atena_on") and c.u.get("registered"):
+        on = v == "atena_on" if v != "atena" else not asks_name(c.u)
         set_company(c, 宛名を聞く=on)
-        return c.send(line.text(
-            "これから募集図面を送るたびに、初期費用概算書の宛名をお聞きします。" if on else
-            "これからは宛名をお聞きせず、初期費用概算書の宛名は空欄で作ります（手書きでご記入いただけます）。"))
+        return c.send(texts.build("atena_on_done" if on else "atena_off_done"))
+    if k == "atena" and v == "skip":
+        if c.u.get("name_wait"):
+            return on_name(c, "不要")
+        return c.send(line.text("宛名をお待ちしている資料はありません。募集図面を送っていただくと、宛名をお聞きします。"))
     if k == "reg" and v == "show":
         return c.send(confirm_message(c.u))
     if k == "edit" and v == "staff" and c.u.get("registered"):
@@ -416,6 +422,8 @@ def on_postback(c, data):
     if k == "referral":
         import referral
         return c.send(*referral.menu_messages(c.uid))
+    if k == "recvfax" and v.split("&")[0] in ("send", "skip"):
+        return recvfax_press(c, v)
     if k == "recvfax":
         return c.send(texts.build("recvfax_show", urls=plan_urls(c)))
     if k == "commercial" and v == "go":
@@ -606,6 +614,18 @@ def hold(c, data, kind, result=None, pages=0):
                                           "result": result}})
 
 
+def purge_pending():
+    """定期実行から。預かって24時間を過ぎた募集図面の画像を消す（10/28本人決定）。消した件数を返す。"""
+    n = 0
+    for uid, u in store.db().before("users", "pending.at", store.now() - timedelta(hours=24)):
+        if not u.get("pending"):
+            continue
+        store.db().delete_file(f"users/{uid}/pending.bin")
+        store.update_user(uid, {"pending": None})
+        n += 1
+    return n
+
+
 def process(c, data, held=None):
     """資料を作って届ける。held は預かっていた読み取り結果（事業用の確認後など）。"""
     q = store.quota(c.u)
@@ -657,6 +677,9 @@ def finish(c, jid, a, atena="", after=()):
     try:
         if not store.try_consume(c.uid):
             store.update_job(jid, {"status": "failed", "error": "quota"})
+            buf = io.BytesIO()
+            a["img"].save(buf, "PNG")
+            hold(c, buf.getvalue(), "quota", schema.for_store(a["result"]), a["pages"])
             return c.send(texts.build("plan_needed", urls=plan_urls(c)), *after)
         consumed = True
         company = {**company_for_render(c.uid, c.u), "宛名": atena}
@@ -694,22 +717,16 @@ def _job_label(jid):
     """宛名をお聞きする物件の呼び方。読み取りが済んでいれば物件名。"""
     f = ((store.get_job(jid) or {}).get("result") or {}).get("事実") or {}
     name = " ".join(x for x in (f.get("物件名"), f.get("号室") and f"{f['号室']}号室") if x)
-    return f"「{name}」" if name else "先に送っていただいた募集図面"
+    return name or "先に送っていただいた募集図面"
 
 
 def name_question(queue=(), kind="first"):
     """宛名の聞き方。kind: first（最初）・more（ほかに待ちがあるときに届いた）・next（1件届けたあと続けて）。"""
-    tail = "宛名を空欄のままでよい場合は「不要」と送ってください。"
     if kind == "first" or not queue:
-        t = "お客様のお名前（初期費用概算書の宛名）を送ってください。\n" + tail
-    elif kind == "more":
-        t = (f"この募集図面も受け付けました（宛名をお待ちしているのは{len(queue)}件です）。\n"
-             f"届いた順にお聞きしています。まず{_job_label(queue[0])}の宛名を送ってください。\n" + tail)
-    else:
-        t = f"続けて、{_job_label(queue[0])}の宛名を送ってください（あと{len(queue)}件）。\n" + tail
-    msg = line.text(t)
-    msg["quickReply"] = {"items": [{"type": "action", "action": {"type": "message", "label": "不要", "text": "不要"}}]}
-    return msg
+        return texts.build("atena_ask")
+    if kind == "more":
+        return texts.build("atena_more", 件数=len(queue), 物件=_job_label(queue[0]))
+    return texts.build("atena_next", 件数=len(queue), 物件=_job_label(queue[0]))
 
 
 def analyze_and_ask(c, jid, data):
@@ -808,7 +825,7 @@ def deliver(c, jid, after=()):
     if (job.get("pages") or 0) > 1:
         extra.append(texts.note("err_file"))
     remain = remain_note(u)
-    pdf_url = store.file_url(jid, job, "shiryou.pdf")
+    url_okyaku, url_shanai = store.pdf_urls(jid, job)
     img = line.image(store.file_url(jid, job, "obikae.jpg"), store.file_url(jid, job, "preview.jpg"))
     if job.get("verdict") == "commercial":
         # 事業用のときは、資料の前に一言（同じ応答なので通数は増えない）
@@ -817,39 +834,114 @@ def deliver(c, jid, after=()):
     # 何枚か続けて送られても、各資料の「この物件で内見FAX」はその物件で始まるよう資料IDを入れる
     common = dict(物件名=job["title"], のこり枚数の案内=remain, extra_buttons=remain_buttons(u), 資料ID=jid)
     if method == "email" and d.get("email"):
-        pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
-        if delivery.send_mail(d["email"], job["title"], pdf, pdf_url):
+        if delivery.send_mail(d["email"], job["title"], store.pdf_files(jid, job, job["title"]),
+                              store.file_url(jid, job, "shiryou.pdf")):
             return c.send(*_as_list(img), texts.build("deliver_mail", メールアドレス=d["email"], **common), *after)
-    if method == "fax":
-        how, n = recvfax_send(c.uid, u, jid, job)
-        if how == "sent":
-            add, btns = recvfax_low(c.uid, n)
-            common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, add) if x)
-            common["extra_buttons"] = list(common["extra_buttons"] or []) + btns
-            return c.send(*_as_list(img), texts.build("deliver_fax", FAX番号=d["fax"], **common), *after)
-        if how == "empty":
-            # 回数券がないときはFAXを送らずLINEで届け、買えばこの資料もFAXで送る
-            store.update_user(c.uid, {"recvfax_wait": jid})
-            common["のこり枚数の案内"] = "\n\n".join(x for x in (remain, texts.raw("recvfax_empty")) if x)
-            common["extra_buttons"] = list(common["extra_buttons"] or []) + texts.buttons_of("recvfax_empty")
-            common["urls"] = plan_urls(c)
-    c.send(*_as_list(img), texts.build("deliver_line", リンク=pdf_url, 有効期限=f"{exp.month}月{exp.day}日", **common), *after)
+    if method == "fax" and d.get("fax"):
+        # FAXの前に帯替え図面を見てもらい、「このままFAXする」で送る（10/28本人決定）
+        t = store.now()
+        store.update_job(jid, {"recvfax": "confirm", "recvfax_at": t})
+        store.update_user(c.uid, {"recvfax_confirming": jid, "recvfax_remind_at": t + timedelta(minutes=REMIND_MINUTES)})
+        return c.send(*_as_list(img), recvfax_confirm(jid, job), *after)
+    c.send(*_as_list(img), texts.build("deliver_line", お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
+                                       有効期限=f"{exp.month}月{exp.day}日", **common), *after)
+
+
+REMIND_MINUTES = 10
+CONFIRM_HOURS = 24
+
+
+def _links(jid, job):
+    exp = job["expires_at"].astimezone(store.JST)
+    url_okyaku, url_shanai = store.pdf_urls(jid, job)
+    return (f"▼お客様向け（帯替え図面・初期費用の概算書）\n{url_okyaku}\n\n"
+            f"▼社内向け（おすすめポイント・想定Q&A・内見申込書）\n{url_shanai}\n\n"
+            f"※リンクは{exp.month}月{exp.day}日まで開けます。")
+
+
+def recvfax_confirm(jid, job, links=True):
+    return texts.build("recvfax_confirm", 物件名=job["title"], 資料ID=jid, append=_links(jid, job) if links else "")
+
+
+def recvfax_press(c, v):
+    """「このままFAXする」「LINEだけで受け取る」が押されたとき。v は「send&doc=資料ID」の形。"""
+    how, _, rest = v.partition("&")
+    jid = rest.partition("doc=")[2] or c.u.get("recvfax_confirming") or c.u.get("last_job")
+    job = store.get_job(jid) if jid else None
+    if not job or job.get("user_id") != c.uid:
+        return c.send(line.text("お送りする資料が見つかりませんでした。お手数ですが、募集図面をもう一度送ってください。"))
+    state = job.get("recvfax")
+    if state == "sent":
+        return c.send(line.text("この資料は、もうFAXでお送りしています。"))
+    if state == "skip" and how == "skip":
+        return c.send(line.text("この資料はFAXでお送りせず、LINEでのお届けのみにしています。"))
+    if how == "skip":
+        store.update_job(jid, {"recvfax": "skip"})
+        return c.send(line.text("かしこまりました。この資料はFAXでお送りせず、LINEでのお届けのみにしました。\n"
+                                "上のリンクから、いつでもご覧いただけます。"))
+    if (job.get("recvfax_at") or store.now()) < store.now() - timedelta(hours=CONFIRM_HOURS):
+        store.update_job(jid, {"recvfax": "expired"})
+        return c.send(line.text("お届けから24時間が過ぎたため、この資料のFAXは終了しました。\n"
+                                "FAXが必要な場合は、資料の「FAXにも送る」を押してください。"))
+    d = c.u.get("delivery") or {}
+    res, n = recvfax_send(c.uid, c.u, jid, job)
+    if res == "sent":
+        store.update_job(jid, {"recvfax": "sent"})
+        c.refresh()
+        add, btns = recvfax_low(c.uid, n)
+        remain = "\n\n".join(x for x in (remain_note(c.u), add) if x)
+        return c.send(texts.build("deliver_fax", FAX番号=d.get("fax", ""), 物件名=job["title"], 資料ID=jid,
+                                  のこり枚数の案内=remain, extra_buttons=btns))
+    if res in ("empty", "trial_over"):
+        # 回数券を買えば、この資料もFAXで送る
+        store.update_user(c.uid, {"recvfax_wait": jid})
+        store.update_job(jid, {"recvfax": "waiting"})
+        mid = "recvfax_trial_over" if res == "trial_over" else "recvfax_empty"
+        return c.send(texts.build(mid, urls=plan_urls(c)))
+    return c.send(line.text("ただいまFAXでのお届けを準備中です。資料は上のリンクからご覧ください。"))
+
+
+def remind_recvfax():
+    """定期実行から。「このままFAXする」が10分押されていない方に、1回だけお知らせする。送った件数を返す。"""
+    n = 0
+    for uid, u in store.db().before("users", "recvfax_remind_at", store.now()):
+        jid = u.get("recvfax_confirming")
+        if not u.get("recvfax_remind_at"):
+            continue
+        store.update_user(uid, {"recvfax_confirming": None, "recvfax_remind_at": None})
+        job = store.get_job(jid) if jid else None
+        if not job or job.get("recvfax") != "confirm" or not u.get("line_uid") or u.get("blocked"):
+            continue
+        if job.get("recvfax_at") and job["recvfax_at"] < store.now() - timedelta(hours=CONFIRM_HOURS):
+            continue
+        line.push(u["line_uid"], [texts.build("recvfax_remind", 物件名=job["title"], 資料ID=jid)])
+        n += 1
+    return n
 
 
 def _as_list(x):
     return x if isinstance(x, list) else [x]
 
 
+TRIAL_FAX = 3  # お試し中の受取りFAXは最初の3件まで無料（10/28本人決定）
+
+
 def recvfax_send(uid, u, jid, job):
     """受け取り用FAXで、資料の2枚（帯替え図面＋初期費用概算書）を御社のFAXへ送る。
-    無料お試し中は回数券なしで送る。戻り値は (結果, のこり回数)。結果は "sent"・"empty"（回数券なし）・None（送れない）。"""
+    お試し中は最初の3件まで回数券なしで送る。戻り値は (結果, のこり回数)。
+    結果は "sent"・"empty"（回数券なし）・"trial_over"（お試しの3件を使い切り、回数券もない）・None（送れない）。"""
     number = (u.get("delivery") or {}).get("fax")
     if not (number and delivery.fax_ready()):
         return None, None
     company = company_for_render(uid, u)
     if (u.get("plan") or "free") == "free":
-        ok = delivery.send_fax(number, faxopt.build_pdf(company, {**job, "_id": jid}))
-        return ("sent", None) if ok else (None, None)
+        if (u.get("trial_fax_used") or 0) < TRIAL_FAX:
+            ok = delivery.send_fax(number, faxopt.build_pdf(company, {**job, "_id": jid}))
+            if ok:
+                store.update_user(uid, {"trial_fax_used": (u.get("trial_fax_used") or 0) + 1})
+            return ("sent", None) if ok else (None, None)
+        if not faxopt.can_send(u):
+            return "trial_over", None
     if not faxopt.can_send(u):
         return "empty", None
     n = faxopt.send_job(uid, u, jid, job, company)
@@ -928,12 +1020,18 @@ def fix_last(c, t):
         return c.send(line.text(r["note"] or "ご依頼の文字が図面の中に見つかりませんでした。消したいところを、図面に書いてある言葉でもう一度送ってください。"))
     job = store.get_job(jid)
     exp = job["expires_at"].astimezone(store.JST)
-    append = f"資料一式（PDF）も直しました：\n{store.file_url(jid, job, 'shiryou.pdf')}\n（{exp.month}月{exp.day}日まで）"
+    url_okyaku, url_shanai = store.pdf_urls(jid, job)
+    append = (f"PDFも直しました（{exp.month}月{exp.day}日まで開けます）。\n▼お客様向け\n{url_okyaku}\n▼社内向け\n{url_shanai}"
+              if url_okyaku != url_shanai else
+              f"資料一式（PDF）も直しました：\n{url_okyaku}\n（{exp.month}月{exp.day}日まで）")
     if r["note"]:
         append = r["note"] + "\n\n" + append
     v = f"?v={len(job.get('fixes') or [])}"  # LINEに前の画像を出させないため
     img = line.image(store.file_url(jid, job, "obikae.jpg") + v, store.file_url(jid, job, "preview.jpg") + v)
-    c.send(img, texts.build("fix_done", 物件名=job.get("title") or "", 直した内容="、".join(r["texts"]), append=append))
+    done = texts.build("fix_done", 物件名=job.get("title") or "", 直した内容="、".join(r["texts"]), append=append)
+    if job.get("recvfax") == "confirm":
+        return c.send(img, done, recvfax_confirm(jid, job, links=False))
+    c.send(img, done)
 
 
 def send_last(c, how):
@@ -945,14 +1043,15 @@ def send_last(c, how):
     d = c.u.get("delivery") or {}
     if how == "line":
         exp = job["expires_at"].astimezone(store.JST)
-        return c.send(texts.build("deliver_line", 物件名=job["title"], リンク=store.file_url(jid, job, "shiryou.pdf"),
+        url_okyaku, url_shanai = store.pdf_urls(jid, job)
+        return c.send(texts.build("deliver_line", 物件名=job["title"], お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
                                   有効期限=f"{exp.month}月{exp.day}日", のこり枚数の案内="", 資料ID=jid))
     if how == "mail":
         if not d.get("email"):
             store.update_user(c.uid, {"reg_queue": ["send_mail"], "reg_mode": "send_mail"})
             return c.send(texts.build("send_mail_ask"))
-        pdf = store.db().get_file(f"jobs/{jid}/shiryou.pdf")
-        if delivery.send_mail(d["email"], job["title"], pdf, store.file_url(jid, job, "shiryou.pdf")):
+        if delivery.send_mail(d["email"], job["title"], store.pdf_files(jid, job, job["title"]),
+                              store.file_url(jid, job, "shiryou.pdf")):
             return c.send(texts.build("send_mail_done", メールアドレス=d["email"]))
         return c.send(line.text("ただいまメールでのお届けを準備中です。もうしばらくお待ちください。"))
     if how == "fax":
@@ -991,7 +1090,7 @@ def notify(uid, mid, kw):
     elif mid == "plan_canceled":
         kw = {"期限": store.renew_date(u)}
     elif mid == "plan_payment_failed":
-        kw = {"猶予日": "1週間後", "urls": {"お支払い情報を確認": billing.portal_url(uid)}}
+        kw = {"猶予日": kw.get("猶予日") or "1週間後", "urls": {"お支払い情報を確認": billing.portal_url(uid)}}
     elif mid == "store_paid":
         g = campaign.get_group(u.get("shop_code")) or {}
         if not g:

@@ -197,7 +197,7 @@ def verdict(result: Result) -> str:
 def render_documents(company: dict, img: Image.Image, result: Result, pages: int = 0, log: dict = None) -> dict:
     """読み取り結果から資料一式を作る。
 
-    戻り値: pdf, obikae_png, obikae_jpg, obikae_preview, texts, title, pages, log, result
+    戻り値: pdf（全部）, pdf_okyaku, pdf_shanai, obikae_png, obikae_jpg, obikae_preview, texts, title, pages, log, result
     """
     company = {**DEFAULT_COMPANY, **(company or {})}
     t2 = time.perf_counter()
@@ -206,14 +206,21 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
     img, hidden = hide.apply(img, result)
     ob = render.obikae(img, result, company)
     ob_png = render.png_bytes(ob)
-    # ①帯替え ②おすすめ ③概算書 ／ ④内見申込書 ／ ⑤想定Q&A の順に1つのPDFにする
-    htmls = [render.build_html(result, ob_png, company, sections=("obikae", "osusume", "estimate")),
-             render.naiken_html(result, company),
-             render.build_html(result, ob_png, company, sections=("qa",))]
+    # PDFは2つに分ける（10/28本人決定）
+    #   お客様向け：帯替え図面・初期費用の概算書　社内向け：おすすめポイント・内見申込書・想定Q&A
     with tempfile.TemporaryDirectory() as d:
-        out = Path(d) / "shiryou.pdf"
-        render.to_pdf(htmls, out)
-        pdf = out.read_bytes()
+        okyaku, shanai = Path(d) / "okyaku.pdf", Path(d) / "shanai.pdf"
+        render.to_pdfs({
+            okyaku: [render.build_html(result, ob_png, company, sections=("obikae", "estimate"))],
+            shanai: [render.build_html(result, ob_png, company, sections=("osusume",)),
+                     render.naiken_html(result, company),
+                     render.build_html(result, ob_png, company, sections=("qa",))],
+        })
+        pdf_okyaku, pdf_shanai = okyaku.read_bytes(), shanai.read_bytes()
+        # 2つを1つにしたもの（アプリ版の pdf_url など、これまでのリンク用）
+        both = Path(d) / "shiryou.pdf"
+        subprocess.run(["pdfunite", str(okyaku), str(shanai), str(both)], check=True)
+        pdf = both.read_bytes()
     t3 = time.perf_counter()
 
     f = result.事実
@@ -228,7 +235,7 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
     log = {**(log or {}), "秒_資料": round(t3 - t2, 2), "白で消した文字": hidden}
     log["秒_合計"] = round(log.get("秒_準備", 0) + log.get("秒_AI", 0) + log.get("秒_写真補正", 0) + log["秒_資料"], 2)
     return {
-        "pdf": pdf, "obikae_png": ob_png,
+        "pdf": pdf, "pdf_okyaku": pdf_okyaku, "pdf_shanai": pdf_shanai, "obikae_png": ob_png,
         # 帯を付ける前の図面（写真は補正後）。「ここを消して」の直しで作り直すときに使う
         "page_jpg": _jpeg(raw_page, 3000, 92),
         "obikae_jpg": _jpeg(ob, 3000, 88), "obikae_preview": _jpeg(ob, 1000, 80),

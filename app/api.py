@@ -1,7 +1,7 @@
 """アプリ版（Android）の REST API。ログインは Firebase Authentication の IDトークン。
 
 POST /v1/jobs            画像かPDF（multipart の file）→ {job_id}
-GET  /v1/jobs/{id}       → {status, pdf_url, obikae_url, texts, error}
+GET  /v1/jobs/{id}       → {status, pdf_url（全部）, customer_pdf_url（お客様向け）, staff_pdf_url（社内向け）, obikae_url, texts, error}
 PUT  /v1/jobs/{id}/atena {"atena":"山田 太郎"} 初期費用概算書の宛名（""で空欄。でき上がり後なら作り直す。409 失敗した資料）
 POST /v1/jobs/{id}/fix   {"request":"右下の連絡先を消して"} 業者向け情報の消し直し（無料・件数に数えない）
 GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, company}
@@ -267,7 +267,9 @@ def get_job(jid: str, authorization: str = Header("")):
     if job["status"] == "done":
         mz = (job.get("texts") or {}).get("motozuke") or {}
         res.update(motozuke=mz.get("name"), motozuke_fax=mz.get("fax"), motozuke_tel=mz.get("tel"))
-        res.update(pdf_url=store.file_url(jid, job, "shiryou.pdf"), obikae_url=store.file_url(jid, job, "obikae.png"),
+        okyaku, shanai = store.pdf_urls(jid, job)
+        res.update(pdf_url=store.file_url(jid, job, "shiryou.pdf"), customer_pdf_url=okyaku, staff_pdf_url=shanai,
+                   obikae_url=store.file_url(jid, job, "obikae.png"),
                    texts=job.get("texts"), expires_at=job["expires_at"].isoformat())
     res.update(fax_receive=job.get("fax_receive"), fax_tickets_left=faxopt.left(u))
     return res

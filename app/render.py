@@ -396,28 +396,37 @@ dt {{ font-weight: bold; margin-top: 8px; }} dd {{ margin: 2px 0 0 1.2em; }}
 
 def to_pdf(html_text, out: Path):
     """HTMLをPDFにする。html_text に並びを渡すと、順にPDFにして1つにまとめる（pdfunite）。"""
+    htmls = [html_text] if isinstance(html_text, str) else list(html_text)
+    to_pdfs({out: htmls})
+
+
+def to_pdfs(groups: dict):
+    """{出力先: [HTML, …]} をまとめてPDFにする。ブラウザの起動は1回で済ませる。"""
+    import shutil
     import subprocess
     from playwright.sync_api import sync_playwright
-    htmls = [html_text] if isinstance(html_text, str) else list(html_text)
-    parts = []
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=CHROME)
         page = b.new_page()
-        for i, h in enumerate(htmls):
-            # 書体ファイルを読み込めるよう、いったんファイルに書いてから開く
-            tmp = out.with_suffix(f".{i}.print.html")
-            tmp.write_text(h, encoding="utf-8")
-            page.goto(tmp.as_uri(), wait_until="networkidle")
-            page.evaluate("document.fonts.ready")
-            part = out if len(htmls) == 1 else out.with_suffix(f".{i}.pdf")
-            page.pdf(path=str(part), format="A4", print_background=True)
-            tmp.unlink()
-            parts.append(part)
+        for out, htmls in groups.items():
+            parts = []
+            for i, h in enumerate(htmls):
+                # 書体ファイルを読み込めるよう、いったんファイルに書いてから開く
+                tmp = out.with_suffix(f".{i}.print.html")
+                tmp.write_text(h, encoding="utf-8")
+                page.goto(tmp.as_uri(), wait_until="networkidle")
+                page.evaluate("document.fonts.ready")
+                part = out.with_suffix(f".{i}.pdf")
+                page.pdf(path=str(part), format="A4", print_background=True)
+                tmp.unlink()
+                parts.append(part)
+            if len(parts) > 1:
+                subprocess.run(["pdfunite", *map(str, parts), str(out)], check=True)
+                for part in parts:
+                    part.unlink()
+            else:
+                shutil.move(str(parts[0]), str(out))
         b.close()
-    if len(parts) > 1:
-        subprocess.run(["pdfunite", *map(str, parts), str(out)], check=True)
-        for part in parts:
-            part.unlink()
 
 
 NAIKEN_TEMPLATE = HERE / "naiken_template.html"

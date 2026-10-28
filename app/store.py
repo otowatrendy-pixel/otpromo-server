@@ -100,7 +100,11 @@ class _Local:
 
     def before(self, col, field, cutoff):
         """field が cutoff 以前の文書の (id, 中身)。"""
-        return [(k, copy.deepcopy(v)) for k, v in self.docs[col].items() if v.get(field) and v[field] <= cutoff]
+        def val(v):
+            for part in field.split("."):  # 「pending.at」のような入れ子の項目
+                v = v.get(part) if isinstance(v, dict) else None
+            return v
+        return [(k, copy.deepcopy(v)) for k, v in self.docs[col].items() if val(v) and val(v) <= cutoff]
 
     def update_tx(self, col, id, fn):
         """取り出し→fnで変更→保存を一度に行う。fn の戻り値をそのまま返す。"""
@@ -118,6 +122,11 @@ class _Local:
     def get_file(self, key):
         p = self.dir / key
         return p.read_bytes() if p.exists() else None
+
+    def delete_file(self, key):
+        p = self.dir / key
+        if p.exists():
+            p.unlink()
 
 
 class _GCP:
@@ -173,6 +182,12 @@ class _GCP:
             return b.download_as_bytes()
         except Exception:
             return None
+
+    def delete_file(self, key):
+        try:
+            self.bucket.blob(key).delete()
+        except Exception:
+            pass
 
 
 _db = None
@@ -373,12 +388,17 @@ def get_job(jid):
     return db().get("jobs", jid)
 
 
-FILES = {"shiryou.pdf": "application/pdf", "obikae.png": "image/png",
+FILES = {"shiryou.pdf": "application/pdf", "okyaku.pdf": "application/pdf", "shanai.pdf": "application/pdf",
+         "obikae.png": "image/png",
          "obikae.jpg": "image/jpeg", "preview.jpg": "image/jpeg"}
 
 
 def save_files(jid, out):
     db().put_file(f"jobs/{jid}/shiryou.pdf", out["pdf"], FILES["shiryou.pdf"])
+    if out.get("pdf_okyaku"):
+        db().put_file(f"jobs/{jid}/okyaku.pdf", out["pdf_okyaku"], FILES["okyaku.pdf"])
+        db().put_file(f"jobs/{jid}/shanai.pdf", out["pdf_shanai"], FILES["shanai.pdf"])
+        update_job(jid, {"split_pdf": True})
     db().put_file(f"jobs/{jid}/obikae.png", out["obikae_png"], FILES["obikae.png"])
     db().put_file(f"jobs/{jid}/obikae.jpg", out["obikae_jpg"], FILES["obikae.jpg"])
     db().put_file(f"jobs/{jid}/preview.jpg", out["obikae_preview"], FILES["preview.jpg"])
@@ -390,6 +410,22 @@ def save_files(jid, out):
 def get_page(jid):
     """作り直し用に保存した、帯を付ける前の図面。"""
     return db().get_file(f"jobs/{jid}/page.jpg")
+
+
+def pdf_urls(jid, job):
+    """お客様向けと社内向けのPDFのリンク。分ける前に作った資料は、両方とも一式のPDF。"""
+    if job.get("split_pdf"):
+        return file_url(jid, job, "okyaku.pdf"), file_url(jid, job, "shanai.pdf")
+    u = file_url(jid, job, "shiryou.pdf")
+    return u, u
+
+
+def pdf_files(jid, job, title):
+    """メールに添付するPDF（ファイル名, 中身）の並び。"""
+    if job.get("split_pdf"):
+        return [(f"{title}_お客様向け.pdf", db().get_file(f"jobs/{jid}/okyaku.pdf")),
+                (f"{title}_社内向け.pdf", db().get_file(f"jobs/{jid}/shanai.pdf"))]
+    return [(f"{title}.pdf", db().get_file(f"jobs/{jid}/shiryou.pdf"))]
 
 
 def file_url(jid, job, name):

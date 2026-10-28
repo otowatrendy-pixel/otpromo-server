@@ -203,6 +203,16 @@ def cron_daily(x_cron_key: str = Header("")):
             "purged": retention.daily()}
 
 
+@app.post("/cron/often")
+def cron_often(x_cron_key: str = Header("")):
+    """Cloud Scheduler から5分ごとに呼ぶ（受取りFAXの確認のお知らせ、預かった募集図面の削除、お支払いの猶予切れ）。"""
+    import hmac as _hmac
+    if not _hmac.compare_digest(x_cron_key, config.env("CRON_KEY") or config.APP_SECRET):
+        raise HTTPException(403)
+    return {"recvfax_remind": bot.remind_recvfax(), "pending_purged": bot.purge_pending(),
+            "grace_ended": billing.end_grace()}
+
+
 @app.get("/paid")
 def paid(t: str = ""):
     return page("ありがとうございました", f"""<p>お手続きが完了しました。LINEに戻って、そのままお使いください。</p>

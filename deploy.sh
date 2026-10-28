@@ -37,7 +37,12 @@ if [ "${1:-}" = "schedule" ]; then
         --http-method=POST --headers="X-Cron-Key=$KEY" --attempt-deadline=300s)
   gcloud scheduler jobs create http otpromo-daily "${ARGS[@]}" 2>/dev/null \
     || gcloud scheduler jobs update http otpromo-daily "${ARGS[@]}"
-  echo "毎日9時（日本時間）の定期実行を設定しました。"
+  # 5分ごと：受取りFAXの確認のお知らせ（10分後に1回）・預かった募集図面の削除・お支払いの猶予切れ
+  ARGS=(--location=$REGION --schedule="*/5 * * * *" --time-zone=Asia/Tokyo --uri="$URL/cron/often"
+        --http-method=POST --headers="X-Cron-Key=$KEY" --attempt-deadline=120s)
+  gcloud scheduler jobs create http otpromo-often "${ARGS[@]}" 2>/dev/null \
+    || gcloud scheduler jobs update http otpromo-often "${ARGS[@]}"
+  echo "毎日9時と5分ごと（日本時間）の定期実行を設定しました。"
   exit 0
 fi
 

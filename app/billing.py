@@ -506,6 +506,33 @@ def ensure_webhook():
     log.info("Stripe の通知先を作りました %s", ep["id"])
 
 
+GRACE_DAYS = 7
+
+
+def _invoice_sub(inv):
+    return inv.get("subscription") or ((inv.get("parent") or {}).get("subscription_details") or {}).get("subscription")
+
+
+def end_grace():
+    """定期実行から。お支払いの猶予（7日）が過ぎても払われていない契約を終える。終えた件数を返す。"""
+    s = _stripe()
+    n = 0
+    for uid, u in store.db().before("users", "grace_until", store.now()):
+        if not u.get("grace_until"):
+            continue
+        sid = u.get("stripe_subscription")
+        if sid and u.get("sub_status") in ("past_due", "unpaid", "incomplete"):
+            try:
+                s.Subscription.cancel(sid)  # customer.subscription.deleted の通知で無料に戻る
+                n += 1
+                log.info("猶予切れで契約を終了 %s %s", uid, sid)
+            except Exception:
+                log.exception("猶予切れの終了に失敗 %s", uid)
+                continue
+        store.update_user(uid, {"grace_until": None})
+    return n
+
+
 def handle_webhook(payload: bytes, sig: str):
     """Stripeからの通知。戻り値は LINE で知らせる内容 [(uid, 文面ID, 差し込み)]。"""
     s = _stripe()
@@ -567,15 +594,22 @@ def handle_webhook(payload: bytes, sig: str):
     elif t == "customer.subscription.deleted":
         uid, before, after = sync_subscription(obj)
     elif t == "invoice.payment_failed":
-        uid, _ = store.db().find("users", "stripe_customer", obj["customer"])
-        if uid:
-            notices.append((uid, "plan_payment_failed", {}))
+        uid, u = store.db().find("users", "stripe_customer", obj["customer"])
+        # 猶予は失敗した日から7日（10/28本人決定）。再請求のたびに届くので、お知らせは最初の1回だけ
+        if uid and _invoice_sub(obj):
+            if not (u or {}).get("grace_until"):
+                until = store.now() + timedelta(days=GRACE_DAYS)
+                store.update_user(uid, {"pay_failed_at": store.now(), "grace_until": until})
+                d = until.astimezone(store.JST)
+                notices.append((uid, "plan_payment_failed",
+                                {"猶予日": f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）"}))
     elif t == "invoice.paid":
-        sid = obj.get("subscription") or ((obj.get("parent") or {}).get("subscription_details") or {}).get("subscription")
+        sid = _invoice_sub(obj)
         if sid:
             sync_subscription(s.Subscription.retrieve(sid))
             uid, _ = store.db().find("users", "stripe_customer", obj["customer"])
             if uid:
+                store.update_user(uid, {"pay_failed_at": None, "grace_until": None})
                 import referral
                 notices += referral.on_invoice_paid(uid, obj)
     elif t in ("charge.refunded", "charge.dispute.created"):
