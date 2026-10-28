@@ -13,6 +13,7 @@ from pathlib import Path
 from PIL import Image, ImageOps
 
 import config
+import hide
 import render
 import scan
 from prompt import SYSTEM, USER
@@ -199,6 +200,9 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
     """
     company = {**DEFAULT_COMPANY, **(company or {})}
     t2 = time.perf_counter()
+    raw_page = img
+    # 帯の外の業者向け情報（元付業者の連絡先・広告料・AD・鍵の場所など）を白で消す
+    img, hidden = hide.apply(img, result)
     ob = render.obikae(img, result, company)
     ob_png = render.png_bytes(ob)
     # ①帯替え ②おすすめ ③概算書 ／ ④内見申込書 ／ ⑤想定Q&A の順に1つのPDFにする
@@ -220,16 +224,35 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
         "shaky": shaky,
         "motozuke": {"name": f.元付業者, "tel": f.元付業者_電話, "fax": f.元付業者_FAX},
     }
-    log = {**(log or {}), "秒_資料": round(t3 - t2, 2)}
+    log = {**(log or {}), "秒_資料": round(t3 - t2, 2), "白で消した文字": hidden}
     log["秒_合計"] = round(log.get("秒_準備", 0) + log.get("秒_AI", 0) + log.get("秒_写真補正", 0) + log["秒_資料"], 2)
     return {
         "pdf": pdf, "obikae_png": ob_png,
         # 帯を付ける前の図面（写真は補正後）。「ここを消して」の直しで作り直すときに使う
-        "page_jpg": _jpeg(img, 3000, 92),
+        "page_jpg": _jpeg(raw_page, 3000, 92),
         "obikae_jpg": _jpeg(ob, 3000, 88), "obikae_preview": _jpeg(ob, 1000, 80),
         "texts": texts, "title": title, "pages": pages, "log": log,
         "result": json.loads(result.model_dump_json()),
     }
+
+
+def fix(company: dict, page: Image.Image, result: Result, obikae_png: bytes, request: str, pages: int = 0) -> dict:
+    """「ここを消して」の直し。前回の読み取り結果はそのまま使い、消す文字だけをAIに聞いて足して作り直す。
+    戻り値: out（render_documents と同じ。消す文字がなければ None）, texts, note（できないことの説明）, log"""
+    t0 = time.perf_counter()
+    texts, note, usage, served = hide.ask(Image.open(io.BytesIO(obikae_png)), request, config.MODEL, config.EFFORT)
+    log = {"秒_AI": round(time.perf_counter() - t0, 2), "直しの依頼": request, "消す文字": texts,
+           "直せなかったこと": note, "実際のモデル": served}
+    try:
+        pin, pout, pcache = PRICES.get(config.MODEL, PRICES["claude-sonnet-5-5"])
+        log["原価_円"] = round((usage.input_tokens * pin + usage.output_tokens * pout) / 1e6 * YEN, 2)
+    except Exception:
+        pass
+    if not texts:
+        return {"out": None, "texts": [], "note": note, "log": log}
+    result.帯の外の業者向け情報 = list(result.帯の外の業者向け情報) + texts
+    out = render_documents(company, page, result, pages, log)
+    return {"out": out, "texts": texts, "note": note, "log": out["log"]}
 
 
 def render_fax(company: dict, img: Image.Image, result: Result) -> bytes:

@@ -100,5 +100,8 @@ class Result(BaseModel):
     事実: Facts
     用紙: Paper = Field(default_factory=Paper)
     帯: Band = Field(default_factory=lambda: Band(見つかった=False))
+    帯の外の業者向け情報: List[str] = Field(
+        default_factory=list,
+        description="帯の外（備考欄など）に書かれた、元付業者と客付業者のあいだだけの情報を、図面に書いてあるとおり1行ずつ。なければ空")
     おすすめポイント: List[Point] = Field(default_factory=list, description="3〜5個")
     想定QA: List[QA] = Field(default_factory=list, description="8〜10個")

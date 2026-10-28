@@ -205,6 +205,15 @@ def _money_text(m) -> str:
     return m.記載 or "記載なし"
 
 
+def _fee_note(text):
+    """仲介手数料の記載から、業者間の配分・広告料など、お客様に見せないものを外す。"""
+    if not text:
+        return ""
+    parts = re.split(r"[／/、,，]", text)
+    keep = [p.strip() for p in parts if p.strip() and not re.search(r"配分|広告料|ＡＤ|\bAD\b|報酬|元付|客付", p)]
+    return "／".join(keep)
+
+
 def estimate_section(f, company: dict, name: str) -> str:
     """初期費用概算書。テナントショップ練馬のExcel版（A4縦・3区分・青の見出し帯）に合わせる。"""
     e = html.escape
@@ -232,7 +241,7 @@ def estimate_section(f, company: dict, name: str) -> str:
             *([("償却・敷引", f.償却, "募集図面より")] if f.償却 else []),
             ("礼金", _money_text(f.礼金), _src(f.礼金)),
             ("仲介手数料", f"{months:g}ヶ月",
-             "弊社規定　※別途消費税" + (f"（図面の記載：{f.仲介手数料_記載}）" if f.仲介手数料_記載 else "")),
+             "弊社規定　※別途消費税" + (f"（図面の記載：{_fee_note(f.仲介手数料_記載)}）" if _fee_note(f.仲介手数料_記載) else "")),
             ("保証会社", f.保証会社 or "記載なし", "保証会社の規定による"),
             ("火災保険", f.火災保険 or "記載なし", "要見積")]
     cond_rows = "".join(

@@ -2,6 +2,7 @@
 
 返事はできるだけ応答（reply）で返す。資料づくりに50秒以上かかったら「混み合っています」を応答し、資料は push で届ける。
 """
+import io
 import json
 import logging
 import re
@@ -22,6 +23,7 @@ import monitor
 import naiken_bot
 import store
 import texts
+from PIL import Image
 from schema import Result
 
 log = logging.getLogger("bot")
@@ -498,6 +500,8 @@ def on_text(c, t):
         return on_postback(c, "reg=edit")
     if c.u.get("registered") and norm(t) in ("担当者", "担当者名", "担当者名の変更", "名前の変更", "携帯の変更"):
         return on_postback(c, "edit=staff")
+    if c.u.get("registered") and FIX_WORDS.search(t) and c.u.get("last_job"):
+        return fix_last(c, t)
     if norm(t) == monitor.CODE:
         if not c.u.get("registered"):
             return c.send(texts.build("reg_first"))
@@ -744,6 +748,46 @@ def recvfax_low(uid, n):
     if not exp:
         t = t.replace("（まで）", "")
     return t, texts.buttons_of("recvfax_low")
+
+
+FIX_WORDS = re.compile(r"消して|消す|消去|削除|隠して|見えないように|外して|取って|塗りつぶ")
+
+
+def fix_last(c, t):
+    """「ここを消して」の直し。直近の資料の帯替え図面から、頼まれた文字を白で消して作り直す。
+    件数には数えない（10/28本人決定：何度でも無料）。"""
+    jid = c.u.get("last_job")
+    job = store.get_job(jid)
+    if not job or job.get("status") != "done" or job["expires_at"] < store.now():
+        return c.send(line.text("直せる資料が見つかりませんでした。お手数ですが、募集図面をもう一度送ってください。"))
+    page = store.get_page(jid)
+    ob = store.db().get_file(f"jobs/{jid}/obikae.png")
+    if not page or not ob:
+        return c.send(line.text("この資料は作り直しのための図面が残っていないため、直せませんでした。お手数ですが、募集図面をもう一度送ってください。"))
+    line.loading(c.line_uid, 60)
+    try:
+        r = core.fix(company_for_render(c.uid, c.u), Image.open(io.BytesIO(page)).convert("RGB"),
+                     Result.model_validate(job["result"]), ob, t, job.get("pages") or 0)
+    except Exception:
+        log.exception("直しで例外")
+        return c.send(texts.build("err_system"))
+    note = r["note"]
+    if not r["out"]:
+        store.update_job(jid, {"fixes": (job.get("fixes") or []) + [{"at": store.now(), **r["log"]}]})
+        return c.send(line.text(note or "ご依頼の文字が図面の中に見つかりませんでした。消したいところを、図面に書いてある言葉でもう一度送ってください。"))
+    out = r["out"]
+    store.save_files(jid, out)
+    store.update_job(jid, {"result": out["result"], "log": out["log"],
+                           "fixes": (job.get("fixes") or []) + [{"at": store.now(), **r["log"]}]})
+    job = store.get_job(jid)
+    exp = job["expires_at"].astimezone(store.JST)
+    append = f"資料一式（PDF）も直しました：\n{store.file_url(jid, job, 'shiryou.pdf')}\n（{exp.month}月{exp.day}日まで）"
+    if note:
+        append = note + "\n\n" + append
+    img = line.image(store.file_url(jid, job, "obikae.jpg") + f"?v={len(job.get('fixes') or [])}",
+                     store.file_url(jid, job, "preview.jpg") + f"?v={len(job.get('fixes') or [])}")
+    c.send(img, texts.build("fix_done", 物件名=job.get("title") or "", 直した内容="、".join(r["texts"]), append=append))
+    log.info("直し %s %s", jid, json.dumps(r["log"], ensure_ascii=False, default=str))
 
 
 def send_last(c, how):
