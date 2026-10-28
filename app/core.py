@@ -114,7 +114,17 @@ def call_claude(jpeg: bytes):
     usd = (u.input_tokens * pin + cache_write * pin * 1.25 + cache_read * pcache + u.output_tokens * pout) / 1e6
     usage = {"入力トークン": u.input_tokens, "出力トークン": u.output_tokens, "キャッシュ読み出し": cache_read,
              "原価_円": round(usd * YEN, 2), "実際のモデル": resp.model}
+    _count_cost(usd * YEN)
     return Result.model_validate(obj), usage
+
+
+def _count_cost(yen):
+    """AI利用料を月ごとに数える（上限の見張り：usage.ai_check）。"""
+    try:
+        import usage as _usage
+        _usage.count("ai_yen", round(yen, 2))
+    except Exception:
+        pass
 
 
 def analyze(data: bytes) -> dict:
@@ -254,6 +264,7 @@ def fix(company: dict, page: Image.Image, result: Result, obikae_png: bytes, req
     try:
         pin, pout, pcache = PRICES.get(config.MODEL, PRICES["claude-sonnet-5-5"])
         log["原価_円"] = round((usage.input_tokens * pin + usage.output_tokens * pout) / 1e6 * YEN, 2)
+        _count_cost(log["原価_円"])
     except Exception:
         pass
     if not texts:

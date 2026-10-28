@@ -463,7 +463,8 @@ def sync_subscription(sub):
         data["pending_change"] = None
     if plan != "free":
         data["ended_at"] = None
-        data["paid_before"] = True  # 新人さん応援は「初めての方」だけ
+        data["paid_before"] = True
+        data["first_paid_at"] = u.get("first_paid_at") or store.now()  # 週報の「翌月も継続」用  # 新人さん応援は「初めての方」だけ
     if plan == "free" and u.get("plan_source") in ("group", "group_leaving"):
         # 店舗まとめ割で使っている方は、個人の契約の状態でプランを上書きしない
         data = {"stripe_customer": sub["customer"], "stripe_subscription": None, "sub_status": sub["status"]}

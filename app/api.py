@@ -5,6 +5,7 @@ GET  /v1/jobs/{id}       → {status, pdf_url（全部）, customer_pdf_url（�
 PUT  /v1/jobs/{id}/atena {"atena":"山田 太郎"} 初期費用概算書の宛名（""で空欄。でき上がり後なら作り直す。409 失敗した資料）
 POST /v1/jobs/{id}/fix   {"request":"右下の連絡先を消して"} 業者向け情報の消し直し（無料・件数に数えない）
 GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, company}
+POST /v1/me/cancel-reason {"reason":"price|nouse|accuracy|other_service|other"} 解約の理由
 PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方・宛名を聞く）。担当者名・携帯は必須（422 name_required/mobile_check/name_check、429 name_locked）
 POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課金（あとで実装）
 """
@@ -85,6 +86,20 @@ def _pending(u):
 
 class TermsIn(BaseModel):
     version: str
+
+
+class CancelReasonIn(BaseModel):
+    reason: str  # price・nouse・accuracy・other_service・other
+
+
+@router.post("/me/cancel-reason")
+def post_cancel_reason(body: CancelReasonIn, authorization: str = Header("")):
+    """解約の手続きのあとに聞く理由（1つ）。日報に件数が載る。"""
+    import growth
+    uid, u = _me(authorization)
+    if not growth.on_cancel_reason(uid, body.reason):
+        raise HTTPException(422, {"code": "reason", "choices": growth.CANCEL_REASONS})
+    return {"ok": True}
 
 
 @router.put("/me/terms")
@@ -235,6 +250,11 @@ async def create_job(file: UploadFile = File(...), authorization: str = Header("
     q = store.quota(u)
     if q["remaining"] is not None and q["remaining"] <= 0:
         raise HTTPException(402, "今月の件数を使い切りました")
+    import usage
+    if usage.ai_stopped():
+        raise HTTPException(503, {"code": "busy", "message": "ただいま大変混み合っているため、資料づくりを一時お休みしています。"})
+    if usage.over_daily(u):
+        raise HTTPException(429, {"code": "daily_limit", "message": f"本日の資料づくりは、上限の{usage.DAILY_DOC_LIMIT}件に達しました。明日0時から、またお使いいただけます。"})
     data = await file.read()
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(413, "ファイルが大きすぎます（20MBまで）")
@@ -412,6 +432,9 @@ def naiken_send(fid: str, authorization: str = Header("")):
         raise HTTPException(403, {"code": "trial", "message": texts.raw("naiken_trial")})
     if status == "limit":
         raise HTTPException(402, "内見FAXの回数の上限に達しました")
+    if status == "optout":
+        # 元付業者さんの依頼で送信を止めている番号（回数には数えない）
+        raise HTTPException(409, {"code": "optout", "message": "この管理会社さまからFAXを止めるご依頼をいただいているため、お送りできません。お電話など直接ご連絡をお願いいたします。"})
     return {"status": status}
 
 

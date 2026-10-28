@@ -208,6 +208,12 @@ def cron_daily(x_cron_key: str = Header("")):
         usage.daily_report()  # 毎朝9時の日報【1分資料 日報】
     except Exception:
         log.exception("日報")
+    import growth
+    if store.now().astimezone(store.JST).weekday() == 0:
+        try:
+            growth.weekly_report()  # 毎週月曜9時の週報【1分資料 週報】
+        except Exception:
+            log.exception("週報")
     return {"monitor_sent": monitor.daily(), "annual_renew_sent": renew, "store_notices": len(store_notices),
             "purged": retention.daily()}
 
@@ -219,7 +225,8 @@ def cron_often(x_cron_key: str = Header("")):
     if not _hmac.compare_digest(x_cron_key, config.env("CRON_KEY") or config.APP_SECRET):
         raise HTTPException(403)
     import usage
-    return {"usage_alerts": usage.check(), "recvfax_remind": bot.remind_recvfax(), "pending_purged": bot.purge_pending(),
+    import growth
+    return {"usage_alerts": usage.check(), "growth_sent": growth.run_due(), "recvfax_remind": bot.remind_recvfax(), "pending_purged": bot.purge_pending(),
             "grace_ended": billing.end_grace()}
 
 
@@ -299,6 +306,37 @@ def admin_referral_decide(referred: str, action: str, key: str = ""):
     for uid, mid, kw in notices:
         bot.notify(uid, mid, kw)
     return {"ok": True, "action": action, "notices": [m for _, m, _ in notices]}
+
+
+class OptoutIn(BaseModel):
+    number: str
+    note: str = ""          # 例：「〇〇管理 様より電話で依頼（10/29）」
+
+
+@app.get("/admin/fax-optout")
+def admin_optout_list(key: str = ""):
+    """元付業者さんから「FAXを止めて」と依頼された番号の一覧（合言葉 ADMIN_OPS_KEY）。"""
+    import naiken
+    _ops_key(key)
+    return {"optout": naiken.optout_list()}
+
+
+@app.post("/admin/fax-optout")
+def admin_optout_add(body: OptoutIn, key: str = ""):
+    """送信停止リストに足す。この番号には内見申込書のFAXを送らず、利用者にはお電話などをお願いする。"""
+    import naiken
+    _ops_key(key)
+    n = naiken.optout_add(body.number, body.note)
+    if not n:
+        raise HTTPException(422, "FAX番号を確認してください")
+    return {"ok": True, "id": n}
+
+
+@app.delete("/admin/fax-optout")
+def admin_optout_remove(number: str, key: str = ""):
+    import naiken
+    _ops_key(key)
+    return {"removed": naiken.optout_remove(number)}
 
 
 @app.post("/admin/line/webhook")

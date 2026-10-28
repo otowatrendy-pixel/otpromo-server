@@ -19,6 +19,7 @@ import config
 import core
 import delivery
 import faxopt
+import growth
 import line
 import monitor
 import naiken_bot
@@ -373,6 +374,7 @@ def on_postback(c, data):
         if not c.u.get("company", {}).get("会社名"):
             return start_steps(c, list(REG_STEPS), "new")
         store.update_user(c.uid, {"registered": True, "reg_queue": [], "reg_mode": None, "registered_at": store.now()})
+        growth.on_registered(c.uid)
         link_menu(c.line_uid, True)
         return c.send(texts.build("reg_done"))
     if k == "reg" and v == "edit":
@@ -434,6 +436,8 @@ def on_postback(c, data):
     if k == "referral":
         import referral
         return c.send(*referral.menu_messages(c.uid))
+    if k == "cancel_reason":
+        return c.send(growth.on_cancel_reason(c.uid, v) or line.text("ありがとうございます。"))
     if k == "recvfax" and v.split("&")[0] in ("send", "skip"):
         return recvfax_press(c, v)
     if k == "recvfax":
@@ -645,6 +649,11 @@ def process(c, data, held=None):
         hold(c, data, "quota")
         mid = "plan_light_empty" if q["plan"] == "light" else "plan_needed"
         return c.send(texts.build(mid, urls=plan_urls(c), 更新日=store.renew_date(c.u)))
+    # 費用の上限（AI利用料が月5万円）と、1人1日60件まで（10/29本人承認）
+    if usage.ai_stopped():
+        return c.send(usage.busy_message())
+    if usage.over_daily(c.u):
+        return c.send(usage.daily_limit_message())
 
     jid, job = store.new_job(c.uid, "line")
     store.update_job(jid, {"status": "processing"})
@@ -694,6 +703,8 @@ def finish(c, jid, a, atena="", after=()):
             hold(c, buf.getvalue(), "quota", schema.for_store(a["result"]), a["pages"])
             return c.send(texts.build("plan_needed", urls=plan_urls(c)), *after)
         consumed = True
+        if (c.u.get("plan") or "free") == "free" and store.quota(store.get_user(c.uid))["remaining"] == 0:
+            growth.on_free_used_up(c.uid, c.u)  # 3日後にライトの案内（1回だけ）
         company = {**company_for_render(c.uid, c.u), "宛名": atena}
         out = core.render_documents(company, a["img"], a["result"], a["pages"], a["log"])
         store.save_files(jid, out)
@@ -989,6 +1000,7 @@ def do_fix(uid, u, jid, t):
     件数には数えない（10/28本人決定：何度でも無料）。
     戻り値: {"status": "done" | "none" | "missing" | "expired", "texts": [...], "note": できないことの説明}"""
     job = store.get_job(jid) if jid else None
+    usage.count("fix")
     if not job or job.get("status") != "done":
         return {"status": "missing", "texts": [], "note": None}
     if job["expires_at"] < store.now():
@@ -1123,7 +1135,10 @@ def notify(uid, mid, kw):
     elif mid == "plan_annual_renew":
         kw["urls"] = {"変更・解約": billing.portal_url(uid), "Stripeのお客様ページ": billing.portal_url(uid)}
     urls = kw.pop("urls", None)
-    if not line.push(u["line_uid"], [texts.build(mid, urls=urls, **kw)]):
+    msgs = [texts.build(mid, urls=urls, **kw)]
+    if mid == "plan_canceled":
+        msgs.append(growth.cancel_question())  # 同じ push なので通数は増えない
+    if not line.push(u["line_uid"], msgs):
         push_failed(uid, u, mid, kw, urls)
     if mid == "recvfax_done" and u.get("recvfax_wait"):
         pool.submit(_send_waiting_fax, uid)

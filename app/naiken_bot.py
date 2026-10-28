@@ -313,6 +313,9 @@ def on_postback(c, v):
             return c.send(texts.build("naiken_limit", urls=bot.plan_urls(c), 上限=limit, 更新日=nxt))
         if status == "fax_invalid":
             return next_step(c)
+        if status == "optout":
+            _set(c, nk_step=None, last_naiken=fid)
+            return c.send(_optout_message(fid, rec))
         if status == "not_ready":
             _set(c, nk_step=None, last_naiken=fid)
             return c.send(line.text("ただいまFAX送信の準備中のため、まだお送りしていません（テスト版）。\n"
@@ -347,3 +350,14 @@ def edit_card(c):
 def cancel(c):
     _set(c, nk={}, nk_step=None, nk_fid=None)
     c.send(texts.build("naiken_canceled"))
+
+
+def _optout_message(fid, rec):
+    """送信停止リストの番号だったとき（10/29本人承認）。申込書は作ってあるので、電話などで直接の連絡をお願いする。"""
+    to = ((rec or {}).get("draft") or {}).get("to") or {}
+    if "naiken_optout" in texts._MSG:
+        return texts.build("naiken_optout", 管理会社名=to.get("company", ""), FAX番号=to.get("fax", ""))
+    return line.text(f"申し訳ありません。{to.get('company') or 'この管理会社'}さま（FAX {to.get('fax', '')}）から、"
+                     "1分資料からのFAXを止めてほしいとのご依頼をいただいているため、お送りできません。\n"
+                     "お手数ですが、お電話など直接ご連絡をお願いいたします。\n"
+                     f"作った申込書はこちらから見られます。\n{naiken.file_url(fid, rec, 'naiken.pdf')}")

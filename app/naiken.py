@@ -343,9 +343,14 @@ def send(uid, fid):
     to = rec["draft"]["to"]
     if not fax_ok(to.get("fax")):
         return "fax_invalid"
+    if opted_out(to.get("fax")):
+        # 元付業者さんから「FAXを止めて」と言われた番号には送らない（10/29本人承認）
+        store.db().set("faxes", fid, {"status": "optout"}, merge=True)
+        return "optout"
     pdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
     count(uid, 1)
-    ok = delivery.fax_ready() and delivery.send_fax(normalize_fax(to["fax"]), pdf)
+    sender = delivery.fax_sender((u.get("company") or {}).get("会社名"))
+    ok = delivery.fax_ready() and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender)
     status = "sending" if ok else ("failed" if delivery.fax_ready() else "not_ready")
     if not ok:
         count(uid, -1)
@@ -354,6 +359,38 @@ def send(uid, fid):
         remember_to(uid, to)
         store.db().update_tx("users", uid, lambda u: u.__setitem__("total_naiken", u.get("total_naiken", 0) + 1))
     return status
+
+
+# ---------- 送信停止リスト（元付業者さんからの「FAXを止めて」） ----------
+
+def _optout_id(number):
+    return re.sub(r"\D", "", normalize_fax(number) or "")
+
+
+def opted_out(number):
+    n = _optout_id(number)
+    return bool(n) and bool(store.db().get("fax_optout", n))
+
+
+def optout_add(number, note=""):
+    n = _optout_id(number)
+    if not n:
+        return None
+    store.db().set("fax_optout", n, {"number": fax_display(number), "note": note, "at": store.now()})
+    return n
+
+
+def optout_remove(number):
+    n = _optout_id(number)
+    if n and store.db().get("fax_optout", n):
+        store.db().delete("fax_optout", n)
+        return True
+    return False
+
+
+def optout_list():
+    return [{"id": k, **{x: (v[x].isoformat() if x == "at" else v[x]) for x in ("number", "note", "at") if v.get(x)}}
+            for k, v in store.db().all("fax_optout")]
 
 
 def remember_to(uid, to):

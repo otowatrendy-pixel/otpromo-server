@@ -78,6 +78,16 @@ def send_notice(to, subject, text) -> bool:
     return r.status_code < 300
 
 
-def send_fax(number, pdf: bytes) -> bool:
-    log.info("FAX未設定のため送らない to=%s", number)
+def send_fax(number, pdf: bytes, sender: str = "") -> bool:
+    """FAXを送る。sender は相手のFAXの上に出る送信元の表示（「利用会社名（1分資料経由）」）。
+    faximo の API で指定できる項目（ヘッダーの文字・文字数）が分かったら、つなぐときに合わせる。"""
+    import usage
+    log.info("FAX未設定のため送らない to=%s sender=%s", number, sender)
+    usage.count("fax_fail")
     return False
+
+
+def fax_sender(company_name):
+    """FAXの送信元の表示：「利用会社名（1分資料経由）」（10/29本人承認）。"""
+    name = (company_name or "").strip()
+    return f"{name}（1分資料経由）" if name else "1分資料"

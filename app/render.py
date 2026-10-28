@@ -465,6 +465,10 @@ def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=
     # 書体はネットから読まず、同梱のものを使う
     tpl = re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "", tpl)
     css = font_css({"書体": "ゴシック"})[0] + font_css({"書体": "明朝"})[0]
+    # 一番下の友だち追加QR（内見申込書FAX専用の経路 https://lin.ee/YzyWFNQ、15mm角。10/29本人承認）
+    from markupsafe import Markup
+    qr = HERE / "static" / "naiken-qr.svg"
+    data.setdefault("qr_svg", Markup(qr.read_text(encoding="utf-8")) if qr.exists() else "")
     html_text = Template(tpl, autoescape=True).render(**data)
     return html_text.replace("<style>", "<style>\n" + css, 1)
 

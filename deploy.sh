@@ -42,7 +42,19 @@ if [ "${1:-}" = "schedule" ]; then
   job otpromo-daily "0 9 * * *" /cron/daily 300s
   # 5分ごと：受取りFAXの確認のお知らせ（10分後に1回）・預かった募集図面の削除・お支払いの猶予切れ・通数の警告
   job otpromo-often "*/5 * * * *" /cron/often 120s
-  echo "毎日9時と5分ごと（日本時間）の定期実行を設定しました。"
+  # 毎日3時：Firestore を丸ごと書き出す（10/29本人承認）。保存先は30日で自動で消す
+  BACKUP=gs://${PROJECT}-backup
+  gcloud storage buckets create $BACKUP --location=$REGION --uniform-bucket-level-access 2>/dev/null || true
+  echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}' > /tmp/lc-backup.json
+  gcloud storage buckets update $BACKUP --lifecycle-file=/tmp/lc-backup.json >/dev/null
+  gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$SA --role=roles/datastore.importExportAdmin --condition=None >/dev/null
+  gcloud storage buckets add-iam-policy-binding $BACKUP --member=serviceAccount:$SA --role=roles/storage.objectAdmin >/dev/null
+  gcloud scheduler jobs delete otpromo-backup --location=$REGION --quiet >/dev/null 2>&1 || true
+  gcloud scheduler jobs create http otpromo-backup --location=$REGION --schedule="0 3 * * *" --time-zone=Asia/Tokyo \
+    --uri="https://firestore.googleapis.com/v1/projects/$PROJECT/databases/(default):exportDocuments" \
+    --http-method=POST --headers="Content-Type=application/json" --message-body="{\"outputUriPrefix\":\"$BACKUP\"}" \
+    --oauth-service-account-email=$SA --oauth-token-scope=https://www.googleapis.com/auth/datastore >/dev/null
+  echo "毎日9時・5分ごと・毎日3時のバックアップ（日本時間）の定期実行を設定しました。"
   exit 0
 fi
 

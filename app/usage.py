@@ -28,6 +28,10 @@ MAIL_MONTH_LIMIT = int(config.env("MAIL_MONTH_LIMIT", "3000") or 3000)
 MAIL_DAY_WARN = int(config.env("MAIL_DAY_WARN", "50") or 50)
 MAIL_MONTH_WARN = int(config.env("MAIL_MONTH_WARN", "2000") or 2000)
 HELD_MAX = 20
+# 費用の上限（10/29本人承認）：AI利用料が月3万円で警告、月5万円で新しい資料づくりを止める。1人1日60件まで
+AI_WARN_YEN = int(config.env("AI_WARN_YEN", "30000") or 30000)
+AI_STOP_YEN = int(config.env("AI_STOP_YEN", "50000") or 50000)
+DAILY_DOC_LIMIT = int(config.env("DAILY_DOC_LIMIT", "60") or 60)
 
 
 def _jst(t=None):
@@ -232,6 +236,11 @@ def check():
     if p["forecast_month_end"] > p["limit"]:
         if alert_once("push_forecast", "LINEの通数が月末に上限を超えそうです", head):
             sent.append("push_forecast")
+    yen = _get("usage_m_" + _month()).get("ai_yen", 0)
+    if yen >= AI_WARN_YEN:
+        if alert_once("ai_warn_" + _month(), f"AI利用料が月{AI_WARN_YEN:,}円を超えました",
+                      f"今月のAI利用料：約{round(yen):,}円\n月{AI_STOP_YEN:,}円に達すると、新しい資料づくりを自動で止めます。"):
+            sent.append("ai_warn")
     if ml["today"] > MAIL_DAY_WARN:
         if alert_once("mail_day", f"メールの送信数が1日{MAIL_DAY_WARN}通を超えました",
                       f"今日のメール：{ml['today']}通／1日{MAIL_DAY_LIMIT}通（Resend無料枠）\n今月：{ml['month']}通／{MAIL_MONTH_LIMIT}通"):
@@ -241,6 +250,15 @@ def check():
                       f"今月のメール：{ml['month']}通／{MAIL_MONTH_LIMIT}通（Resend無料枠）"):
             sent.append("mail_month")
     return sent
+
+
+def _growth_lines():
+    try:
+        import growth
+        return growth.daily_lines()
+    except Exception:
+        log.exception("日報の追加の行")
+        return "（読み取り・解約理由などの集計に失敗しました）"
 
 
 def daily_report():
@@ -254,6 +272,7 @@ def daily_report():
             f"■利用者\n有料：{us['paid_total']}人（ライト 月払い{us['paid']['light_month']}・年払い{us['paid']['light_year']}／"
             f"使い放題 月払い{us['paid']['unlimited_month']}・年払い{us['paid']['unlimited_year']}）\n"
             f"お試し中：{us['trial']}人\n今月の新規登録：{us['new_this_month']}人\n今月の解約：{us['ended_this_month']}人\n\n"
+            f"{_growth_lines()}\n\n"
             f"■上限で送れずにためているLINEのお知らせ：{p['held_now'] if p['held_now'] is not None else '－'}件\n"
             f"■メールが送れずLINEで代わりに届けた件数：昨日{ml['fallback_to_line_yesterday']}件（今月{ml['fallback_to_line_month']}件）\n")
     import delivery
@@ -329,3 +348,49 @@ def broadcast(mid, to, values):
             log.exception("一斉送信の失敗 %s", uid)
     notify_admin(f"一斉送信が終わりました（{mid}）", f"宛先：{'LINE' if to == 'line' else 'メール'}\n送れた人数：{n}人", urgent=False)
     return n
+
+
+# ---------- 費用の上限 ----------
+
+_ai = {"at": 0, "yen": 0}
+
+
+def ai_month_yen():
+    import time
+    if time.monotonic() - _ai["at"] > 60:
+        _ai["yen"] = _get("usage_m_" + _month()).get("ai_yen", 0)
+        _ai["at"] = time.monotonic()
+    return _ai["yen"]
+
+
+def ai_stopped():
+    """今月のAI利用料が上限（5万円）に達したら、新しい資料づくりを止める。"""
+    yen = ai_month_yen()
+    if yen >= AI_STOP_YEN:
+        alert_once("ai_stop_" + _month(), f"AI利用料が月{AI_STOP_YEN:,}円に達したため、新しい資料づくりを止めました",
+                   f"今月のAI利用料：約{round(yen):,}円\n利用者には「混み合っています」とお伝えしています。\n"
+                   f"再開するには、Cloud Run の環境変数 AI_STOP_YEN を上げてください。")
+        return True
+    return False
+
+
+def over_daily(u):
+    """1人1日の作成上限（60件、翌日に戻る）に達しているか。"""
+    today = _day()
+    return u.get("day_key") == today and (u.get("day_docs") or 0) >= DAILY_DOC_LIMIT
+
+
+def busy_message():
+    import texts
+    if "busy_cost_limit" in texts._MSG:
+        return texts.build("busy_cost_limit")
+    return line.text("申し訳ありません。ただいま大変混み合っているため、資料づくりを一時お休みしています。\n"
+                     "今回の分は、件数に数えていません。準備ができしだい、このLINEでお知らせします。")
+
+
+def daily_limit_message():
+    import texts
+    if "daily_limit_reached" in texts._MSG:
+        return texts.build("daily_limit_reached", 上限=DAILY_DOC_LIMIT)
+    return line.text(f"本日の資料づくりは、上限の{DAILY_DOC_LIMIT}件に達しました。\n"
+                     "明日0時から、またお使いいただけます。今回の分は、件数に数えていません。")

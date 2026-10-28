@@ -67,7 +67,7 @@ def _no_nested_arrays(x, path=""):
 
 class _Local:
     def __init__(self):
-        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}, "referrals": {}}
+        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}, "referrals": {}, "fax_optout": {}}
         self.lock = threading.Lock()
         self.dir = Path(config.LOCAL_DIR)
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -125,6 +125,10 @@ class _Local:
 
     def all(self, col):
         return [(k, copy.deepcopy(v)) for k, v in self.docs[col].items()]
+
+    def delete(self, col, id):
+        with self.lock:
+            self.docs[col].pop(id, None)
 
     def incr(self, col, id, fields):
         with self.lock:
@@ -194,6 +198,9 @@ class _GCP:
 
     def all(self, col):
         return [(s.id, s.to_dict()) for s in self.fs.collection(col).stream()]
+
+    def delete(self, col, id):
+        self.fs.collection(col).document(id).delete()
 
     def incr(self, col, id, fields):
         self.fs.collection(col).document(id).set({k: self.firestore.Increment(n) for k, n in fields.items()}, merge=True)
@@ -343,6 +350,10 @@ def try_consume(uid):
             _live_grants(u)[0]["used"] += 1
         u["month_used"] = u.get("month_used", 0) + 1
         u["total_docs"] = u.get("total_docs", 0) + 1
+        u["last_doc_at"] = now()
+        today = now().astimezone(JST).strftime("%Y%m%d")
+        u["day_docs"] = (u.get("day_docs", 0) if u.get("day_key") == today else 0) + 1
+        u["day_key"] = today
         if q["plan"] == "free":
             u["free_used"] = u.get("free_used", 0) + 1
         over[:] = [q["plan"] == "unlimited" and u["month_used"] == UNLIMITED_SOFT_CAP + 1]
@@ -361,6 +372,8 @@ def refund(uid):
         _roll_month(u)
         u["month_used"] = max(0, u.get("month_used", 0) - 1)
         u["total_docs"] = max(0, u.get("total_docs", 0) - 1)
+        if u.get("day_docs"):
+            u["day_docs"] -= 1
         plan = u.get("plan") or "free"
         if plan == "free":
             u["free_used"] = max(0, u.get("free_used", 0) - 1)
@@ -397,6 +410,14 @@ def new_job(uid, source):
 
 def update_job(jid, data):
     db().set("jobs", jid, data, merge=True)
+    if data.get("status") == "failed":
+        # 日報用：読み取れなかった件数（ぼやけ・募集図面でない・売買・ファイルの不備）とシステムの失敗
+        err = str(data.get("error") or "")
+        import usage
+        if err in ("blurry", "not_maisoku", "sale") or err.startswith("input:"):
+            usage.count("read_fail")
+        elif err != "quota":
+            usage.count("system_fail")
 
 
 def get_job(jid):
