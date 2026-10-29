@@ -11,7 +11,7 @@ import bot, delivery, faxopt, store
 bot.pool = type("P", (), {"submit": staticmethod(lambda f, *a: f(*a))})()  # その場で動かす
 sent = []
 delivery.fax_ready = lambda: True
-delivery.send_fax = lambda num, pdf: sent.append((num, len(pdf), pdf[:4])) or True
+delivery.send_fax = lambda num, pdf, *a, **k: sent.append((num, len(pdf), pdf[:4])) or True
 u = store.get_user("LUabc")
 store.update_user("LUabc", {"plan": "light", "period_start": store.now(), "faxrecv_packs": [],
                             "delivery": {**u["delivery"], "method": "fax", "fax": "03-1234-9999"}})
