@@ -464,6 +464,75 @@ def naiken_send(fid: str, authorization: str = Header("")):
     return {"status": status}
 
 
+class ReserveIn(BaseModel):
+    send_at: str  # 日本時間の「YYYY-MM-DDTHH:MM」
+
+
+def _reserve_fail(status, fid):
+    import naiken
+    if status is None:
+        raise HTTPException(404)
+    if status == "trial":
+        raise HTTPException(403, {"code": "trial", "message": texts.raw("naiken_trial")})
+    if status == "limit":
+        raise HTTPException(402, "内見FAXの回数の上限に達しました")
+    if status == "optout":
+        raise HTTPException(409, {"code": "optout", "message": "この管理会社さまからFAXを止めるご依頼をいただいているため、お送りできません。お電話など直接ご連絡をお願いいたします。"})
+    if status in naiken.RESERVE_ERRORS:
+        rec = store.db().get("faxes", fid) or {}
+        raise HTTPException(422, {"code": status, "message": naiken.error_text(status, rec.get("draft"))})
+
+
+def _reserved_out(fid, rec):
+    import naiken
+    return {"fax_id": fid, "status": rec["status"], "send_at": rec["send_at"].astimezone(store.JST).isoformat(),
+            "send_at_label": naiken.when_label(rec["send_at"]), "holiday_note": naiken.holiday_note(rec["send_at"]),
+            "to_company": (rec["draft"].get("to") or {}).get("company", ""),
+            "prop_name": (rec["draft"].get("prop") or {}).get("name", "")}
+
+
+@router.get("/naiken/reserved")
+def naiken_reserved(authorization: str = Header("")):
+    """予約中の内見FAX（送信の早い順）。"""
+    import naiken
+    uid, u = _me(authorization)
+    return {"items": [_reserved_out(fid, rec) for fid, rec in naiken.reserved(uid)]}
+
+
+@router.post("/naiken/{fid}/reserve")
+def naiken_reserve(fid: str, body: ReserveIn, authorization: str = Header("")):
+    """日時を指定して送る（8時〜20時・15分後〜7日後・内見の第1希望の1時間前まで）。回数は予約した時点で1回分使う。"""
+    import naiken
+    uid, u = _me(authorization)
+    status = naiken.reserve(uid, fid, naiken.parse_when(body.send_at))
+    if status != "scheduled":
+        _reserve_fail(status, fid)
+        return {"status": status}
+    return _reserved_out(fid, store.db().get("faxes", fid))
+
+
+@router.put("/naiken/{fid}/reserve")
+def naiken_reschedule(fid: str, body: ReserveIn, authorization: str = Header("")):
+    """予約の日時を変える（送信の5分前まで）。"""
+    import naiken
+    uid, u = _me(authorization)
+    status = naiken.reschedule(uid, fid, naiken.parse_when(body.send_at))
+    if status != "scheduled":
+        _reserve_fail(status, fid)
+    return _reserved_out(fid, store.db().get("faxes", fid))
+
+
+@router.delete("/naiken/{fid}/reserve")
+def naiken_unreserve(fid: str, authorization: str = Header("")):
+    """予約を取り消す（送信の5分前まで）。押さえた回数は戻る。"""
+    import naiken
+    uid, u = _me(authorization)
+    status = naiken.unreserve(uid, fid)
+    if status != "canceled":
+        _reserve_fail(status, fid)
+    return {"status": "canceled"}
+
+
 @router.get("/naiken/{fid}")
 def naiken_get(fid: str, authorization: str = Header("")):
     import naiken
@@ -471,4 +540,5 @@ def naiken_get(fid: str, authorization: str = Header("")):
     rec = store.db().get("faxes", fid)
     if not rec or rec["user_id"] != uid:
         raise HTTPException(404)
-    return {"status": rec["status"], "pdf_url": naiken.file_url(fid, rec, "naiken.pdf"), "error": rec.get("error")}
+    return {"status": rec["status"], "pdf_url": naiken.file_url(fid, rec, "naiken.pdf"), "error": rec.get("error"),
+            "send_at": rec["send_at"].astimezone(store.JST).isoformat() if rec.get("send_at") else None}

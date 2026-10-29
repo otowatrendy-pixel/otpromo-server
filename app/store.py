@@ -98,6 +98,9 @@ class _Local:
                 return k, copy.deepcopy(v)
         return None, None
 
+    def find_all(self, col, field, value):
+        return [(k, copy.deepcopy(v)) for k, v in self.docs[col].items() if v.get(field) == value]
+
     def before(self, col, field, cutoff):
         """field が cutoff 以前の文書の (id, 中身)。"""
         def val(v):
@@ -169,6 +172,10 @@ class _GCP:
         for s in self.fs.collection(col).where(filter=FieldFilter(field, "==", value)).limit(1).stream():
             return s.id, s.to_dict()
         return None, None
+
+    def find_all(self, col, field, value):
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        return [(s.id, s.to_dict()) for s in self.fs.collection(col).where(filter=FieldFilter(field, "==", value)).stream()]
 
     def before(self, col, field, cutoff):
         from google.cloud.firestore_v1.base_query import FieldFilter

@@ -137,7 +137,11 @@ def handle(ev):
         # 「このままFAXする」のお知らせは、その間にほかの操作があれば送らない
         store.update_user(c.uid, {"recvfax_remind_at": None})
     if t == "postback":
-        return on_postback(c, ev["postback"]["data"])
+        data = ev["postback"]["data"]
+        dt = (ev["postback"].get("params") or {}).get("datetime")
+        if dt:  # 日時選択のボタン（内見FAXの送信予約）で選ばれた日時
+            data += "&dt=" + dt
+        return on_postback(c, data)
     if t != "message":
         return
     m = ev["message"]
@@ -523,6 +527,8 @@ def on_text(c, t):
     step = current_step(c.u)
     if step:
         return reg_text(c, step, t)
+    if norm(t) in naiken_bot.RESERVED_WORDS and c.u.get("registered"):
+        return naiken_bot.show_reserved(c)
     if naiken_bot.active(c.u) or norm(t).startswith("内見"):
         if not c.u.get("registered"):
             return c.send(texts.build("reg_first"))
