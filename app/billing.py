@@ -46,6 +46,37 @@ PRODUCTS = {
 }
 
 
+def key_mode():
+    k = config.STRIPE_SECRET_KEY or ""
+    return "live" if k.startswith(("sk_live_", "rk_live_")) else ("test" if k else "")
+
+
+def reset_sandbox_data():
+    """サンドボックスのキーから本番のキーに替えた最初の起動で1回だけ、テストで作った契約の記録を消す。
+    （サンドボックスの顧客・契約IDは本番では使えないため。テストで有料にした方は無料に戻る）"""
+    if key_mode() != "live":
+        return 0
+    if not store.db().create("meta", "stripe_live_reset", {"at": store.now()}):
+        return 0  # もう済んでいる（または別のインスタンスが実行中）
+    n = 0
+    for uid, u in store.db().all("users"):
+        if not (u.get("stripe_customer") or u.get("stripe_subscription") or u.get("plan_source") in ("stripe", "group", "group_leaving")):
+            continue
+        data = {"stripe_customer": None, "stripe_subscription": None, "sub_status": None,
+                "cancel_at_period_end": False, "grace_until": None, "pending_change": None}
+        if u.get("plan_source") in ("stripe", "group", "group_leaving", None) and (u.get("plan") or "free") != "free":
+            data.update({"plan": "free", "plan_source": None, "billing_interval": "month",
+                         "period_start": None, "period_end": None})
+        store.update_user(uid, data)
+        n += 1
+    for gid, g in store.db().all("groups"):
+        if g.get("stripe_subscription"):
+            store.db().set("groups", gid, {"stripe_subscription": None, "status": "sandbox_ended"}, merge=True)
+    store.db().delete("meta", "stripe_webhook")  # サンドボックスの通知先の記録。本番の通知先は ensure_webhook が作る
+    log.warning("本番キーに切り替えたため、サンドボックスの契約の記録を %d 人分消しました", n)
+    return n
+
+
 def ensure_prices():
     """プランの価格IDを、いまのキー（サンドボックス／本番）のものにそろえる。環境変数で指定したものはそのまま。"""
     import os

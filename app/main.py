@@ -35,7 +35,7 @@ def _setup_webhooks():
 
     def run():
         import richmenu
-        for name, fn in (("prices", billing.ensure_prices), ("stripe", billing.ensure_webhook), ("line", line.ensure_webhook), ("richmenu", richmenu.ensure),
+        for name, fn in (("sandbox_reset", billing.reset_sandbox_data), ("prices", billing.ensure_prices), ("stripe", billing.ensure_webhook), ("line", line.ensure_webhook), ("richmenu", richmenu.ensure),
                          ("descriptor", billing.ensure_descriptors)):
             try:
                 fn()
