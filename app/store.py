@@ -8,7 +8,7 @@ users/{id}
   company{...}                 … 帯・色・書体など（core.DEFAULT_COMPANY と同じ項目）
   delivery{method, email, fax} … 受け取り方（line / email / fax）
   plan                         … free / light / unlimited
-  plan_source                  … stripe / google_play
+  plan_source                  … stripe / google_play / app_store
   faxrecv_packs                … 受け取り用FAXの回数券 [{n, used, at, exp}]（10回・90日）
   recvfax_wait                 … 回数券を買ったらFAXで送る資料ID
   stripe_customer, stripe_subscription
