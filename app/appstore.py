@@ -159,6 +159,11 @@ def notify(body: dict):
     if tx and tx.get("productId") in SUBS:
         res = apply_subscription(None, tx, renewal)
         log.info("App Store 通知 %s/%s %s", n.get("notificationType"), n.get("subtype"), res)
+        if (n.get("notificationType"), n.get("subtype")) == ("DID_CHANGE_RENEWAL_STATUS", "AUTO_RENEW_DISABLED"):
+            # 自動更新をオフ＝解約の手続き。アプリで解約の理由を1回聞く（/v1/me の ask_cancel_reason）
+            uid, _ = store.db().find("users", "apple_original_tx", str(tx.get("originalTransactionId") or ""))
+            if uid:
+                store.update_user(uid, {"ask_cancel_reason": True})
     elif tx and n.get("notificationType") == "REFUND":
         log.warning("消費型の返金 %s %s", tx.get("productId"), tx.get("transactionId"))
     return True
