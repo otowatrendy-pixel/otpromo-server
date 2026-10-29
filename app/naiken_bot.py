@@ -172,8 +172,112 @@ def confirm(c, pre=()):
     if not kw["号室"]:
         text = text.replace(" 号室", "")
     img = line.image(naiken.file_url(fid, rec, "naiken.png"), naiken.file_url(fid, rec, "naiken.png"))
-    msg = texts.build("naiken_confirm", text=text)
+    text = text + "\n日時を指定して送る場合は「日時を指定して送る」から（8時〜20時・7日先まで）。"
+    msg = with_picker(texts.build("naiken_confirm", text=text), "naiken=reserve")
     c.send(*pre, img, msg)
+
+
+# ---------- 送信予約 ----------
+
+RESERVED_WORDS = {"予約", "予約中", "予約確認", "予約中のFAX", "FAX予約", "予約一覧"}
+
+
+def picker(label, data):
+    """LINEの日時選択ボタン（15分後〜7日後）。選ぶと postback に &dt=YYYY-MM-DDTHH:MM が付いて届く。"""
+    now = store.now().astimezone(store.JST)
+    first = now + naiken.RESERVE_MIN + timedelta(minutes=5)
+    if first.hour < naiken.RESERVE_HOURS[0]:
+        first = first.replace(hour=naiken.RESERVE_HOURS[0], minute=0)
+    elif first.hour >= naiken.RESERVE_HOURS[1]:
+        first = (first + timedelta(days=1)).replace(hour=naiken.RESERVE_HOURS[0], minute=0)
+    f = "%Y-%m-%dT%H:%M"
+    return {"type": "datetimepicker", "label": label[:20], "data": data, "mode": "datetime",
+            "initial": first.strftime(f), "min": (now + naiken.RESERVE_MIN).strftime(f),
+            "max": (now + naiken.RESERVE_MAX).strftime(f)}
+
+
+def with_picker(msg, data, label="日時を指定して送る"):
+    """クイックリプライの2番目（「この内容で送信」の次）に日時選択のボタンを入れる。"""
+    items = msg.setdefault("quickReply", {"items": []})["items"]
+    items.insert(min(1, len(items)), {"type": "action", "action": picker(label, data)})
+    return msg
+
+
+def _split_dt(v):
+    """「reserve&dt=2026-11-01T10:00」→ ("reserve", datetime)"""
+    head, _, dt = v.partition("&dt=")
+    return head, naiken.parse_when(dt) if dt else None
+
+
+def reserved_text(fid, rec):
+    d = rec["draft"]
+    to, p = d.get("to") or {}, d.get("prop") or {}
+    room = f" {p['room']}号室" if p.get("room") else ""
+    return (f"送信日時：{naiken.when_label(rec['send_at'])}\n送り先：{to_text(to)}（{naiken.fax_display(to.get('fax'))}）\n"
+            f"物件：{p.get('name', '')}{room}")
+
+
+def reserved_buttons(fid):
+    return [{"type": "action", "action": picker("日時を変える", f"naiken=resched:{fid}")},
+            line.qr_postback("予約を取り消す", f"naiken=unreserve:{fid}"),
+            line.qr_postback("予約中のFAX", "naiken=reserved")]
+
+
+def reserve(c, when):
+    fid = c.u.get("nk_fid")
+    if not fid:
+        return c.send(line.text("送る内容が見つかりませんでした。もう一度はじめからお願いします。"))
+    status = naiken.reserve(c.uid, fid, when)
+    rec = store.db().get("faxes", fid)
+    if status == "scheduled":
+        _set(c, nk_step=None, last_naiken=fid)
+        t = ("内見申込書のFAXを、送信予約しました。\n\n" + reserved_text(fid, rec) +
+             "\n\nこの時刻に自動でお送りし、届いたらこちらでお知らせします。"
+             "今月の内見FAXの回数は、予約した時点で1回分使い、取り消すと戻ります。\n"
+             "取り消し・日時の変更は、送信の5分前までできます（「予約」と送ると、予約中のFAXが見られます）。")
+        note = naiken.holiday_note(rec["send_at"])
+        return c.send(line.text(t + ("\n\n" + note if note else ""), quick=reserved_buttons(fid)))
+    if status in naiken.RESERVE_ERRORS:
+        q = [{"type": "action", "action": picker("日時を選び直す", "naiken=reserve")},
+             line.qr_postback("今すぐ送る", "naiken=send"), line.qr_postback("やめる", "cancel")]
+        return c.send(line.text(naiken.error_text(status, rec and rec["draft"]), quick=q))
+    return answer(c, fid, status, rec)
+
+
+def show_reserved(c):
+    rows = naiken.reserved(c.uid)
+    if not rows:
+        return c.send(line.text("予約中の内見申込書FAXはありません。"))
+    msgs = [line.text(f"予約中の内見申込書FAXは{len(rows)}件です（送信の早い順）。\n取り消し・日時の変更は、送信の5分前までできます。")]
+    for fid, rec in rows[:4]:  # 1回で送れるのは5通まで
+        msgs.append(line.text(reserved_text(fid, rec), quick=reserved_buttons(fid)))
+    if len(rows) > 4:
+        msgs[0]["text"] += f"\n（ここには早い順に4件を出しています）"
+    return c.send(*msgs)
+
+
+def reserve_postback(c, v):
+    head, when = _split_dt(v)
+    if head == "reserve":
+        return reserve(c, when)
+    if head == "reserved":
+        return show_reserved(c)
+    if head.startswith("unreserve:"):
+        st = naiken.unreserve(c.uid, head.split(":", 1)[1])
+        if st == "canceled":
+            return c.send(line.text("送信予約を取り消しました。今回の分は、回数に戻しています。\n"
+                                    "あらためて送る場合は、その物件の資料の「この物件で内見FAX」からお願いします。"))
+        return c.send(line.text(naiken.RESERVE_ERRORS.get(st or "not_reserved")))
+    if head.startswith("resched:"):
+        fid = head.split(":", 1)[1]
+        st = naiken.reschedule(c.uid, fid, when)
+        rec = store.db().get("faxes", fid)
+        if st == "scheduled":
+            note = naiken.holiday_note(rec["send_at"])
+            return c.send(line.text("送信日時を変更しました。\n\n" + reserved_text(fid, rec) + ("\n\n" + note if note else ""),
+                                    quick=reserved_buttons(fid)))
+        q = reserved_buttons(fid) if st not in ("too_late", "not_reserved", None) else None
+        return c.send(line.text(naiken.error_text(st or "not_reserved", rec and rec["draft"]), quick=q))
 
 
 # ---------- 名刺の情報 ----------
@@ -299,30 +403,45 @@ def on_postback(c, v):
             return c.send(line.text("送る内容が見つかりませんでした。もう一度はじめからお願いします。"))
         status = naiken.send(c.uid, fid)
         rec = store.db().get("faxes", fid)
-        if status == "sending":
-            _set(c, nk_step=None, last_naiken=fid)
-            return c.send(texts.build("naiken_sending"))
-        if status == "trial":
-            _set(c, nk_step=None)
-            return c.send(trial_message(c))
-        if status == "limit":
-            import bot
-            period, limit, nxt = naiken.limit_info(c.u)
-            if period == "本日":
-                return c.send(texts.build("naiken_limit_day", 上限=limit))
-            return c.send(texts.build("naiken_limit", urls=bot.plan_urls(c), 上限=limit, 更新日=nxt))
-        if status == "fax_invalid":
-            return next_step(c)
-        if status == "optout":
-            _set(c, nk_step=None, last_naiken=fid)
-            return c.send(_optout_message(fid, rec))
-        if status == "not_ready":
-            _set(c, nk_step=None, last_naiken=fid)
-            return c.send(line.text("ただいまFAX送信の準備中のため、まだお送りしていません（テスト版）。\n"
-                                    f"作った申込書はこちらから見られます。\n{naiken.file_url(fid, rec, 'naiken.pdf')}"))
-        return c.send(line.text("この申込書は、すでに送信の手続きが済んでいます。"))
+        return answer(c, fid, status, rec)
+    if v.split("&")[0] in ("reserve", "reserved") or v.startswith(("unreserve:", "resched:")):
+        return reserve_postback(c, v)
     if v == "edit":
         return c.send(texts.build("naiken_edit"))
+    return answer_rest(c, v)
+
+
+def answer(c, fid, status, rec):
+    """「この内容で送信」「日時を指定して送る」の結果を伝える（送れなかった理由ごと）。"""
+    if status == "sending":
+        _set(c, nk_step=None, last_naiken=fid)
+        return c.send(texts.build("naiken_sending"))
+    if status == "trial":
+        _set(c, nk_step=None)
+        return c.send(trial_message(c))
+    if status == "limit":
+        import bot
+        period, limit, nxt = naiken.limit_info(c.u)
+        if period == "本日":
+            return c.send(texts.build("naiken_limit_day", 上限=limit))
+        return c.send(texts.build("naiken_limit", urls=bot.plan_urls(c), 上限=limit, 更新日=nxt))
+    if status == "fax_invalid":
+        return next_step(c)
+    if status == "optout":
+        _set(c, nk_step=None, last_naiken=fid)
+        return c.send(_optout_message(fid, rec))
+    if status == "not_ready":
+        _set(c, nk_step=None, last_naiken=fid)
+        return c.send(line.text("ただいまFAX送信の準備中のため、まだお送りしていません（テスト版）。\n"
+                                f"作った申込書はこちらから見られます。\n{naiken.file_url(fid, rec, 'naiken.pdf')}"))
+    if status == "scheduled":
+        return c.send(line.text("この申込書は、送信予約をしています。今すぐ送る場合は、予約を取り消してから「この内容で送信」を押してください。\n\n"
+                                + reserved_text(fid, rec), quick=reserved_buttons(fid)))
+    return c.send(line.text("この申込書は、すでに送信の手続きが済んでいます。"))
+
+
+def answer_rest(c, v):
+    """確認カードの「直す」から先のボタン。"""
     if v in EDIT_ASK:
         _set(c, nk_step=v)
         return c.send(texts.build(EDIT_ASK[v]))

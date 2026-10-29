@@ -348,21 +348,232 @@ def send(uid, fid):
         # 元付業者さんから「FAXを止めて」と言われた番号には送らない（10/29本人承認）
         store.db().set("faxes", fid, {"status": "optout"}, merge=True)
         return "optout"
-    pdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
     count(uid, 1)
     source = (store.get_user(uid) or {}).get("last_fax_from")
+    return _dispatch(uid, fid, rec, u, source)
+
+
+def _dispatch(uid, fid, rec, u, source):
+    """回数を数えた後、faximo へ渡す。送れなければ回数を戻す。今すぐ送る・予約の時刻の両方から使う。"""
+    to = rec["draft"]["to"]
+    pdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
     sender = delivery.fax_sender((u.get("company") or {}).get("会社名"))
     ok = delivery.fax_ready() and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender,
                                                     kind="naiken", ref=fid, uid=uid)
     status = "sending" if ok else ("failed" if delivery.fax_ready() else "not_ready")
     if not ok:
-        count(uid, -1)
+        count(uid, -1, source=source)
     store.db().set("faxes", fid, {"status": status, "sent_at": store.now(), "fax_id": ok or None,
                                   "from": source, "retry_told": False}, merge=True)
     if ok:
         remember_to(uid, to)
         store.db().update_tx("users", uid, lambda u: u.__setitem__("total_naiken", u.get("total_naiken", 0) + 1))
     return status
+
+
+# ---------- 送信予約（10/29本人決定：公開日から） ----------
+# faximo には予約送信がないため、サーバーで預かり、定期実行（5分ごと）が時刻になったものを送る。
+# 回数は予約した時点で1回分を押さえ、取り消したら戻す。送れなかった分は今すぐ送るときと同じく数えない。
+
+RESERVE_MIN = timedelta(minutes=int(config.env("NAIKEN_RESERVE_MIN", "15")))   # 今から15分後以降
+RESERVE_MAX = timedelta(days=int(config.env("NAIKEN_RESERVE_DAYS", "7")))      # 7日先まで
+RESERVE_HOURS = (8, 20)                       # 8:00〜20:00（夜間・早朝は相手先のご迷惑になるため）
+RESERVE_LOCK = timedelta(minutes=5)           # 取り消し・変更は送信の5分前まで
+RESERVE_BEFORE_VISIT = timedelta(hours=1)     # 内見の第1希望の1時間前まで
+RESERVE_COUNT = int(config.env("NAIKEN_RESERVE_COUNT", "10"))  # 1人が同時に予約できる件数
+
+RESERVE_ERRORS = {
+    "bad_time": "送信の日時を読み取れませんでした。もう一度お選びください。",
+    "too_soon": "送信の日時は、今から15分後以降でお選びください。すぐに送る場合は「この内容で送信」を押してください。",
+    "too_far": "送信の日時は、7日先までの間でお選びください。",
+    "night": "送信の日時は、8時〜20時の間でお選びください（夜間・早朝は相手先のご迷惑になるため、お送りしていません）。",
+    "after_visit": "送信の日時は、内見の第1希望（{visit}）の1時間前までの間でお選びください。",
+    "too_many": "送信予約は、同時に10件までです。予約中のFAXが送られてから、またお選びください。",
+    "too_late": "送信の5分前を過ぎたため、取り消し・変更ができませんでした。このままお送りします。",
+    "not_reserved": "この申込書は、予約中ではありません（送信済み・取り消し済みの可能性があります）。",
+}
+
+
+def parse_when(s):
+    """「2026-11-01T10:00」（LINEの日時選択・アプリ）→ 日本時間の datetime。読めなければ None。"""
+    try:
+        t = datetime.fromisoformat(str(s).strip().replace(" ", "T"))
+    except (TypeError, ValueError):
+        return None
+    return t.replace(tzinfo=store.JST) if t.tzinfo is None else t.astimezone(store.JST)
+
+
+def when_label(t):
+    t = t.astimezone(store.JST)
+    return f"{t.month}月{t.day}日（{WEEK[t.weekday()]}）{t.hour}時{t.minute:02d}分"
+
+
+def first_visit(d):
+    """内見の希望日時のうち一番早いもの（日本時間）。時刻がなければ午前・未指定は9時、午後は12時とみなす。"""
+    out = []
+    for w in d.get("wishes") or []:
+        try:
+            day = datetime.strptime(w["date"], "%Y-%m-%d")
+        except (KeyError, ValueError, TypeError):
+            continue
+        if w.get("time"):
+            h, m = (int(x) for x in w["time"].split(":")[:2])
+        else:
+            h, m = (12 if "午後" in (w.get("note") or "") else 9), 0
+        out.append(day.replace(hour=h, minute=m, tzinfo=store.JST))
+    return min(out) if out else None
+
+
+def reserve_error(d, when):
+    """選ばれた日時が予約の決まりに合わなければ、その理由のコード（合えば None）。"""
+    if not when:
+        return "bad_time"
+    now = store.now()
+    if when < now + RESERVE_MIN:
+        return "too_soon"
+    if when > now + RESERVE_MAX:
+        return "too_far"
+    t = when.astimezone(store.JST)
+    if not (RESERVE_HOURS[0] <= t.hour < RESERVE_HOURS[1] or (t.hour == RESERVE_HOURS[1] and t.minute == 0)):
+        return "night"
+    v = first_visit(d)
+    if v and when > v - RESERVE_BEFORE_VISIT:
+        return "after_visit"
+    return None
+
+
+def error_text(code, d=None):
+    v = first_visit(d or {})
+    return RESERVE_ERRORS.get(code, "").format(visit=wish_label({"date": v.strftime("%Y-%m-%d"), "time": v.strftime("%H:%M")}) if v else "")
+
+
+def holiday_note(when):
+    """不動産会社の定休日が多い水曜日を選んだときの一言。"""
+    if when.astimezone(store.JST).weekday() == 2:
+        return "水曜日は定休日の会社が多いため、ご確認が翌日になることがあります。"
+    return ""
+
+
+def reserved(uid):
+    """予約中のFAX（送信の早い順）。[(fax_id, rec), …]"""
+    rows = [(k, v) for k, v in store.db().find_all("faxes", "user_id", uid) if v.get("status") == "scheduled"]
+    return sorted(rows, key=lambda x: x[1]["send_at"])
+
+
+def reserve(uid, fid, when):
+    """［日時を指定して送る］。今すぐ送るときと同じ確認をしてから、回数を押さえて預かる。戻り値は status。"""
+    rec = store.db().get("faxes", fid)
+    if not rec or rec["user_id"] != uid or rec["status"] not in ("preview", "failed"):
+        return rec and rec["status"]
+    u = store.get_user(uid)
+    if is_trial(u):
+        return "trial"
+    err = reserve_error(rec["draft"], when)
+    if err:
+        return err
+    if len(reserved(uid)) >= RESERVE_COUNT:
+        return "too_many"
+    if not can_send(u):
+        return "limit"
+    to = rec["draft"]["to"]
+    if not fax_ok(to.get("fax")):
+        return "fax_invalid"
+    if opted_out(to.get("fax")):
+        store.db().set("faxes", fid, {"status": "optout"}, merge=True)
+        return "optout"
+    count(uid, 1)
+    source = (store.get_user(uid) or {}).get("last_fax_from")
+    # 申込書の画像・PDFは送信日から7日間見られるようにする
+    store.db().set("faxes", fid, {"status": "scheduled", "send_at": when.astimezone(store.JST), "from": source,
+                                  "reserved_at": store.now(), "expires_at": when + timedelta(days=7)}, merge=True)
+    return "scheduled"
+
+
+def reschedule(uid, fid, when):
+    """予約中のFAXの日時を変える（回数はそのまま）。戻り値は status またはエラーのコード。"""
+    rec = store.db().get("faxes", fid)
+    if not rec or rec["user_id"] != uid:
+        return None
+    if rec["status"] != "scheduled":
+        return "not_reserved"
+    if rec["send_at"] <= store.now() + RESERVE_LOCK:
+        return "too_late"
+    err = reserve_error(rec["draft"], when)
+    if err:
+        return err
+    store.db().set("faxes", fid, {"send_at": when.astimezone(store.JST), "expires_at": when + timedelta(days=7)}, merge=True)
+    return "scheduled"
+
+
+def unreserve(uid, fid):
+    """予約を取り消す。押さえた回数を戻し、申込書は確認中（preview）に戻す（そのまま今すぐ送ることもできる）。"""
+    rec = store.db().get("faxes", fid)
+    if not rec or rec["user_id"] != uid:
+        return None
+    if rec["status"] != "scheduled":
+        return "not_reserved"
+    if rec["send_at"] <= store.now() + RESERVE_LOCK:
+        return "too_late"
+
+    def fn(r):
+        if r.get("status") != "scheduled":
+            return False
+        r.update(status="preview", send_at=None, canceled_at=store.now())
+        return True
+    if not store.db().update_tx("faxes", fid, fn):
+        return "not_reserved"
+    count(uid, -1, source=rec.get("from"))
+    return "canceled"
+
+
+def run_reserved():
+    """定期実行（5分ごと）から。送信時刻になった予約を送る。送った件数を返す。"""
+    import bot
+    n = 0
+    for fid, rec in store.db().before("faxes", "send_at", store.now()):
+        if rec.get("status") != "scheduled":
+            continue
+
+        def claim(r):
+            # 定期実行が重なっても二重に送らない
+            if r.get("status") != "scheduled":
+                return False
+            r["status"] = "dispatching"
+            return True
+        if not store.db().update_tx("faxes", fid, claim):
+            continue
+        uid, source = rec["user_id"], rec.get("from")
+        u = store.get_user(uid) or {}
+        to = rec["draft"].get("to") or {}
+        base = {"管理会社": " ".join(x for x in (to.get("company"), to.get("branch")) if x), "FAX番号": to.get("fax", "")}
+        try:
+            if opted_out(to.get("fax")):
+                # 予約の後に元付業者さんから「FAXを止めて」と言われた番号
+                store.db().set("faxes", fid, {"status": "optout"}, merge=True)
+                count(uid, -1, source=source)
+                _push(u, "予約していた内見申込書のFAXは、送り先の管理会社さまからFAXを止めるご依頼をいただいているため、"
+                         f"お送りしませんでした（{base['管理会社']}）。お電話など直接ご連絡をお願いいたします。今回の分は、回数に数えていません。")
+                continue
+            status = _dispatch(uid, fid, rec, u, source)
+        except Exception:
+            log.exception("予約FAXを送れない %s", fid)
+            store.db().set("faxes", fid, {"status": "failed"}, merge=True)
+            count(uid, -1, source=source)
+            status = "failed"
+        if status == "sending":
+            n += 1  # 届いた・失敗は delivery.poll_faxes → on_fax_result でお知らせする
+        elif status == "failed":
+            store.update_user(uid, {"nk_fid": fid, "nk": rec["draft"]})
+            bot.notify(uid, "naiken_failed", {**base, "理由": "予約の時刻にFAXを送り出せませんでした"})
+        elif status == "not_ready":
+            _push(u, "予約していた内見申込書のFAXは、ただいまFAX送信の準備中のため、お送りしていません（テスト版）。")
+    return n
+
+
+def _push(u, text):
+    import line
+    if u.get("line_uid"):
+        line.push(u["line_uid"], [line.text(text)])
 
 
 FAIL_REASONS = {"busy": "相手のFAXが話し中、または応答がありませんでした", "invalid": "FAX番号がつながりませんでした"}
