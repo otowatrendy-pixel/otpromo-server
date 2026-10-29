@@ -406,13 +406,52 @@ def change_plan(uid, plan, yearly=False):
     return "later", at
 
 
+# お客様ページ（カスタマーポータル）の設定。ダッシュボードで保存していない本番でも動くよう、起動時にコードで用意する
+PORTAL_METADATA = {"otpromo": "portal"}
+_portal_cfg = {}
+
+
+def _portal_params():
+    # プランの変更はこちらの決まり（上げは即日割・下げは次の更新日）で行うので、ポータルでは解約・カード変更・領収書だけ
+    return {
+        "business_profile": {"headline": "1分資料 ご契約内容の確認・解約",
+                             "privacy_policy_url": config.PRIVACY_URL, "terms_of_service_url": config.TERMS_URL},
+        "features": {
+            "customer_update": {"enabled": True, "allowed_updates": ["email", "name"]},
+            "invoice_history": {"enabled": True},
+            "payment_method_update": {"enabled": True},
+            "subscription_cancel": {"enabled": True, "mode": "at_period_end", "proration_behavior": "none"},
+            "subscription_update": {"enabled": False},
+        },
+        "metadata": PORTAL_METADATA,
+    }
+
+
+def ensure_portal():
+    """お客様ページの設定を探し、なければ作る。あれば上の内容にそろえる。起動時に1回。"""
+    s = _stripe()
+    found = [c for c in (plain(x) for x in s.billing_portal.Configuration.list(active=True, limit=100).auto_paging_iter())
+             if (c.get("metadata") or {}).get("otpromo") == PORTAL_METADATA["otpromo"]]
+    if found:
+        cfg = plain(s.billing_portal.Configuration.modify(found[0]["id"], **_portal_params()))
+    else:
+        cfg = plain(s.billing_portal.Configuration.create(**_portal_params()))
+    _portal_cfg["id"] = cfg["id"]
+    return cfg["id"]
+
+
 def portal(uid):
     s = _stripe()
     u = store.get_user(uid)
     if not u.get("stripe_customer"):
         return None
+    kw = {}
+    try:
+        kw["configuration"] = _portal_cfg.get("id") or ensure_portal()
+    except Exception:
+        log.exception("お客様ページの設定を用意できなかった（ダッシュボードの既定の設定で開く）")
     sess = s.billing_portal.Session.create(customer=u["stripe_customer"], locale="ja",
-                                           return_url=f"{config.BASE_URL}/paid?t={sign(uid)}")
+                                           return_url=f"{config.BASE_URL}/paid?t={sign(uid)}", **kw)
     return sess.url
 
 

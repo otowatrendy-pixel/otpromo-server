@@ -36,7 +36,7 @@ def _setup_webhooks():
     def run():
         import richmenu
         for name, fn in (("prices", billing.ensure_prices), ("stripe", billing.ensure_webhook), ("line", line.ensure_webhook), ("richmenu", richmenu.ensure),
-                         ("descriptor", billing.ensure_descriptors)):
+                         ("descriptor", billing.ensure_descriptors), ("portal", billing.ensure_portal)):
             try:
                 fn()
             except Exception:
