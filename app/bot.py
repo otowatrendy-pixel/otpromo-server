@@ -967,7 +967,8 @@ def recvfax_send(uid, u, jid, job):
     company = company_for_render(uid, u)
     if (u.get("plan") or "free") == "free":
         if (u.get("trial_fax_used") or 0) < TRIAL_FAX:
-            ok = delivery.send_fax(number, faxopt.build_pdf(company, {**job, "_id": jid}))
+            ok = delivery.send_fax(number, faxopt.build_pdf(company, {**job, "_id": jid}),
+                                    kind="recv", ref=jid, uid=uid, meta={"trial": True})
             if ok:
                 store.update_user(uid, {"trial_fax_used": (u.get("trial_fax_used") or 0) + 1})
             return ("sent", None) if ok else (None, None)

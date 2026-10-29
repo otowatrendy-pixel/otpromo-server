@@ -67,7 +67,7 @@ def _no_nested_arrays(x, path=""):
 
 class _Local:
     def __init__(self):
-        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}, "referrals": {}, "fax_optout": {}}
+        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}, "referrals": {}, "fax_optout": {}, "fax_sends": {}}
         self.lock = threading.Lock()
         self.dir = Path(config.LOCAL_DIR)
         self.dir.mkdir(parents=True, exist_ok=True)

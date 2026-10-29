@@ -1,9 +1,10 @@
 """メール・FAXでのお届け。
 
-メールは Resend（RESEND_API_KEY があれば送る）。FAXは送信サービスが決まってから足す。
+メールは Resend（RESEND_API_KEY があれば送る）。FAXは faximo（送信APIは仕様書が届いてからつなぐ、結果は問い合わせ方式）。
 """
 import base64
 import logging
+from datetime import timedelta
 
 import requests
 
@@ -78,13 +79,83 @@ def send_notice(to, subject, text) -> bool:
     return r.status_code < 300
 
 
-def send_fax(number, pdf: bytes, sender: str = "") -> bool:
+FAX_CHECK_MIN = 2      # 送信結果を問い合わせる間隔（分）
+FAX_GIVEUP_HOURS = 12  # これを過ぎても結果が分からなければ運営に知らせる
+
+
+def send_fax(number, pdf: bytes, sender: str = "", kind: str = "", ref: str = "", uid: str = "", meta=None):
     """FAXを送る。sender は相手のFAXの上に出る送信元の表示（「利用会社名（1分資料経由）」）。
-    faximo の API で指定できる項目（ヘッダーの文字・文字数）が分かったら、つなぐときに合わせる。"""
+    戻り値は送信の受付番号（受け付けられなければ None）。faximo には Webhook がないため（10/29回答）、
+    結果（届いた・話し中で再送中・失敗）は poll_faxes が定期実行から問い合わせる。
+    kind は結果を返す先（"naiken"＝内見申込書、"recv"＝受け取り用FAX）、ref はその資料のID。"""
+    import store
     import usage
+    pid = _fax_api_send(number, pdf, sender)
+    if not pid:
+        usage.count("fax_fail")
+        return None
+    store.db().set("fax_sends", pid, {"kind": kind, "ref": ref, "uid": uid, "number": number, "meta": meta or {},
+                                      "status": "sending", "at": store.now(),
+                                      "next_check": store.now() + timedelta(minutes=FAX_CHECK_MIN)})
+    return pid
+
+
+def _fax_api_send(number, pdf, sender):
+    """faximo の送信API。仕様書（トライアル開始時に入手）が届いたらここをつなぐ。戻り値は受付番号。"""
     log.info("FAX未設定のため送らない to=%s sender=%s", number, sender)
-    usage.count("fax_fail")
-    return False
+    return None
+
+
+def _fax_api_status(pid):
+    """faximo の送信結果API。戻り値は ("sending"|"retrying"|"sent"|"failed", 理由)。仕様書が届いたらつなぐ。"""
+    return "sending", ""
+
+
+def poll_faxes():
+    """定期実行（5分ごと）から。送信中のFAXの結果を問い合わせ、決まったものを元の機能に返す。件数を返す。"""
+    import store
+    import usage
+    now = store.now()
+    n = 0
+    for pid, r in store.db().before("fax_sends", "next_check", now):
+        if r.get("status") not in ("sending", "retrying"):
+            continue
+        try:
+            st, reason = _fax_api_status(pid)
+        except Exception:
+            log.exception("FAXの結果を取れない %s", pid)
+            st, reason = r["status"], ""
+        upd = {"next_check": now + timedelta(minutes=FAX_CHECK_MIN)}
+        if st in ("sent", "failed"):
+            upd = {"status": st, "reason": reason, "done_at": now, "next_check": None}
+            if st == "failed":
+                usage.count("fax_fail")
+        elif r["at"] <= now - timedelta(hours=FAX_GIVEUP_HOURS):
+            upd = {"status": "unknown", "next_check": None}
+            usage.notify_admin("FAXの送信結果が分かりません",
+                               f"受付番号：{pid}\n送り先：{r.get('number')}\n種類：{r.get('kind')}\n"
+                               f"送信から{FAX_GIVEUP_HOURS}時間たっても結果が取れません。faximo の管理画面で確認してください。")
+        elif st == "retrying" and r["status"] != "retrying":
+            upd["status"] = "retrying"
+        else:
+            st = None
+        store.db().set("fax_sends", pid, upd, merge=True)
+        if st:
+            _fax_result(r, st, reason)
+            n += 1
+    return n
+
+
+def _fax_result(r, st, reason):
+    try:
+        if r.get("kind") == "naiken":
+            import naiken
+            naiken.on_fax_result(r["ref"], st, reason)
+        elif r.get("kind") == "recv":
+            import faxopt
+            faxopt.on_fax_result(r, st, reason)
+    except Exception:
+        log.exception("FAXの結果の処理に失敗 %s", r)
 
 
 def fax_sender(company_name):

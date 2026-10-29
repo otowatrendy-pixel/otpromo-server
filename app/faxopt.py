@@ -101,7 +101,32 @@ def send_job(uid, u, jid, job, company):
     n = use(uid)
     if n is None:
         return None
-    if not delivery.send_fax(number, pdf):
+    if not delivery.send_fax(number, pdf, kind="recv", ref=jid, uid=uid, meta={"trial": False}):
         refund(uid)
         return None
     return n
+
+
+def on_fax_result(r, st, reason=""):
+    """受け取り用FAXの送信結果（delivery.poll_faxes から）。失敗したら1回分を戻して、LINEでお知らせする。"""
+    if st != "failed":
+        return
+    import bot
+    import texts
+    uid = r["uid"]
+    if (r.get("meta") or {}).get("trial"):
+        store.db().update_tx("users", uid, lambda u: u.__setitem__("trial_fax_used", max(0, (u.get("trial_fax_used") or 0) - 1)))
+    else:
+        refund(uid)
+    job = store.db().get("jobs", r["ref"]) or {}
+    kw = {"FAX番号": r.get("number", ""), "物件名": job.get("title", "")}
+    if "recvfax_failed" in texts._MSG:
+        bot.notify(uid, "recvfax_failed", kw)
+        return
+    u = store.get_user(uid) or {}
+    if u.get("line_uid"):
+        import line
+        line.push(u["line_uid"], [line.text(
+            f"申し訳ありません。{kw['FAX番号']}あてのFAX（物件：{kw['物件名']}）を送ることができませんでした。\n"
+            "今回の分は、回数に数えていません。資料はこのトークの「LINEでも見る」からご覧いただけます。\n"
+            "FAX番号が変わった場合は、メニューの「設定」から直してください。")])

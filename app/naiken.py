@@ -264,8 +264,9 @@ def limit_info(u):
     return "今月", lim_m, store.renew_date(u)
 
 
-def count(uid, delta=1):
-    """送信1回分を数える。今月の枠を先に使い、なくなったら追加購入分から使う。delta=-1 で取り消し。"""
+def count(uid, delta=1, source=None):
+    """送信1回分を数える。今月の枠を先に使い、なくなったら追加購入分から使う。delta=-1 で取り消し。
+    source は取り消すときに、どちらから使った分か（"month"・"pack"、送った時に faxes に残してある）。"""
     now = datetime.now(store.JST)
     dk = now.strftime("%Y-%m-%d")
 
@@ -284,7 +285,7 @@ def count(uid, delta=1):
                 u["last_fax_from"] = "pack"
         elif delta > 0:
             u["last_fax_from"] = "month"
-        if delta < 0 and u.get("last_fax_from") == "pack":
+        if delta < 0 and (source or u.get("last_fax_from")) == "pack":
             used = sorted([p for p in (u.get("fax_packs") or []) if p["used"] > 0], key=lambda p: p["exp"])
             if used:
                 used[0]["used"] -= 1
@@ -349,16 +350,53 @@ def send(uid, fid):
         return "optout"
     pdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
     count(uid, 1)
+    source = (store.get_user(uid) or {}).get("last_fax_from")
     sender = delivery.fax_sender((u.get("company") or {}).get("会社名"))
-    ok = delivery.fax_ready() and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender)
+    ok = delivery.fax_ready() and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender,
+                                                    kind="naiken", ref=fid, uid=uid)
     status = "sending" if ok else ("failed" if delivery.fax_ready() else "not_ready")
     if not ok:
         count(uid, -1)
-    store.db().set("faxes", fid, {"status": status, "sent_at": store.now()}, merge=True)
+    store.db().set("faxes", fid, {"status": status, "sent_at": store.now(), "fax_id": ok or None,
+                                  "from": source, "retry_told": False}, merge=True)
     if ok:
         remember_to(uid, to)
         store.db().update_tx("users", uid, lambda u: u.__setitem__("total_naiken", u.get("total_naiken", 0) + 1))
     return status
+
+
+FAIL_REASONS = {"busy": "相手のFAXが話し中、または応答がありませんでした", "invalid": "FAX番号がつながりませんでした"}
+
+
+def on_fax_result(fid, st, reason=""):
+    """faximo の送信結果（delivery.poll_faxes から）。届いた・再送中・失敗を利用者に知らせる。"""
+    import bot
+    rec = store.db().get("faxes", fid)
+    if not rec:
+        return
+    uid, d = rec["user_id"], rec["draft"]
+    to = d.get("to") or {}
+    base = {"管理会社": " ".join(x for x in (to.get("company"), to.get("branch")) if x), "FAX番号": to.get("fax", "")}
+    if st == "sent":
+        store.db().set("faxes", fid, {"status": "sent", "done_at": store.now()}, merge=True)
+        u = store.get_user(uid) or {}
+        month, packs, _ = remaining(u)
+        live = sorted([p for p in (u.get("fax_packs") or []) if p["exp"] > store.now() and p["used"] < p["n"]],
+                      key=lambda p: p["exp"])
+        p = d.get("prop") or {}
+        bot.notify(uid, "naiken_sent", {**base, "物件名": p.get("name", ""), "号室": p.get("room", ""),
+                                        "自社FAX": (u.get("company") or {}).get("FAX", ""),
+                                        "リンク": file_url(fid, rec, "naiken.pdf"), "内見残": month,
+                                        "追加FAXの案内": f"＋追加分{packs}回（{bot._md(live[0]["exp"])}まで）" if packs else ""})
+    elif st == "retrying":
+        if not rec.get("retry_told"):
+            store.db().set("faxes", fid, {"retry_told": True}, merge=True)
+            bot.notify(uid, "naiken_retrying", {})
+    elif st == "failed":
+        store.db().set("faxes", fid, {"status": "failed", "done_at": store.now()}, merge=True)
+        count(uid, -1, source=rec.get("from"))  # 届かなかった分は回数に数えない
+        store.update_user(uid, {"nk_fid": fid, "nk": d})  # 「もう一度送る」「番号を直して送る」で使う
+        bot.notify(uid, "naiken_failed", {**base, "理由": FAIL_REASONS.get(reason, reason or "相手のFAXにつながりませんでした")})
 
 
 # ---------- 送信停止リスト（元付業者さんからの「FAXを止めて」） ----------
