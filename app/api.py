@@ -27,7 +27,7 @@ router = APIRouter(prefix="/v1")
 log = logging.getLogger("api")
 
 
-def _firebase_uid(authorization: str) -> str:
+def _firebase_uid(authorization: str, want_email=False):
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "ログインが必要です")
     token = authorization[7:]
@@ -39,11 +39,21 @@ def _firebase_uid(authorization: str) -> str:
         info = id_token.verify_firebase_token(token, greq.Request(), audience=config.FIREBASE_PROJECT)
     except Exception:
         raise HTTPException(401, "ログインの確認に失敗しました")
-    return info["sub"]
+    return info["sub"] if not want_email else (info["sub"], info.get("email"))
 
 
 def _me(authorization):
-    return store.user_by_firebase(_firebase_uid(authorization))
+    if config.STORE == "local" and authorization.startswith("Bearer dev:"):
+        fb, email = _firebase_uid(authorization), None
+        if fb.startswith("review:"):  # 手元の確認用
+            email = config.REVIEW_EMAILS[0]
+    else:
+        fb, email = _firebase_uid(authorization, want_email=True)
+    uid, u = store.user_by_firebase(fb)
+    import review
+    if review.is_review_email(email) or review.is_review(u):
+        u = review.ensure(uid, u)
+    return uid, u
 
 
 @router.get("/me")
@@ -188,7 +198,7 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     if not mobile:
         raise HTTPException(422, {"code": "mobile_check", "message": texts.raw("reg_mobile_retry")})
     co["携帯"] = mobile
-    if co["担当者名"] != (u.get("company") or {}).get("担当者名"):
+    if co["担当者名"] != (u.get("company") or {}).get("担当者名") and not u.get("review"):
         until = person.change_wait(u)
         if until:
             d = until.astimezone(store.JST)

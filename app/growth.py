@@ -130,7 +130,7 @@ def idle_paid(users=None):
     now = store.now()
     out = []
     for uid, u in users if users is not None else store.db().all("users"):
-        if (u.get("plan") or "free") not in ("light", "unlimited") or u.get("blocked"):
+        if (u.get("plan") or "free") not in ("light", "unlimited") or u.get("blocked") or u.get("review"):
             continue
         last = u.get("last_doc_at") or u.get("first_paid_at") or u.get("period_start")
         if last and last <= now - timedelta(days=IDLE_DAYS):
@@ -188,6 +188,8 @@ def funnel(users=None):
     now = store.now()
     f = {"friends": 0, "registered": 0, "first_doc": 0, "five_docs": 0, "paid": 0, "continued": 0}
     for _, u in users:
+        if u.get("review"):
+            continue
         if u.get("line_uid") or u.get("firebase_uid"):
             f["friends"] += 1
         if u.get("registered"):
@@ -210,7 +212,7 @@ def weekly_report():
     import delivery
     users = store.db().all("users")
     f = funnel(users)
-    paid_now = sum(1 for _, u in users if (u.get("plan") or "free") in ("light", "unlimited"))
+    paid_now = sum(1 for _, u in users if (u.get("plan") or "free") in ("light", "unlimited") and not u.get("review"))
     t = store.now().astimezone(store.JST)
     key = t.strftime("%Y%m")
     goal = TARGETS.get(key)

@@ -968,7 +968,7 @@ def recvfax_send(uid, u, jid, job):
     お試し中は最初の3件まで回数券なしで送る。戻り値は (結果, のこり回数)。
     結果は "sent"・"empty"（回数券なし）・"trial_over"（お試しの3件を使い切り、回数券もない）・None（送れない）。"""
     number = (u.get("delivery") or {}).get("fax")
-    if not (number and delivery.fax_ready()):
+    if not (number and (delivery.fax_ready() or u.get("review"))):
         return None, None
     company = company_for_render(uid, u)
     if (u.get("plan") or "free") == "free":

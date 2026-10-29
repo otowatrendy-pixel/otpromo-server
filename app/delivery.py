@@ -90,7 +90,14 @@ def send_fax(number, pdf: bytes, sender: str = "", kind: str = "", ref: str = ""
     kind は結果を返す先（"naiken"＝内見申込書、"recv"＝受け取り用FAX）、ref はその資料のID。"""
     import store
     import usage
-    pid = _fax_api_send(number, pdf, sender)
+    u = store.get_user(uid) if uid else None
+    if u and u.get("review"):
+        # ストア審査用のアカウントは実際には送らない（知らない相手に届かないように）。結果は「届いた」にする
+        import secrets
+        pid = "REVIEW-" + secrets.token_hex(6)
+        log.info("審査用アカウントのためFAXは送らない to=%s", number)
+    else:
+        pid = _fax_api_send(number, pdf, sender)
     if not pid:
         usage.count("fax_fail")
         return None
@@ -121,7 +128,7 @@ def poll_faxes():
         if r.get("status") not in ("sending", "retrying"):
             continue
         try:
-            st, reason = _fax_api_status(pid)
+            st, reason = ("sent", "") if pid.startswith("REVIEW-") else _fax_api_status(pid)
         except Exception:
             log.exception("FAXの結果を取れない %s", pid)
             st, reason = r["status"], ""

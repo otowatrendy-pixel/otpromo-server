@@ -95,7 +95,7 @@ def send_job(uid, u, jid, job, company):
     """回数券を1回使って、資料の2枚を利用会社のFAXへ送る。戻り値はのこり回数（送れなければ None）。"""
     number = (u.get("delivery") or {}).get("fax")
     import delivery
-    if not (number and delivery.fax_ready() and can_send(u)):
+    if not (number and (delivery.fax_ready() or u.get("review")) and can_send(u)):
         return None
     pdf = build_pdf(company, {**job, "_id": jid})
     n = use(uid)

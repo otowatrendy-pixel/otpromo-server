@@ -199,6 +199,8 @@ def user_stats():
     paid = {"light_month": 0, "light_year": 0, "unlimited_month": 0, "unlimited_year": 0}
     trial = new = ended = blocked = 0
     for _, u in store.db().all("users"):
+        if u.get("review"):
+            continue  # ストア審査用のアカウントは数えない
         plan = u.get("plan") or "free"
         if plan in ("light", "unlimited"):
             key = f"{plan}_{'year' if u.get('billing_interval') == 'year' else 'month'}"
@@ -303,6 +305,8 @@ def set_outage(on, values=None):
 def _recipients(to):
     out = []
     for uid, u in store.db().all("users"):
+        if u.get("review"):
+            continue
         if to == "line":
             if u.get("line_uid") and not u.get("blocked"):
                 out.append((uid, u))

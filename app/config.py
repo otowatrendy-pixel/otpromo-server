@@ -52,6 +52,8 @@ APP_SECRET = env("APP_SECRET", "dev-only-secret")
 
 # Firebase（アプリ版のログイン確認）
 FIREBASE_PROJECT = env("FIREBASE_PROJECT", "otpromo-maisoku")
+# ストア審査用のアカウント（カンマ区切り）。最初のログインから使い放題、FAXは実際には送らない（10/29）
+REVIEW_EMAILS = [e.strip().lower() for e in env("REVIEW_EMAILS", "ippunshiryo.review@gmail.com").split(",") if e.strip()]
 
 # 料金と枚数
 FREE_SHEETS = int(env("FREE_SHEETS", "5"))       # 最初の無料枚数（通算）

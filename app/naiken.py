@@ -358,9 +358,10 @@ def _dispatch(uid, fid, rec, u, source):
     to = rec["draft"]["to"]
     pdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
     sender = delivery.fax_sender((u.get("company") or {}).get("会社名"))
-    ok = delivery.fax_ready() and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender,
+    ready = delivery.fax_ready() or bool(u.get("review"))  # 審査用アカウントは送ったことにする
+    ok = ready and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender,
                                                     kind="naiken", ref=fid, uid=uid)
-    status = "sending" if ok else ("failed" if delivery.fax_ready() else "not_ready")
+    status = "sending" if ok else ("failed" if ready else "not_ready")
     if not ok:
         count(uid, -1, source=source)
     store.db().set("faxes", fid, {"status": status, "sent_at": store.now(), "fax_id": ok or None,

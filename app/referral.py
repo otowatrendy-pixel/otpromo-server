@@ -62,7 +62,7 @@ def accept(uid, code):
     u = store.get_user(uid) or {}
     if u.get("referred_by") == code:
         return "already"
-    if referrer == uid or u.get("referred_by") or u.get("paid_before") or (u.get("plan") or "free") != "free" \
+    if referrer == uid or u.get("review") or ru.get("review") or u.get("referred_by") or u.get("paid_before") or (u.get("plan") or "free") != "free" \
             or u.get("shop_code"):
         return "not_eligible"
     email = (u.get("delivery") or {}).get("email")
