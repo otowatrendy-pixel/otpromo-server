@@ -104,9 +104,84 @@ def rental(f: Facts, company: dict) -> List[Line]:
     return lines, later
 
 
+MONEY_KEYS = ("賃料", "管理費_共益費", "敷金", "礼金", "保証金")
+
+
+def apply_choice(f: Facts, i: int) -> Facts:
+    """利用者が選んだ条件（区画・使い方）の金額を、事実の欄に入れた写しを返す。"""
+    c = f.条件が複数[i]
+    g = f.model_copy(deep=True)
+    for k in MONEY_KEYS:
+        m = getattr(c, k)
+        if m.記載 or m.金額円 is not None or m.ヶ月 is not None:
+            setattr(g, k, m)
+        else:
+            setattr(g, k, Money())
+    g.選んだ条件 = i
+    return g
+
+
+def _differing(f: Facts) -> dict:
+    """条件が2通り以上あってまだ選ばれていないとき、条件によって違う項目 → 「店舗①：…／店舗②：…」。"""
+    if len(f.条件が複数) < 2 or f.選んだ条件 is not None:
+        return {}
+    out = {}
+    for k in MONEY_KEYS:
+        vals = [(c.名前, getattr(c, k)) for c in f.条件が複数]
+        keyset = {(m.記載, m.金額円, m.ヶ月) for _, m in vals}
+        if len(keyset) > 1:
+            out[k] = "／".join(f"{n}：{m.記載 or 'なし'}" for n, m in vals)
+    return out
+
+
+# 「読み取りに自信がない項目」の言葉 → 金額の項目
+_SHAKY_WORDS = {"賃料": "賃料", "家賃": "賃料", "管理費": "管理費_共益費", "共益費": "管理費_共益費",
+                "敷金": "敷金", "礼金": "礼金", "保証金": "保証金", "火災保険": "火災保険", "保証会社": "保証会社"}
+
+
+def _shaky_keys(f: Facts) -> set:
+    keys = set()
+    for item in f.読み取りに自信がない項目:
+        for word, key in _SHAKY_WORDS.items():
+            if word in item:
+                keys.add(key)
+    return keys
+
+
+# 概算書の行が、どの読み取り項目にもとづくか
+def _depends(line: "Line", f: Facts) -> set:
+    name = line.項目
+    by_month = lambda m: m.金額円 is None and m.ヶ月 is not None
+    if name == "翌月分賃料" or name == "仲介手数料":
+        return {"賃料"}
+    if name == "翌月分管理費・共益費":
+        return {"管理費_共益費"}
+    if name.startswith("賃料・共益費の消費税"):
+        return {"賃料", "管理費_共益費"}
+    for key in ("保証金", "敷金", "礼金"):
+        if name == key:
+            return {key} | ({"賃料"} if by_month(getattr(f, key)) else set())
+    if name.startswith("火災保険"):
+        return {"火災保険"}
+    if name.startswith("保証会社"):
+        return {"保証会社"}
+    return set()
+
+
 def estimate(f: Facts, company: dict):
-    """初期費用の明細・合計・要確認の項目と、合計に入れない入居後の費用（参考）を返す。"""
+    """初期費用の明細・合計・要確認の項目と、合計に入れない入居後の費用（参考）を返す。
+    条件が2通り以上あってまだ選ばれていない項目と、読み取りに自信がない金額の項目は、金額を入れず「要確認」にする。"""
     lines, later = rental(f, company)
+    diff, shaky = _differing(f), _shaky_keys(f)
+    for l in lines:
+        dep = _depends(l, f)
+        hit = [k for k in dep if k in diff]
+        if hit:
+            l.金額円 = None
+            l.メモ = "条件により異なります（" + "、".join(diff[k] for k in hit) + "）"
+        elif dep & shaky and l.金額円 is not None:
+            l.金額円 = None
+            l.メモ = f"読み取りに自信がないため要確認（図面の記載：{l.メモ}）" if l.メモ else "読み取りに自信がないため要確認"
     known = sum(l.金額円 for l in lines if l.金額円 is not None)
     unknown = [l.項目 for l in lines if l.金額円 is None]
     return lines, known, unknown, later

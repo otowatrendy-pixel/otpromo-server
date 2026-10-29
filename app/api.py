@@ -6,6 +6,7 @@ PUT  /v1/jobs/{id}/atena {"atena":"山田 太郎"} 初期費用概算書の宛�
 POST /v1/jobs/{id}/fix   {"request":"右下の連絡先を消して"} 業者向け情報の消し直し（無料・件数に数えない）
 GET  /v1/me              → {plan, plan_source, remaining, free_left, registered, ask_cancel_reason, company}
 POST /v1/me/cancel-reason {"reason":"price|nouse|accuracy|other_service|other"} 解約の理由
+PUT  /v1/jobs/{id}/choice {"index":0} 条件が2通り以上ある図面で、どれで概算書を作るか（GET の choices・choice）
 PUT  /v1/me/company      会社情報（帯・色・書体・受け取り方・宛名を聞く）。担当者名・携帯は必須（422 name_required/mobile_check/name_check、429 name_locked）
 POST /v1/billing/google/verify, /v1/billing/google/rtdn  … Google Play の課金
 POST /v1/billing/apple/verify, /v1/billing/apple/notify  … App Store の課金（iPhone版）
@@ -289,6 +290,9 @@ def get_job(jid: str, authorization: str = Header("")):
     if job["status"] == "done":
         mz = (job.get("texts") or {}).get("motozuke") or {}
         res.update(motozuke=mz.get("name"), motozuke_fax=mz.get("fax"), motozuke_tel=mz.get("tel"))
+        # 賃料などが区画・使い方で2通り以上書いてある図面。choice が null なら PUT /v1/jobs/{id}/choice で選んでもらう
+        f = (job.get("result") or {}).get("事実") or {}
+        res.update(choices=[c["名前"] for c in (f.get("条件が複数") or [])], choice=f.get("選んだ条件"))
         okyaku, shanai = store.pdf_urls(jid, job)
         res.update(pdf_url=store.file_url(jid, job, "shiryou.pdf"), customer_pdf_url=okyaku, staff_pdf_url=shanai,
                    obikae_url=store.file_url(jid, job, "obikae.png"),
@@ -346,6 +350,24 @@ def job_atena(jid: str, body: AtenaIn, authorization: str = Header("")):
     res = get_job(jid, authorization)
     res["atena"] = atena
     return res
+
+
+class ChoiceIn(BaseModel):
+    index: int
+
+
+@router.put("/jobs/{jid}/choice")
+def job_choice(jid: str, body: ChoiceIn, authorization: str = Header("")):
+    """条件が2通り以上ある図面で、どれで初期費用の概算書を作るか（choices の番号、0から）。作り直して更新後の Job を返す。"""
+    uid, u = _me(authorization)
+    job = store.get_job(jid)
+    if not job or job["user_id"] != uid:
+        raise HTTPException(404)
+    if job["status"] != "done":
+        raise HTTPException(409, "資料ができてから選んでください")
+    if not bot.apply_choice(uid, u, jid, body.index):
+        raise HTTPException(410, "資料の保存期間が過ぎたか、選べない番号です")
+    return get_job(jid, authorization)
 
 
 class FixIn(BaseModel):

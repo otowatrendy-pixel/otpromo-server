@@ -57,6 +57,13 @@ def start_from_job(c, jid):
         return c.send(texts.build("naiken_fax_unread", text=(
             f"宛先を「{to['company']}　FAX {naiken.fax_display(to['fax'])}」と読み取りましたが、"
             "読み取りに自信がありません。\n誤送信を防ぐため、管理会社の名前とFAX番号を、募集図面を見ながらもう一度送ってください。")))
+    if not to.get("fax") and not ((job.get("texts") or {}).get("motozuke") or {}).get("fax"):
+        # 募集図面にFAX番号の記載がない（精度検証B）。回数は使わない。番号が分かれば送ってもらえば続けられる
+        _set(c, nk=d, nk_step="to")
+        return c.send(line.text("この募集図面には、元付業者のFAX番号の記載がありません。"
+                                "内見のお申し込みは、元付業者に直接ご確認ください。\n\n"
+                                "FAX番号がお分かりでしたら、管理会社の名前とFAX番号をこのトークに送っていただければ、"
+                                "内見申込書をお送りします。"))
     if not (to.get("company") and naiken.fax_ok(to.get("fax"))):
         _set(c, nk=d, nk_step="to")
         msg = texts.build("naiken_fax_unread", 物件名=room_text(d))

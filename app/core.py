@@ -143,6 +143,9 @@ def analyze(data: bytes) -> dict:
         except ValueError:
             # JSONの形が崩れたときは1回だけやり直す（pydantic の検証エラーも ValueError）
             result, usage = call_claude(jpeg)
+    result.事実.選んだ条件 = None  # 利用者が選ぶ欄。AIの答えは使わない
+    if len(result.事実.条件が複数) < 2:
+        result.事実.条件が複数 = []
     t2 = time.perf_counter()
     # AIには撮ったままの写真を送り、帯替えには補正した画像を使う。PDFはそのまま
     fix = "補正なし"

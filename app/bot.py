@@ -17,6 +17,7 @@ import billing
 import campaign
 import config
 import core
+import costs
 import delivery
 import faxopt
 import growth
@@ -442,6 +443,9 @@ def on_postback(c, data):
         return c.send(*referral.menu_messages(c.uid))
     if k == "cancel_reason":
         return c.send(growth.on_cancel_reason(c.uid, v) or line.text("ありがとうございます。"))
+    if k == "choice":
+        line.loading(c.line_uid, 20)
+        return choice_press(c, v)
     if k == "recvfax" and v.split("&")[0] in ("send", "skip"):
         return recvfax_press(c, v)
     if k == "recvfax":
@@ -859,9 +863,15 @@ def deliver(c, jid, after=()):
     if job.get("verdict") == "commercial":
         # 事業用のときは、資料の前に一言（同じ応答なので通数は増えない）
         img = [texts.build("err_commercial"), img]
+    if nofax(job):
+        extra.append(NOFAX_NOTE)
+    ask = choice_message(jid, job)
+    if ask:
+        after = (ask, *after)
     remain = "\n\n".join(x for x in extra + [remain] if x)
     # 何枚か続けて送られても、各資料の「この物件で内見FAX」はその物件で始まるよう資料IDを入れる
-    common = dict(物件名=job["title"], のこり枚数の案内=remain, extra_buttons=remain_buttons(u), 資料ID=jid)
+    common = dict(物件名=job["title"], のこり枚数の案内=remain, extra_buttons=remain_buttons(u), 資料ID=jid,
+                  **nofax_drop(job))
     pre = []
     if method == "email" and d.get("email"):
         if delivery.send_mail(d["email"], job["title"], store.pdf_files(jid, job, job["title"]),
@@ -897,7 +907,71 @@ def _links(jid, job):
 
 
 def recvfax_confirm(jid, job, links=True):
-    return texts.build("recvfax_confirm", 物件名=job["title"], 資料ID=jid, append=_links(jid, job) if links else "")
+    return texts.build("recvfax_confirm", 物件名=job["title"], 資料ID=jid, append=_links(jid, job) if links else "",
+                       **nofax_drop(job))
+
+
+# ---------- 元付業者のFAX番号がない図面（精度検証B、10/30） ----------
+
+NOFAX_NOTE = "この募集図面には、元付業者のFAX番号の記載がありません。内見のお申し込みは、元付業者に直接ご確認ください。"
+
+
+def nofax(job):
+    """募集図面に元付業者のFAX番号が書いていない（読み取りで空欄）。"""
+    return not ((job.get("texts") or {}).get("motozuke") or {}).get("fax")
+
+
+def nofax_drop(job):
+    """FAX番号がない図面では「この物件で内見FAX」のボタンを出さない。"""
+    return {"drop": ("postback naiken=from_last&doc={資料ID}",)} if nofax(job) else {}
+
+
+# ---------- 条件が2通り以上ある図面（精度検証A、10/30） ----------
+
+def choice_message(jid, job):
+    """賃料などが区画・使い方で2通り以上書いてあり、まだ選ばれていなければ、どれで概算書を作るか聞く。"""
+    f = (job.get("result") or {}).get("事実") or {}
+    choices = f.get("条件が複数") or []
+    if len(choices) < 2 or f.get("選んだ条件") is not None:
+        return None
+    names = "・".join(c["名前"] for c in choices)
+    msg = line.text(f"この募集図面には、条件が{len(choices)}通り書いてあります（{names}）。\n"
+                    "初期費用の概算書は、どれで作りますか？\n"
+                    "お選びいただくまでは、条件によって違う金額を「要確認」にしています。")
+    msg["quickReply"] = {"items": [line.qr_postback(c["名前"], f"choice={i}&doc={jid}")
+                                   for i, c in enumerate(choices[:4])]}
+    return msg
+
+
+def apply_choice(uid, u, jid, i):
+    """選んだ条件で概算書を作り直す（AIは使わない・件数に数えない）。戻り値は条件の名前（できなければ None）。"""
+    job = store.get_job(jid)
+    page = store.get_page(jid)
+    if not job or job.get("status") != "done" or not page or job.get("user_id") != uid:
+        return None
+    r = Result.model_validate(job["result"])
+    if not (0 <= i < len(r.事実.条件が複数)):
+        return None
+    r.事実 = costs.apply_choice(r.事実, i)
+    company = {**company_for_render(uid, u), "宛名": job.get("宛名") or ""}
+    out = core.render_documents(company, Image.open(io.BytesIO(page)).convert("RGB"), r,
+                                job.get("pages") or 0, job.get("log") or {})
+    store.save_files(jid, out)
+    store.update_job(jid, {"result": out["result"], "log": out["log"], "choice": i})
+    return r.事実.条件が複数[i].名前
+
+
+def choice_press(c, v):
+    i, _, rest = v.partition("&")
+    jid = rest.partition("doc=")[2] or c.u.get("last_job")
+    try:
+        name = apply_choice(c.uid, c.u, jid, int(i))
+    except ValueError:
+        name = None
+    if not name:
+        return c.send(line.text("作り直す資料が見つかりませんでした（資料の保存期間が過ぎた可能性があります）。"))
+    job = store.get_job(jid)
+    return c.send(line.text(f"「{name}」の条件で、初期費用の概算書を作り直しました。\n\n" + _links(jid, job)))
 
 
 def recvfax_press(c, v):
@@ -928,7 +1002,7 @@ def recvfax_press(c, v):
         add, btns = recvfax_low(c.uid, n)
         remain = "\n\n".join(x for x in (remain_note(c.u), add) if x)
         return c.send(texts.build("deliver_fax", FAX番号=d.get("fax", ""), 物件名=job["title"], 資料ID=jid,
-                                  のこり枚数の案内=remain, extra_buttons=btns))
+                                  のこり枚数の案内=remain, extra_buttons=btns, **nofax_drop(job)))
     if res in ("empty", "trial_over"):
         # 回数券を買えば、この資料もFAXで送る
         store.update_user(c.uid, {"recvfax_wait": jid})
@@ -951,7 +1025,7 @@ def remind_recvfax():
             continue
         if job.get("recvfax_at") and job["recvfax_at"] < store.now() - timedelta(hours=CONFIRM_HOURS):
             continue
-        line.push(u["line_uid"], [texts.build("recvfax_remind", 物件名=job["title"], 資料ID=jid)])
+        line.push(u["line_uid"], [texts.build("recvfax_remind", 物件名=job["title"], 資料ID=jid, **nofax_drop(job))])
         n += 1
     return n
 
@@ -1084,7 +1158,8 @@ def send_last(c, how):
         exp = job["expires_at"].astimezone(store.JST)
         url_okyaku, url_shanai = store.pdf_urls(jid, job)
         return c.send(texts.build("deliver_line", 物件名=job["title"], お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
-                                  有効期限=f"{exp.month}月{exp.day}日", のこり枚数の案内="", 資料ID=jid))
+                                  有効期限=f"{exp.month}月{exp.day}日", のこり枚数の案内="", 資料ID=jid,
+                                  **nofax_drop(job)))
     if how == "mail":
         if not d.get("email"):
             store.update_user(c.uid, {"reg_queue": ["send_mail"], "reg_mode": "send_mail"})

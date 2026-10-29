@@ -23,6 +23,16 @@ class OtherCost(BaseModel):
         "入居時", description="いつ払う費用か。初期費用の合計には「入居時」だけを入れる")
 
 
+class Choice(BaseModel):
+    """1枚の図面に、区画や使い方によって金額が2通り以上書いてあるときの、その1つ分。"""
+    名前: str = Field(description="図面に書いてある区別の言葉（例：住居として、事務所として、店舗①、2階）")
+    賃料: Money = Field(default_factory=Money)
+    管理費_共益費: Money = Field(default_factory=Money)
+    敷金: Money = Field(default_factory=Money)
+    礼金: Money = Field(default_factory=Money)
+    保証金: Money = Field(default_factory=Money)
+
+
 class Facts(BaseModel):
     資料の種類: Literal["マイソク", "マイソクではない", "読み取れない"] = Field(
         "マイソク", description="物件の募集図面なら「マイソク」。物件資料でない写真は「マイソクではない」。ぼやけ・暗い・一部しか写っていないなどで主な項目が読めなければ「読み取れない」")
@@ -66,6 +76,10 @@ class Facts(BaseModel):
     仲介手数料_記載: Optional[str] = Field(None, description="手数料の負担・配分の記載そのまま（例：借主100%、当方不払い）。なければ null")
     広告転載: Optional[str] = Field(None, description="『広告転載可』『不可』など記載のまま。なければ null")
     読み取りに自信がない項目: List[str] = Field(default_factory=list)
+    条件が複数: List[Choice] = Field(
+        default_factory=list,
+        description="賃料・管理費・敷金・礼金・保証金が、区画や使い方によって2通り以上書いてあるときだけ、その2〜4通り。1通りなら空")
+    選んだ条件: Optional[int] = Field(None, description="AIは入れない（利用者が選んだ条件の番号）")
 
 
 def _points(v):
