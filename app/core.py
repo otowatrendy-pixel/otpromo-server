@@ -5,6 +5,7 @@
 import base64
 import io
 import json
+import re
 import subprocess
 import tempfile
 import time
@@ -143,6 +144,7 @@ def analyze(data: bytes) -> dict:
         except ValueError:
             # JSONの形が崩れたときは1回だけやり直す（pydantic の検証エラーも ValueError）
             result, usage = call_claude(jpeg)
+    tidy_tax(result)
     result.事実.選んだ条件 = None  # 利用者が選ぶ欄。AIの答えは使わない
     if len(result.事実.条件が複数) < 2:
         result.事実.条件が複数 = []
@@ -159,6 +161,29 @@ def analyze(data: bytes) -> dict:
     log = {"秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "秒_写真補正": round(t3 - t2, 2),
            "写真の補正": fix, "モデル": config.MODEL, **usage}
     return {"img": img, "pages": pages, "result": result, "log": log}
+
+
+# 居住用でも消費税がかかるもの（仲介手数料・サービス料・別契約の駐車場など）
+_TAXABLE_WORDS = re.compile(r"仲介|手数料|駐車|駐輪|バイク|鍵|消毒|サポート|クリーニング|ネット|サービス|短期|マンスリー|ウィークリー|SOHO|事務所")
+_RENT_WORDS = re.compile(r"賃料|家賃|管理費|共益費|礼金|更新料|敷金")
+
+
+def tidy_tax(result: Result) -> None:
+    """居住用の賃料・共益費・礼金などは非課税。用途が「不明」でも住まいの図面なら居住用にし、
+    想定Q&Aで賃料などの消費税を「要確認」としていたら、正しい答えに直す。"""
+    f = result.事実
+    # AIが「不明」としても、住まいの間取りがあり、事業向けの言葉がなければ居住用として扱う
+    if f.用途 == "不明" and f.取引 == "賃貸" and re.search(r"[1-9１-９]\s*(R|K|DK|LDK|SLDK|ＬＤＫ|ＤＫ|Ｋ|Ｒ)\b|ワンルーム", f.間取り or "") \
+            and not re.search(r"店舗|事務所|事業|オフィス|倉庫|SOHO|ＳＯＨＯ", f"{f.物件種別 or ''} {f.物件名 or ''}") \
+            and not f.条件が複数:
+        f.用途 = "居住用"
+    if f.用途 != "居住用":
+        return
+    for q in result.想定QA:
+        text = f"{q.質問} {q.参考回答}"
+        if "消費税" in text and _RENT_WORDS.search(text) and not _TAXABLE_WORDS.search(text):
+            q.参考回答 = "居住用の賃貸のため、賃料・管理費（共益費）・礼金・更新料に消費税はかかりません。"
+            q.要確認 = False
 
 
 def make_page(img: Image.Image, result: Result, camera: bool = False) -> tuple:
