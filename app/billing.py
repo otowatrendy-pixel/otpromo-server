@@ -496,6 +496,18 @@ def _period(sub):
     return start, end
 
 
+def canceling(sub):
+    """解約の予約が入っているか。いまのStripe（ポータルの解約）は cancel_at_period_end ではなく
+    cancel_at に期間の終わりの日時を入れるので、どちらでも解約とみなす（10/30本番テストで判明）。"""
+    return bool(sub.get("cancel_at_period_end") or sub.get("cancel_at"))
+
+
+def just_canceled(sub, prev):
+    """この更新で解約の予約が入ったか（previous_attributes に変わる前の値が入っている）。"""
+    was = {k: prev[k] for k in ("cancel_at_period_end", "cancel_at") if k in prev}
+    return canceling(sub) and bool(was) and not any(was.values())
+
+
 def sync_subscription(sub):
     """Stripeの契約内容から、利用者のプラン・期間・FAXオプションを決める。戻り値は (uid, 変更前のプラン, 変更後)。"""
     sub = plain(sub)
@@ -523,7 +535,7 @@ def sync_subscription(sub):
     data = {"plan": plan, "plan_source": "stripe" if plan != "free" else u.get("plan_source"),
             "billing_interval": "year" if yearly else "month",
             "stripe_customer": sub["customer"], "stripe_subscription": sub["id"] if active else None,
-            "sub_status": sub["status"], "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
+            "sub_status": sub["status"], "cancel_at_period_end": canceling(sub),
             "period_start": start_dt,
             "period_end": datetime.fromtimestamp(end, timezone.utc) if end else None}
     if yearly and start_dt and u.get("period_start") != start_dt:
@@ -721,7 +733,7 @@ def handle_webhook(payload: bytes, sig: str):
         if uid and before not in (None, after) and after != "free" and t == "customer.subscription.updated":
             notices.append((uid, "plan_started", {}))
         prev = (ev["data"].get("previous_attributes") or {})
-        if uid and obj.get("cancel_at_period_end") and prev.get("cancel_at_period_end") is False:
+        if uid and just_canceled(obj, prev):
             notices.append((uid, "plan_canceled", {}))
     elif t == "customer.subscription.deleted":
         uid, before, after = sync_subscription(obj)

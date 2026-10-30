@@ -203,7 +203,7 @@ def sync_group(sub):
         _track(code)
     data = {"seats": it.get("quantity") or MIN_SEATS, "stripe_subscription": sub["id"],
             "stripe_customer": sub["customer"], "item": it["id"], "sub_status": sub["status"],
-            "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
+            "cancel_at_period_end": billing.canceling(sub),
             "period_start": datetime.fromtimestamp(start, store.JST) if start else None,
             "period_end": datetime.fromtimestamp(end, store.JST) if end else None,
             "status": "active" if active else "ended"}
@@ -286,11 +286,11 @@ def change_seats(g, seats):
 
 def on_sub_event(t, ev, obj):
     """店舗の契約の変更・解約。"""
+    import billing
     owner = sync_group(obj)
     g = get_group((obj.get("metadata") or {}).get("code"))
     prev = ev["data"].get("previous_attributes") or {}
-    if g and t == "customer.subscription.updated" and obj.get("cancel_at_period_end") \
-            and prev.get("cancel_at_period_end") is False:
+    if g and t == "customer.subscription.updated" and billing.just_canceled(obj, prev):
         last = _jst_date(g["period_end"]) - timedelta(days=1)
         return [(uid, "store_canceled", {"店舗名": g["name"], "最終日": ymdw(last)}) for uid in g["members"]]
     return []
