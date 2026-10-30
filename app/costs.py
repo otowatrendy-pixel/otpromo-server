@@ -61,7 +61,12 @@ def rental(f: Facts, company: dict) -> List[Line]:
     else:
         lines.append(Line("翌月分賃料", None, "賃料が読み取れませんでした"))
     biz = f.用途 == "事業用"
-    if rent and f.賃料_消費税 == "税別":
+    if rent and f.用途 == "居住用":
+        # 住宅の貸付けは非課税。賃料・共益費の消費税は足さない
+        if f.賃料_消費税 == "税別":
+            lines.append(Line("賃料・共益費の消費税（翌月分）", None,
+                              "居住用の賃料は非課税のため、図面の「税別」の記載を要確認"))
+    elif rent and f.賃料_消費税 == "税別":
         lines.append(Line("賃料・共益費の消費税（翌月分）", int((rent + admin) * TAX), "図面に税別と記載"))
     elif rent and biz and f.賃料_消費税 == "記載なし":
         lines.append(Line("賃料・共益費の消費税（翌月分）", None, "税込・税別の記載なし（事業用は課税されることが多い）"))
@@ -71,7 +76,11 @@ def rental(f: Facts, company: dict) -> List[Line]:
             lines.append(Line("敷金", _months_or_yen(f.敷金, rent), f.敷金.記載))
     else:
         lines.append(Line("敷金", _months_or_yen(f.敷金, rent), f.敷金.記載 or "記載なし"))
-    lines.append(Line("礼金", _months_or_yen(f.礼金, rent), f.礼金.記載 or "記載なし"))
+    key_money = _months_or_yen(f.礼金, rent)
+    lines.append(Line("礼金", key_money, f.礼金.記載 or "記載なし"))
+    if biz and key_money and f.賃料_消費税 == "税別":
+        # 事業用の礼金は課税。賃料が税別なら、礼金も税別として消費税を足す
+        lines.append(Line("礼金の消費税", int(key_money * TAX), "事業用の礼金は課税（賃料が税別のため）"))
     months = company.get("事業用_仲介手数料_ヶ月" if biz else "賃貸_仲介手数料_ヶ月",
                          company.get("賃貸_仲介手数料_ヶ月", 1.0))
     if rent:
@@ -111,6 +120,11 @@ def apply_choice(f: Facts, i: int) -> Facts:
     """利用者が選んだ条件（区画・使い方）の金額を、事実の欄に入れた写しを返す。"""
     c = f.条件が複数[i]
     g = f.model_copy(deep=True)
+    # 「住居◯円／事務所◯円」のような図面は、選んだ使い方で消費税・仲介手数料の扱いが変わる
+    if any(w in c.名前 for w in ("住居", "住宅", "居住")):
+        g.用途 = "居住用"
+    elif any(w in c.名前 for w in ("事務所", "店舗", "事業", "オフィス", "倉庫")):
+        g.用途 = "事業用"
     for k in MONEY_KEYS:
         m = getattr(c, k)
         if m.記載 or m.金額円 is not None or m.ヶ月 is not None:
@@ -158,6 +172,8 @@ def _depends(line: "Line", f: Facts) -> set:
         return {"管理費_共益費"}
     if name.startswith("賃料・共益費の消費税"):
         return {"賃料", "管理費_共益費"}
+    if name == "礼金の消費税":
+        return {"礼金"} | ({"賃料"} if by_month(f.礼金) else set())
     for key in ("保証金", "敷金", "礼金"):
         if name == key:
             return {key} | ({"賃料"} if by_month(getattr(f, key)) else set())
