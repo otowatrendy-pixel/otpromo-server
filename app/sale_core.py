@@ -115,6 +115,11 @@ def analyze(data: bytes) -> dict:
         layer = ("", False)
     effort = EFFORT_TEXT if layer[1] else EFFORT_IMAGE
     t1 = time.perf_counter()
+    # 二重の点検に使う図面の文字（文字認識は数秒かかるので、AIの読み取りと同時に進めて待ち時間を増やさない）
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=1)
+    text_job = pool.submit(page_text, data, img, pages, layer)
+    pool.shutdown(wait=False)
     if SALE_MOCK_RESULT:
         result, usage = SaleResult.model_validate_json(Path(SALE_MOCK_RESULT).read_text(encoding="utf-8")), {}
     else:
@@ -125,7 +130,7 @@ def analyze(data: bytes) -> dict:
     tidy(result)
     # 二重の点検：図面の文字（PDFの文字データ＋文字認識）から大切な言葉を探し、AIの結果になければ注意を出す
     try:
-        double_check(result, page_text(data, img, pages, layer))
+        double_check(result, text_job.result(timeout=60))
     except Exception as ex:  # 点検ができなくても資料は作る
         result.スタッフへの注意.append(f"大切な記載の自動点検ができませんでした（{ex.__class__.__name__}）。告知事項・再建築・借地などは原本で確認してください。")
     if pages > 1:
