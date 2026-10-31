@@ -36,6 +36,10 @@ assert d2["prop"]["room"] == "503" and d2["to"]["check"] == ["company"], d2
 cases["test_shueki"] = dict(to={**d["to"], "fax": "03-0000-2222"}, prop=d["prop"], wishes=["11月20日（金）13時00分頃"])
 
 groups = {out / f"{k}.pdf": [bn.html(me=bn.ME, **kw)] for k, kw in cases.items()}
+# 名刺の連絡先が長いとき（はみ出さないか目で確かめる）
+LONG_ME = {**bn.ME, "company": "サンプル不動産コンサルティング株式会社", "address": "東京都○○区見本町10丁目11番12号 見本ビル3階",
+           "email": "taro.mihon-sales@sample-fudosan-consulting.example.jp"}
+groups[out / "test_long_card.pdf"] = [bn.html(me=LONG_ME, **cases["test_max"])]
 render.to_pdfs(groups)
 for pdf in groups:
     info = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, text=True).stdout
