@@ -60,6 +60,22 @@ PLAN_PRICES = [  # (config の名前, lookup_key, 商品, 税込の金額, 間�
     ("PRICE_GROUP_LIGHT", "group_light_monthly", "group", 1180, "month", "店舗まとめ割 ライト 1人1,180円（税込）"),
     ("PRICE_GROUP_UNLIMITED", "group_unlimited_monthly", "group", 2480, "month", "店舗まとめ割 使い放題 1人2,480円（税込）"),
 ]
+# 売買版（APP_MODE=sale）の価格（10/31本人決定：ライト 月2,480円・年24,800円、使い放題 月4,280円・年42,800円、税込）。
+# lookup_key も商品も賃貸版と分ける（service=maisoku_sale）。店舗まとめ割は売買版にはまだない
+SALE_PLAN_PRICES = [
+    ("PRICE_LIGHT", "sale_light_monthly", "light", 2480, "month", "売買版 ライト 月額2,480円（税込）"),
+    ("PRICE_UNLIMITED", "sale_unlimited_monthly", "unlimited", 4280, "month", "売買版 使い放題 月額4,280円（税込）"),
+    ("PRICE_LIGHT_YEAR", "sale_light_yearly", "light", 24800, "year", "売買版 ライト 年額24,800円（税込）"),
+    ("PRICE_UNLIMITED_YEAR", "sale_unlimited_yearly", "unlimited", 42800, "year", "売買版 使い放題 年額42,800円（税込）"),
+]
+SALE_PRODUCTS = {
+    "light": {"name": "1分資料 売買版 ライトプラン",
+              "description": "売買の販売図面から、帯替え図面・物件のおすすめポイント・住宅ローンシミュレーションと購入諸費用の概算書などをお作りします。件数と内見依頼FAXの回数には月ごとの上限があります（年払いでも毎月同じです）。",
+              "metadata": {"service": "maisoku_sale", "plan": "light"}},
+    "unlimited": {"name": "1分資料 売買版 使い放題プラン",
+                  "description": "売買の販売図面からの資料づくりは件数を気にせずお使いいただけます。内見依頼FAXの回数には月ごとの上限があります（年払いでも毎月同じです）。",
+                  "metadata": {"service": "maisoku_sale", "plan": "unlimited"}},
+}
 PRODUCTS = {
     "light": {"name": "1分資料 ライトプラン",
               "description": "資料づくりは募集図面 月50件分、内見申込FAXは月20回までご利用いただけます。年払いでも件数・回数は毎月同じです。",
@@ -110,15 +126,18 @@ def ensure_prices():
     if not config.STRIPE_SECRET_KEY:
         return
     s = _stripe()
-    keys = [lk for _, lk, *_ in PLAN_PRICES]
+    sale = config.APP_MODE == "sale"
+    plan_prices, product_info = (SALE_PLAN_PRICES, SALE_PRODUCTS) if sale else (PLAN_PRICES, PRODUCTS)
+    service = "maisoku_sale" if sale else "maisoku"
+    keys = [lk for _, lk, *_ in plan_prices]
     found = {p["lookup_key"]: p for p in plain(s.Price.list(lookup_keys=keys, active=True, limit=20))["data"]}
     products = {}
-    for attr, lk, kind, amount, interval, nick in PLAN_PRICES:
+    for attr, lk, kind, amount, interval, nick in plan_prices:
         if os.environ.get(attr):
             continue
         p = found.get(lk)
-        if not p:
-            # これまでの価格（サンドボックス）が使えるなら、それに lookup_key を付ける
+        if not p and getattr(config, attr):
+            # これまでの価格（サンドボックス）が使えるなら、それに lookup_key を付ける（売買版は初期値が空なので通らない）
             try:
                 cur = plain(s.Price.retrieve(getattr(config, attr)))
                 if cur.get("active") and cur.get("unit_amount") == amount:
@@ -129,10 +148,10 @@ def ensure_prices():
             if not products:
                 for pr in s.Product.list(active=True, limit=100).auto_paging_iter():
                     md = plain(pr).get("metadata") or {}
-                    if md.get("service") == "maisoku":
+                    if md.get("service") == service:
                         products.setdefault(md.get("plan") or md.get("kind"), plain(pr)["id"])
             if kind not in products:
-                info = PRODUCTS[kind]
+                info = product_info[kind]
                 products[kind] = plain(s.Product.create(name=info["name"], description=info["description"],
                                                         metadata=info["metadata"],
                                                         statement_descriptor=config.DESCRIPTOR_SUBSCRIPTION))["id"]

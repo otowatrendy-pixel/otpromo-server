@@ -32,17 +32,17 @@ LINE_CHANNEL_SECRET = env("LINE_CHANNEL_SECRET")
 LINE_CHANNEL_ACCESS_TOKEN = env("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_ADD_FRIEND_URL = env("LINE_ADD_FRIEND_URL", "https://lin.ee/tlnsKca")
 
-# Stripe（まずはテスト環境のキー）
+# Stripe（まずはテスト環境のキー）。売買版（APP_MODE=sale）は賃貸版の価格IDを初期値にしない（起動時に売買版の lookup_key で探す・作る）
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET")
-PRICE_LIGHT = env("PRICE_LIGHT", "price_1UUsZOB542nWQrMKc0HZD2WL")
-PRICE_UNLIMITED = env("PRICE_UNLIMITED", "price_1UVHfFB542nWQrMKwZKbd3uZ")
+PRICE_LIGHT = env("PRICE_LIGHT", "" if APP_MODE == "sale" else "price_1UUsZOB542nWQrMKc0HZD2WL")
+PRICE_UNLIMITED = env("PRICE_UNLIMITED", "" if APP_MODE == "sale" else "price_1UVHfFB542nWQrMKwZKbd3uZ")
 # 年払い（税込。件数・回数は月払いと同じく毎月戻す。途中解約は返金なし・期間の終わりまで使える）
-PRICE_LIGHT_YEAR = env("PRICE_LIGHT_YEAR", "price_1UVJygB542nWQrMKfPqpDrzx")          # 年額14,800円
-PRICE_UNLIMITED_YEAR = env("PRICE_UNLIMITED_YEAR", "price_1UVJyhB542nWQrMKZRxg4Gsd")  # 年額29,800円
+PRICE_LIGHT_YEAR = env("PRICE_LIGHT_YEAR", "" if APP_MODE == "sale" else "price_1UVJygB542nWQrMKfPqpDrzx")          # 年額14,800円
+PRICE_UNLIMITED_YEAR = env("PRICE_UNLIMITED_YEAR", "" if APP_MODE == "sale" else "price_1UVJyhB542nWQrMKZRxg4Gsd")  # 年額29,800円
 # 店舗まとめ割（1人あたり月額・税込）。受付はサービス公開日（STORE_CAMPAIGN_START）から3か月
-PRICE_GROUP_LIGHT = env("PRICE_GROUP_LIGHT", "price_1UVKSxB542nWQrMKvDBQepAF")          # 1,180円
-PRICE_GROUP_UNLIMITED = env("PRICE_GROUP_UNLIMITED", "price_1UVKSxB542nWQrMK8EVLk1FV")  # 2,480円
+PRICE_GROUP_LIGHT = env("PRICE_GROUP_LIGHT", "" if APP_MODE == "sale" else "price_1UVKSxB542nWQrMKvDBQepAF")          # 1,180円
+PRICE_GROUP_UNLIMITED = env("PRICE_GROUP_UNLIMITED", "" if APP_MODE == "sale" else "price_1UVKSxB542nWQrMK8EVLk1FV")  # 2,480円
 INVOICE_TRN = env("INVOICE_TRN", "T5011601011495")  # 適格請求書発行事業者の登録番号（T＋13桁）。入れると領収書・請求書に載る
 TERMS_URL = env("TERMS_URL", "https://otpromo.com/terms-ippun.html")
 PRIVACY_URL = env("PRIVACY_URL", "https://otpromo.com/privacy.html")

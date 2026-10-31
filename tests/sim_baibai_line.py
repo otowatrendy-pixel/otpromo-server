@@ -155,6 +155,36 @@ def check_stripe_split(mode):
         assert got["metadata"] == {"uid": uid, "app": "sale"} and got["subscription_data"]["metadata"] == {"uid": uid, "app": "sale"}
     else:
         assert got["metadata"] == {"uid": uid} and got["subscription_data"] == {"metadata": {"uid": uid}}
+    # 価格：売買版は売買版の lookup_key・金額・商品で作る（賃貸版の価格IDは使わない）。賃貸版は今までどおり
+    made, prods = [], []
+    class _L(list):
+        def auto_paging_iter(self):
+            return iter(self)
+    fake = SimpleNamespace(
+        Price=SimpleNamespace(list=lambda **kw: {"data": []},
+                              retrieve=lambda pid: {"active": False},
+                              create=lambda **kw: made.append(kw) or {"id": "price_" + kw["lookup_key"]}),
+        Product=SimpleNamespace(list=lambda **kw: _L(), create=lambda **kw: prods.append(kw) or {"id": "prod_" + (kw["metadata"].get("plan") or kw["metadata"].get("kind"))}),
+        InvalidRequestError=Exception)
+    _s, _k, saved = billing._stripe, billing.config.STRIPE_SECRET_KEY, {a: getattr(billing.config, a) for a, *_ in billing.PLAN_PRICES}
+    billing._stripe, billing.config.STRIPE_SECRET_KEY = (lambda: fake), "sk_test_x"
+    envs = {a: os.environ.pop(a) for a in saved if a in os.environ}
+    try:
+        billing.ensure_prices()
+        got = {(m["lookup_key"], m["unit_amount"], m["recurring"]["interval"]) for m in made}
+        if mode == "sale":
+            assert got == {("sale_light_monthly", 2480, "month"), ("sale_unlimited_monthly", 4280, "month"),
+                           ("sale_light_yearly", 24800, "year"), ("sale_unlimited_yearly", 42800, "year")}, got
+            assert all(p["metadata"]["service"] == "maisoku_sale" and "売買版" in p["name"] for p in prods)
+            assert billing.price_of("unlimited", True) == "price_sale_unlimited_yearly"
+            assert billing.plan_of_price("price_sale_light_monthly") == ("light", False)
+        else:
+            assert all(not lk.startswith("sale_") for lk, *_ in got)
+    finally:
+        billing._stripe, billing.config.STRIPE_SECRET_KEY = _s, _k
+        for a, v in saved.items():
+            setattr(billing.config, a, v)
+        os.environ.update(envs)
     print(f"Stripeの通知の見分け（{mode}）OK")
 
 
@@ -482,6 +512,9 @@ _rq.post = _post
 assert _sent["messages"][0]["text"] == "販売図面を送ってください", _sent
 assert "x=募集図面" in _json.dumps(_sent, ensure_ascii=False)  # postback の data は変えない
 check_stripe_split("sale")
+import texts
+import json as _j; ps = _j.dumps(texts.build("plan_show", urls={}), ensure_ascii=False)
+assert "月額2,480円" in ps and "年額24,800円" in ps and "月額4,280円" in ps and "年額42,800円" in ps and "1,480" not in ps, ps
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})
 assert r.returncode == 0
