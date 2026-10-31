@@ -8,7 +8,8 @@
     out["result"]       … 計算結果（Result）
 
 company["売買設定"]      … CompanySaleSettings と同じキー名（知らないキーは無視）
-company["売買ローン目安"] … {"show": bool, "rate": 年利(%), "years": 年数, "ratio": 借入の割合(省略時1.0)}
+company["売買ローン目安"] … 住宅ローンの設定（下の LOAN_DEFAULTS と同じキー名）
+loan_override            … 物件ごとの指定 {amount, type, rate, years, kotei_years}（あるキーだけ会社設定より優先）
 evals                    … スタッフがLINEで送った値 {"land_eval","bldg_eval","annual_property_tax",
                              "rosenka_per_m2","kotei_rosenka_per_m2"}（あるものだけ）
 契約日・引渡日が None なら、作成日と作成日の60日後で仮置き（概算書に「（仮）」と出る）。
@@ -42,30 +43,86 @@ def monthly_payment(amount: int, rate_pct: float, years: int) -> int:
     return int(amount * r / (1 - (1 + r) ** -n))
 
 
+LOAN_DEFAULTS = {
+    "use": True,                 # 住宅ローンを使う前提で諸費用を出すか（ローン関連費用の欄）
+    "show": True,                # 住宅ローンシミュレーションを付けるか
+    "type": "hendo",             # 初期の金利タイプ：hendo 変動 / kotei_kikan 固定期間選択 / zenki_kotei 全期間固定
+    # 2026年10月の水準：変動は大手の最優遇1.195%、10年固定は大手3.6〜4.75%、フラット35最低3.64%（会社設定で変更可）
+    "rates": {"hendo": 1.2, "kotei_kikan": 3.7, "zenki_kotei": 3.6},
+    "kotei_years": 10,           # 固定期間選択の固定年数
+    "years": 35,                 # 借入年数
+    "amount_mode": "ratio",      # ratio＝物件価格×ratio / price_plus_costs＝物件価格＋諸費用 / fixed＝amount
+    "ratio": 1.0,
+    "amount": None,
+    "compare": False,            # True なら3タイプを並べて比べる
+}
+TYPE_JA = {"hendo": "変動金利", "kotei_kikan": "固定期間選択", "zenki_kotei": "全期間固定"}
+
+
+def loan_conditions(company: dict, loan_override: Optional[dict]) -> dict:
+    c = {**LOAN_DEFAULTS, **(company.get("売買ローン目安") or {})}
+    c["rates"] = {**LOAN_DEFAULTS["rates"], **(c.get("rates") or {})}
+    if c.get("rate") is not None and "rates" not in (company.get("売買ローン目安") or {}):
+        c["rates"][c["type"]] = float(c["rate"])        # 古い形（rate だけ）との互換
+    for k, v in (loan_override or {}).items():
+        if v is not None:
+            c[k] = v
+    if (loan_override or {}).get("rate") is not None:
+        c["rates"][c["type"]] = float(loan_override["rate"])
+    if (loan_override or {}).get("amount") is not None:
+        c["amount_mode"] = "fixed"
+    return c
+
+
+def simulate(amount: int, c: dict) -> list[dict]:
+    types = ["hendo", "kotei_kikan", "zenki_kotei"] if c.get("compare") else [c["type"]]
+    out = []
+    for t in types:
+        rate = float(c["rates"][t])
+        years = int(c["years"])
+        m = monthly_payment(amount, rate, years)
+        label = TYPE_JA[t] + (f"（当初{int(c['kotei_years'])}年固定）" if t == "kotei_kikan" else "")
+        out.append({"type": t, "label": label, "rate": rate, "years": years, "amount": amount,
+                    "monthly": m, "yearly": m * 12, "total": m * 12 * years, "selected": t == c["type"]})
+    return out
+
+
 def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, customer: str = "",
                   property_name: str = "", band: Optional[dict] = None, contract_day: Optional[date] = None,
                   handover_day: Optional[date] = None, loan_amount: Optional[int] = None,
-                  today: Optional[date] = None, font_dir: Optional[str] = None) -> dict:
+                  loan_override: Optional[dict] = None, today: Optional[date] = None,
+                  font_dir: Optional[str] = None) -> dict:
     today = today or date.today()
     f = SaleFacts(**facts)
     if evals:
         f = dataclasses.replace(f, **{k: v for k, v in evals.items() if k in EVAL_KEYS and v is not None})
     s = settings_from_company(company)
-    lm = company.get("売買ローン目安") or {}
-    loan = None
-    if lm.get("show", True):
-        amt = loan_amount if loan_amount is not None else int(f.price * float(lm.get("ratio", 1.0)) // 100_000 * 100_000)
-        if amt > 0:
-            loan = LoanPlan(amt)
+    if loan_amount is not None:
+        loan_override = {**(loan_override or {}), "amount": loan_amount}
+    c = loan_conditions(company, loan_override)
     cd = contract_day or today
     hd = handover_day or (today + timedelta(days=60))
+
+    def floor100k(x):
+        return int(x // 100_000 * 100_000)
+
+    loan = None
+    if c["use"]:
+        if c["amount_mode"] == "fixed" and c.get("amount"):
+            amt = int(c["amount"])
+        elif c["amount_mode"] == "price_plus_costs":
+            amt = f.price
+            for _ in range(3):   # ローン関連費用が借入額で変わるので数回まわして落ち着かせる
+                r0 = compute(f, s, LoanPlan(amt), cd, hd, today=today)
+                amt = floor100k(f.price + r0.total_must + r0.total_loan)
+        else:
+            amt = floor100k(f.price * float(c["ratio"]))
+        if amt > 0:
+            loan = LoanPlan(amt)
     r = compute(f, s, loan, cd, hd, today=today)
-    monthly = None
-    if loan and lm.get("rate") and lm.get("years"):
-        monthly = {"amount": monthly_payment(loan.amount, float(lm["rate"]), int(lm["years"])),
-                   "rate": float(lm["rate"]), "years": int(lm["years"])}
+    sim = simulate(loan.amount, c) if (loan and c["show"]) else None
     html = build_html(r, f, loan, customer=customer, property_name=property_name, address=f.address or "",
                       made=today, contract_day=cd, handover_day=hd, company=band or {},
-                      font_dir=font_dir or os.path.join(HERE, "fonts"), monthly=monthly,
+                      font_dir=font_dir or os.path.join(HERE, "fonts"), sim=sim,
                       dates_tentative=(contract_day is None, handover_day is None))
-    return {"html": html, "staff_notes": r.staff_notes, "result": r, "monthly": monthly}
+    return {"html": html, "staff_notes": r.staff_notes, "result": r, "simulation": sim, "loan_conditions": c}

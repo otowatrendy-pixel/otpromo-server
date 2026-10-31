@@ -472,6 +472,11 @@ def to_pdfs(groups: dict):
                 tmp.write_text(h, encoding="utf-8")
                 page.goto(tmp.as_uri(), wait_until="networkidle")
                 page.evaluate("document.fonts.ready")
+                if "dataset.fitted" in h:  # 売買の概算書：文字の大きさを枠に合わせ終わるまで待つ（賃貸の資料には無いので影響なし）
+                    try:
+                        page.wait_for_function('document.body.dataset.fitted === "1"', timeout=10_000)
+                    except Exception:
+                        pass
                 part = out.with_suffix(f".{i}.pdf")
                 page.pdf(path=str(part), format="A4", print_background=True)
                 tmp.unlink()

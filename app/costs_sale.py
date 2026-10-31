@@ -215,6 +215,9 @@ class SaleFacts:
     commercial_area: bool = False               # 用途地域が商業系（近隣商業・商業）
     rosenka_per_m2: Optional[int] = None        # 相続税路線価（円/㎡）。スタッフが送った場合
     kotei_rosenka_per_m2: Optional[int] = None  # 固定資産税路線価（円/㎡）。スタッフが送った場合
+    station_walk_min: Optional[float] = None    # 最寄り駅の徒歩分（図面の「徒歩◯分」。複数あれば最短）
+    youto: Optional[str] = None                 # 用途地域（図面の表記のまま。例「第一種低層住居専用地域」）
+    land_calib: float = 1.0                     # 地域ごとの補正係数（calibration.factor の値をサーバーが入れる）
 
 
 @dataclass
@@ -325,6 +328,7 @@ class EvalInfo:
     estimated: bool
     price_based: bool          # 物件価格からの粗い推計を使った（地価データがなかった）
     labels: list[str]          # スタッフ向けの説明
+    land_unit_est: Optional[int] = None   # 推計した土地の1㎡単価（実績との比較・補正の記録に使う）
 
 
 def estimate_evals(f: SaleFacts, on: date, data: Optional[ev.LandData] = None) -> EvalInfo:
@@ -342,9 +346,11 @@ def estimate_evals(f: SaleFacts, on: date, data: Optional[ev.LandData] = None) -
             est = True
             labels.append(f"建物 約{bldg // 10000:,}万円（東京法務局の認定基準の単価×床面積×経年減価補正率）")
 
+    le = None
     if land is None and not f.shakuchi:
         le = ev.land_unit(f.address, on, data, commercial=f.commercial_area,
-                          rosenka_per_m2=f.rosenka_per_m2, kotei_rosenka_per_m2=f.kotei_rosenka_per_m2)
+                          rosenka_per_m2=f.rosenka_per_m2, kotei_rosenka_per_m2=f.kotei_rosenka_per_m2,
+                          walk_min=f.station_walk_min, youto=f.youto, youseki=f.youseki, calib=f.land_calib)
         area, area_note = f.land_area, ""
         if f.property_type == "mansion" and le is not None and area is None:
             yo = f.youseki or le.youseki
@@ -369,7 +375,8 @@ def estimate_evals(f: SaleFacts, on: date, data: Optional[ev.LandData] = None) -
                 land = int(max(0, ex - (bldg or 0) * A["bldg_market_mult"]) * A["land_eval_ratio"])
             est, price_based = True, True
             labels.append(f"土地 約{land // 10000:,}万円（近くの地価データが使えないため、物件価格からの粗い推計）")
-    return EvalInfo(land, bldg if f.property_type != "land" else None, est, price_based, labels)
+    unit_est = le.unit if (le is not None and not price_based) else None
+    return EvalInfo(land, bldg if f.property_type != "land" else None, est, price_based, labels, unit_est)
 
 
 def jutaku_reg_ok(f: SaleFacts, staff: list[str]) -> Optional[bool]:

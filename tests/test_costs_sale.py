@@ -74,10 +74,36 @@ from sale_estimate import make_estimate, monthly_payment
 assert brokerage_fee(49_800_000, CompanySaleSettings(fee_mode="rate", fee_rate=0.02))[0] == int(49_800_000*0.02*1.1)
 assert brokerage_fee(3_000_000, CompanySaleSettings(fee_mode="rate", fee_rate=0.05))[0] == 154_000   # 上限で止まる
 assert 120_000 < monthly_payment(45_000_000, 1.0, 35) < 135_000 and monthly_payment(45_000_000, 0, 30) == 125_000
-company = {"売買設定": {"fee_mode": "half", "shihoshoshi_transfer": 70_000, "unknown_key": 1}, "売買ローン目安": {"show": True, "rate": 0.8, "years": 35}}
+company = {"売買設定": {"fee_mode": "half", "shihoshoshi_transfer": 70_000, "unknown_key": 1}, "売買ローン目安": {"show": True, "type": "hendo", "rates": {"hendo": 0.8}, "years": 35, "compare": True}}
 facts = dict(property_type="mansion", price=49_800_000, seller_is_business=False, floor_area=62.15, built=D(2008,3,1), structure="rc", kanri_hi=15_800, shuzen_hi=12_400, address="東京都○○区見本町2丁目", youseki=200, commercial_area=False)
 out = make_estimate(company, facts, {"land_eval": 10_000_000, "bldg_eval": None}, customer="見本 太郎", property_name="メゾン見本 302号室",
                     band=dict(name="サンプル不動産株式会社", license="東京都知事（1）第00000号", address="東京都○○区見本町1-2-3", tel="03-0000-0000", staff="見本 花子", mobile="090-0000-0000"), today=D(2026,10,31))
-assert out["result"].lines[0].amount == 1_709_400 // 2 and out["monthly"]["amount"] > 0 and "月々のご返済の目安" in out["html"]
+assert out["result"].lines[0].amount == 1_709_400 // 2 and len(out["simulation"]) == 3 and "住宅ローンシミュレーション" in out["html"]
+assert out["simulation"][0]["monthly"] == monthly_payment(49_800_000, 0.8, 35) and out["simulation"][0]["total"] == out["simulation"][0]["monthly"] * 420
 open(os.path.join(FX, "_line_sample.html"), "w").write(out["html"])
-print("ALL OK 3", out["monthly"], out["staff_notes"][:1])
+# 物件ごとの指定（LINE「借入 3500万 変動 0.9% 35年」）
+o2 = make_estimate(company, facts, loan_override={"amount": 35_000_000, "type": "zenki_kotei", "rate": 2.0, "years": 30, "compare": False}, today=D(2026,10,31))
+assert o2["simulation"] == [x for x in o2["simulation"]] and len(o2["simulation"]) == 1 and o2["simulation"][0]["amount"] == 35_000_000 and o2["simulation"][0]["rate"] == 2.0 and o2["simulation"][0]["years"] == 30
+# 物件価格＋諸費用
+o3 = make_estimate({"売買ローン目安": {"amount_mode": "price_plus_costs"}}, facts, today=D(2026,10,31))
+amt = o3["simulation"][0]["amount"]; assert 49_800_000 < amt <= 49_800_000 + o3["result"].total_must + o3["result"].total_loan + 100_000
+# シミュレーションなし・ローンなし
+o4 = make_estimate({"売買ローン目安": {"show": False}}, facts, today=D(2026,10,31)); assert o4["simulation"] is None and "シミュレーション" not in o4["html"]
+o5 = make_estimate({"売買ローン目安": {"use": False}}, facts, today=D(2026,10,31)); assert o5["result"].total_loan == 0
+open(os.path.join(FX, "_sim3.html"), "w").write(out["html"]); open(os.path.join(FX, "_sim1.html"), "w").write(o2["html"])
+print("ALL OK 3", out["simulation"][0], out["staff_notes"][:1])
+
+# ---- 精度向上：条件が似た地点・駅徒歩補正・地域補正 ----
+import calibration as cal
+base = ev.land_unit("○○区見本町2丁目", D(2027,1,15), LD)
+near_station = ev.land_unit("○○区見本町2丁目", D(2027,1,15), LD, walk_min=3, youto="第一種低層住居専用地域", youseki=200)
+far_station = ev.land_unit("○○区見本町2丁目", D(2027,1,15), LD, walk_min=15, youto="第一種低層住居専用地域", youseki=200)
+print(base.unit, near_station.unit, far_station.unit, near_station.label)
+assert near_station.unit > far_station.unit
+recs = [cal.make_record("○○区", "見本町", 300_000, 33_000_000, 100, "2027-01-0%d" % i) for i in range(1, 4)]
+fac, why = cal.factor(recs, "○○区", "見本町"); assert abs(fac - 1.1) < 1e-9 and "3件" in why
+assert cal.factor(recs[:2], "○○区", "見本町")[0] == 1.0
+cal_u = ev.land_unit("○○区見本町2丁目", D(2027,1,15), LD, calib=fac); assert abs(cal_u.unit / base.unit - 1.1) < 0.01
+ei = estimate_evals(SaleFacts("house", 58_000_000, land_area=100.5, floor_area=95.2, built=D(2012,9,1), address="○○区見本町2丁目", station_walk_min=8, youto="第一種低層住居専用地域"), D(2027,1,15), LD)
+assert ei.land_unit_est and not ei.price_based
+print("ALL OK 4")

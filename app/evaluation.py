@@ -150,6 +150,8 @@ class LandPoint:
     chome: Optional[int]
     youseki: Optional[int]
     year: int
+    eki_m: Optional[int] = None    # 最寄り駅までの距離（m）
+    youto: Optional[str] = None    # 用途地域（"1低専" "1住居" "近商" "商業" など国土数値情報の略称）
 
 
 class LandData:
@@ -179,8 +181,35 @@ class LandEstimate:
     points_used: int = 0
 
 
+SEARCH_M = 1500
+WALK_ADJ_PER_MIN = 0.015     # 駅徒歩1分の差で地価が約1.5%変わるとみなす（補正は±20%まで）
+
+
+def _walk_adj(walk_prop: Optional[float], p: LandPoint) -> float:
+    if walk_prop is None or not p.eki_m:
+        return 1.0
+    return min(1.2, max(0.8, 1 - WALK_ADJ_PER_MIN * (walk_prop - p.eki_m / 80)))
+
+
+def _similarity_score(p: LandPoint, dist_m: Optional[float], walk: Optional[float], youto: Optional[str],
+                      youseki: Optional[int]) -> float:
+    sc = (dist_m / 500) if dist_m is not None else 0.0
+    if walk is not None and p.eki_m:
+        sc += abs(walk - p.eki_m / 80) / 5
+    if youto and p.youto:
+        sc += 0 if normalize(youto).startswith(p.youto[:2]) or p.youto in normalize(youto) else 0.5
+    if youseki and p.youseki:
+        sc += abs(math.log(youseki / p.youseki))
+    return sc
+
+
 def land_unit(address: Optional[str], on: date, data: Optional[LandData], *, commercial: bool = False,
-              rosenka_per_m2: Optional[int] = None, kotei_rosenka_per_m2: Optional[int] = None) -> Optional[LandEstimate]:
+              rosenka_per_m2: Optional[int] = None, kotei_rosenka_per_m2: Optional[int] = None,
+              walk_min: Optional[float] = None, youto: Optional[str] = None, youseki: Optional[int] = None,
+              calib: float = 1.0) -> Optional[LandEstimate]:
+    """1㎡あたりの固定資産税評価額の推計。
+    地価公示の地点は「近さ」だけでなく、駅徒歩・用途地域・容積率が似ている地点を優先し、
+    駅徒歩の差で補正する。calib は実際の評価額との比較から出した地域ごとの補正（calibration.py）。"""
     if kotei_rosenka_per_m2:
         return LandEstimate(int(kotei_rosenka_per_m2), "kotei_rosenka", f"固定資産税路線価 {kotei_rosenka_per_m2:,}円/㎡")
     if rosenka_per_m2:
@@ -199,28 +228,31 @@ def land_unit(address: Optional[str], on: date, data: Optional[LandData], *, com
 
     key = f"{city}|{town}|{chome}" if chome else f"{city}|{town}|"
     center = data.chome.get(key)
+    method, where = "kouji_city", f"{city}全体"
+    pool: list[tuple[Optional[float], LandPoint]] = []
     if center:
-        near = sorted(((haversine_m(center[0], center[1], p.lon, p.lat), p) for p in cand), key=lambda x: x[0])
-        near = [(d, p) for d, p in near if d <= NEAR_M][:3]
-        if near:
-            w = [1 / max(d, 50) for d, _ in near]
-            price = sum(wi * p.price for wi, (_, p) in zip(w, near)) / sum(w)
-            ys = [p.youseki for _, p in near if p.youseki]
-            return LandEstimate(int(price * KOTEI_RATIO), "kouji_near",
-                                f"{year}年地価公示 近くの{len(near)}地点（最寄り{int(near[0][0])}m）×0.7",
-                                ys[0] if ys else None, len(near))
-    same_town = [p for p in cand if p.town == town]
-    if same_town:
-        price = statistics.median(p.price for p in same_town)
-        ys = [p.youseki for p in same_town if p.youseki]
-        return LandEstimate(int(price * KOTEI_RATIO), "kouji_town",
-                            f"{year}年地価公示 {town}の{len(same_town)}地点の中央値×0.7",
-                            int(statistics.median(ys)) if ys else None, len(same_town))
-    price = statistics.median(p.price for p in cand)
-    ys = [p.youseki for p in cand if p.youseki]
-    return LandEstimate(int(price * KOTEI_RATIO), "kouji_city",
-                        f"{year}年地価公示 {city}全体{len(cand)}地点の中央値×0.7（精度低い）",
-                        int(statistics.median(ys)) if ys else None, len(cand))
+        pool = [(haversine_m(center[0], center[1], p.lon, p.lat), p) for p in cand]
+        pool = [(d, p) for d, p in pool if d <= SEARCH_M]
+        if pool:
+            method, where = "kouji_near", "近く"
+    if not pool:
+        same_town = [p for p in cand if p.town == town]
+        if same_town:
+            pool, method, where = [(None, p) for p in same_town], "kouji_town", town
+        else:
+            pool = [(None, p) for p in cand]
+
+    scored = sorted(((_similarity_score(p, d, walk_min, youto, youseki), d, p) for d, p in pool), key=lambda x: x[0])[:3]
+    w = [1 / (sc + 0.2) for sc, _, _ in scored]
+    price = sum(wi * p.price * _walk_adj(walk_min, p) for wi, (_, _, p) in zip(w, scored)) / sum(w)
+    unit = int(price * KOTEI_RATIO * calib)
+    ys = [p.youseki for _, _, p in scored if p.youseki]
+    near_txt = f"（最寄り{int(scored[0][1])}m）" if scored[0][1] is not None else ""
+    label = (f"{year}年地価公示 {where}の条件が似た{len(scored)}地点{near_txt}"
+             + ("・駅徒歩で補正" if walk_min is not None else "") + "×0.7"
+             + (f"×地域補正{calib:.2f}" if abs(calib - 1) > 0.005 else "")
+             + ("（精度低い）" if method == "kouji_city" else ""))
+    return LandEstimate(unit, method, label, ys[0] if ys else None, len(scored))
 
 
 def mansion_land_share(floor_area: float, youseki_pct: Optional[int]) -> Optional[float]:

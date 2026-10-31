@@ -67,7 +67,7 @@ def _no_nested_arrays(x, path=""):
 
 class _Local:
     def __init__(self):
-        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}, "referrals": {}, "fax_optout": {}, "fax_sends": {}}
+        self.docs = {"users": {}, "jobs": {}, "events": {}, "faxes": {}, "meta": {}, "play_tokens": {}, "groups": {}, "referrals": {}, "fax_optout": {}, "fax_sends": {}, "sale_calibration": {}}
         self.lock = threading.Lock()
         self.dir = Path(config.LOCAL_DIR)
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -405,6 +405,15 @@ def apply_promo(uid, code, extra):
 
 
 # ---------- 作成履歴とファイル ----------
+
+def add_calib_record(jid, rec):
+    """売買：実際の評価額と推計の比較（資料ごとに1件。送り直したら上書き）。"""
+    db().set("sale_calibration", jid, rec)
+
+
+def calib_records(city):
+    return [d for _, d in db().find_all("sale_calibration", "city", city)]
+
 
 def new_job(uid, source):
     jid = now().strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(4)

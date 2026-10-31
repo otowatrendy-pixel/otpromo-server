@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<style>
+@font-face { font-family: "NotoJP"; font-weight: 400; src: url("file:///home/claude/otpromo-server/app/fonts/NotoSansJP-Regular.ttf"); }
+@font-face { font-family: "NotoJP"; font-weight: 700; src: url("file:///home/claude/otpromo-server/app/fonts/NotoSansJP-Bold.ttf"); }
+@page { size: A4; margin: 0; }
+:root { --blue: #1A56A8; --pale: #EAF1FB; --line: #9DB6DA; --ink: #1d2433; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #fff; }
+body { font-family: "NotoJP", sans-serif; color: var(--ink); font-size: 9.6pt; line-height: 1.5;
+       word-break: auto-phrase; line-break: strict; }
+.page { width: 210mm; height: 297mm; padding: 11mm 13mm 0 13mm; position: relative; }
+.head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.2pt solid var(--blue); padding-bottom: 2mm; }
+h1 { margin: 0; font-size: 18pt; color: var(--blue); letter-spacing: .08em; font-weight: 700; }
+.made { font-size: 8.5pt; text-align: right; }
+.to { margin: 3mm 0 1mm; font-size: 12pt; font-weight: 700; }
+.to small { font-size: 9pt; font-weight: 400; margin-left: 4mm; }
+.prop { display: grid; grid-template-columns: 1fr auto; gap: 1mm 4mm; background: var(--pale); border: .6pt solid var(--line); padding: 2.2mm 3.5mm; border-radius: 1.5mm; }
+.prop .name { font-weight: 700; font-size: 11pt; }
+.prop .price { grid-row: span 2; align-self: center; text-align: right; }
+.prop .price b { font-size: 16pt; color: var(--blue); }
+.prop .sub { font-size: 8.6pt; }
+.cond { font-size: 8.4pt; margin: 1.6mm 0 0; }
+h2 { font-size: 10.5pt; margin: 3.4mm 0 1.2mm; padding-left: 2.4mm; border-left: 3pt solid var(--blue); font-weight: 700; }
+table.t { width: 100%; border-collapse: collapse; table-layout: fixed; }
+col.c1 { width: 30%; } col.c2 { width: 20%; } col.c3 { width: 50%; }
+.t th, .t td { border-bottom: .5pt solid var(--line); padding: 1.15mm 2mm; vertical-align: middle; }
+.t th { text-align: left; font-weight: 400; }
+.t td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 10pt; }
+.t td.note { font-size: 7.8pt; color: #3c4658; }
+.t tr.sub th, .t tr.sub td { background: var(--pale); font-weight: 700; border-bottom: .8pt solid var(--blue); }
+.yaku { font-size: 8pt; margin-right: .6mm; }
+.chk { font-size: 8.6pt; border: .6pt solid var(--ink); padding: 0 1.4mm; border-radius: 1mm; }
+.sum { margin-top: 3.6mm; border: 1.2pt solid var(--blue); border-radius: 1.5mm; overflow: hidden; }
+.sum .row { display: grid; grid-template-columns: 1fr auto; padding: 1.6mm 4mm; border-top: .5pt solid var(--line); }
+.sum .row:first-child { border-top: 0; background: var(--blue); color: #fff; }
+.sum .row b { font-size: 12.5pt; }
+.sum .row:first-child b { font-size: 14pt; }
+.sum .row span.l small { font-size: 7.8pt; margin-left: 2mm; }
+.others { font-size: 8.4pt; margin: 1.2mm 0 0; }
+ul.notes { margin: 2.6mm 0 0; padding-left: 4.5mm; font-size: 7.8pt; color: #3c4658; }
+ul.notes li { margin: .3mm 0; }
+.band { position: absolute; left: 0; right: 0; bottom: 0; background: var(--blue); color: #fff; padding: 3mm 13mm; display: flex; justify-content: space-between; align-items: center; }
+.band .co { font-size: 12pt; font-weight: 700; }
+.simcond { font-size: 8.2pt; margin: 0 0 1mm; }
+table.sim th, table.sim td { padding: .9mm 2mm; font-size: 8.8pt; }
+table.sim tr.hd th { background: var(--pale); font-weight: 700; font-size: 8pt; text-align: center; }
+table.sim tr.sel th, table.sim tr.sel td { font-weight: 700; }
+.nw { white-space: nowrap; display: inline-block; }
+.band .meta { font-size: 7.8pt; line-height: 1.55; }
+.band > div:first-child { min-width: 0; flex: 1 1 auto; padding-right: 5mm; }
+.band .tan { text-align: right; font-size: 9pt; line-height: 1.5; white-space: nowrap; flex: 0 0 auto; }
+.band .tan b { font-size: 11pt; }
+</style></head>
+<body><div class="page"><div class="content">
+  <div class="head"><h1>購入諸費用の概算書</h1>
+    <div class="made">作成日 2026年10月31日</div></div>
+  <div class="to"> 様<small>ご購入にかかる費用の目安をまとめました。</small></div>
+  <div class="prop">
+    <div class="name"></div>
+    <div class="price">物件価格 <b>4,980万円</b></div>
+    <div class="sub">東京都○○区見本町2丁目　中古マンション　専有面積 62.15㎡　2008年3月築</div>
+  </div>
+  <p class="cond">計算の前提：ご契約 2026年10月31日ごろ（仮）、お引渡し 2026年12月30日ごろ（仮）、住宅ローン 3,500万円</p>
+
+  <h2>お引渡しまでに必ずかかる費用</h2>
+  <table class="t"><colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
+  <tr><th>仲介手数料</th><td class="amt">854,700円</td><td class="note">上限額の半額</td></tr>
+<tr><th>印紙税（売買契約書）</th><td class="amt">10,000円</td><td class="note">軽減措置後の額</td></tr>
+<tr><th>登記費用（所有権）</th><td class="amt"><span class="yaku">約</span>271,000円</td><td class="note">登録免許税＋司法書士報酬の目安（評価額は推計）</td></tr>
+<tr><th>固定資産税等の清算金</th><td class="amt"><span class="yaku">約</span>1,000円</td><td class="note">引渡日から12月31日まで2日分（年税額は推計）</td></tr>
+<tr><th>管理費等の清算金</th><td class="amt"><span class="yaku">約</span>2,000円</td><td class="note">月額28,200円の引渡月2日分（翌月分の前払いが必要な場合があります）</td></tr>
+  <tr class="sub"><th>小計</th><td class="amt"><span class="yaku">約</span>1,138,700円</td><td class="note"></td></tr>
+  </table>
+  
+  <h2>住宅ローンをご利用の場合にかかる費用</h2>
+  <table class="t"><colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
+  <tr><th>印紙税（ローン契約書）</th><td class="amt"><span class="yaku">約</span>20,000円</td><td class="note">電子契約の場合はかかりません</td></tr>
+<tr><th>ローン事務手数料</th><td class="amt"><span class="yaku">約</span>770,000円</td><td class="note">借入額の2.2%（金融機関により異なります）</td></tr>
+<tr><th>登記費用（抵当権設定）</th><td class="amt"><span class="yaku">約</span>79,000円</td><td class="note">登録免許税＋司法書士報酬の目安</td></tr>
+<tr><th>火災保険・地震保険</th><td class="amt"><span class="yaku">約</span>60,000円</td><td class="note">5年分の目安（補償内容で変わります）</td></tr>
+  <tr class="sub"><th>小計</th><td class="amt"><span class="yaku">約</span>929,000円</td><td class="note"></td></tr>
+  </table>
+
+  <h2>お引渡しの後にかかる費用（参考）</h2>
+  <table class="t"><colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
+  <tr><th>不動産取得税</th><td class="amt">0円の見込み</td><td class="note">要件を満たせば軽減措置でかからない見込みです（要件の確認が必要です）</td></tr>
+  </table>
+  <p class="others">このほか、必要に応じて引越し費用、リフォーム・クリーニング費用、家具・家電・カーテンなどがかかります。</p>
+
+  <div class="sum">
+    <div class="row"><span class="l">諸費用の合計（目安）<small>参考の費用を除く</small></span><b>約2,067,700円</b></div>
+    <div class="row"><span class="l">物件価格と諸費用の合計</span><b>約51,867,700円</b></div>
+    <div class="row"><span class="l">ご用意いただく自己資金の目安<small>住宅ローン 3,500万円 を除いた額</small></span><b>約16,867,700円</b></div>
+  </div>
+
+  
+  <h2>住宅ローンシミュレーション（目安）</h2>
+  <p class="simcond">借入額 3,500万円・返済期間 30年・元利均等返済・ボーナス返済なし</p>
+  <table class="t sim"><tr class="hd"><th>金利タイプ</th><th>金利</th><th>毎月のご返済</th><th>年間のご返済</th><th>総返済額</th></tr><tr><th>全期間固定</th><td>年2%</td><td class="amt"><span class="yaku">約</span>129,366円</td><td class="amt">約1,552,392円</td><td class="amt">約46,571,760円</td></tr></table>
+  <ul class="notes"><li>固定資産税評価額が分からないため、登記費用・税金は物件価格からの推計です。実際の評価額で変わります。</li><li>住宅ローンは借入額3,500万円とした場合の目安です。審査や条件は金融機関によって異なります。</li><li>「約」が付いた金額は目安です。税金は評価額や軽減措置の要件、ローン関連は金融機関やお客様の条件によって変わります。</li><li>住宅ローン控除などの税の優遇が使えるかどうかは、要件の確認が必要です。</li><li>ローンのご返済額は、上記の金利が返済期間中ずっと変わらない場合の目安です。実際の金利は、金融機関の審査や商品で決まります。</li><li>正式な金額は、ご契約・お引渡しの前にあらためてご案内します。</li></ul>
+
+  </div>
+  <div class="band">
+    <div><div class="co"></div>
+      <div class="meta"><br>　TEL </div></div>
+    <div class="tan">担当 <b></b></div>
+  </div>
+</div>
+<script>
+// A4 1枚に収める：はみ出すときだけ縮小（最小70%）
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+  const pg = document.querySelector('.page'), c = document.querySelector('.content'), b = document.querySelector('.band');
+  const avail = pg.clientHeight - b.offsetHeight - c.offsetTop - 4;
+  const h = c.scrollHeight;
+  if (h > avail) { const z = Math.max(0.7, avail / h); c.style.zoom = z; c.style.width = (100 / z) + '%'; }
+  document.body.dataset.fitted = '1';
+});
+</script>
+</body></html>

@@ -194,7 +194,10 @@ s = u_of(A)["company"]["売買設定"]
 assert s["shihoshoshi_transfer"] == 77000 and s["shihoshoshi_mortgage"] == 50000, s
 # 住宅ローンシミュレーション（会社の設定）
 out = pb(A, "edit=loan")
-assert "変動金利：0.9%" in out and "付けない" in out
+assert "変動金利：1.2%" in out and "固定期間選択（10年）：3.7%" in out and "全期間固定：3.6%" in out and "付けない" in out, out
+assert "3タイプを並べる" in out and "1つだけ載せる" not in out
+out = pb(A, "loan=cmp_on")
+assert u_of(A)["company"]["売買ローン目安"]["compare"] is True and "1つだけ載せる" in out
 pb(A, "loan=type")
 out = pb(A, "loan=kotei_kikan")
 assert "固定期間選択" in out
@@ -273,7 +276,37 @@ t2 = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfRe
 assert "3,500万" in t2, [l for l in t2.splitlines() if "ローン" in l]
 pb(B, f"lsim=ask&doc={jidB}")
 text(B, "ローンなし")
-assert store.get_job(jidB)["loan"] == {"show": False}
+assert store.get_job(jidB)["loan"] == {"amount": 35000000, "type": "zenki_kotei", "rate": 2.0, "years": 30, "use": False}
+t3 = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jidB}/okyaku.pdf"))).pages))
+assert "3,500万" not in t3 and "抵当権設定" not in t3, [l for l in t3.splitlines() if "ローン" in l or "抵当" in l]
+out = pb(B, f"lsim=ask&doc={jidB}")
+assert "使わない前提" in out, out
+text(B, "変動 1.0%")  # 条件を送り直したら、ローンを使う前提に戻る
+assert store.get_job(jidB)["loan"]["use"] is True and store.get_job(jidB)["loan"]["type"] == "hendo"
+
+# 実際の評価額を送ると、補正の記録が1件残る（土地面積が分かるときだけ）。係数は3件たまるまで1.0
+import calibration
+pb(B, f"eval=ask&doc={jidB}")
+text(B, "土地 30,000,000")
+recs = [d for _, d in store.db().all("sale_calibration")]
+print("補正の記録:", recs)
+assert recs == []  # 見本はマンションで敷地持分が書いていないので記録しない
+import sale_core, types, costs_sale, evaluation
+FXS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "shohiyou")
+costs_sale._LAND_DATA = evaluation.LandData.load(os.path.join(FXS, "landprice_points.json"), os.path.join(FXS, "chome_points.json"))
+_ci = sale_core.cost_inputs
+sale_core.cost_inputs = lambda f: {"property_type": "house", "price": 68_000_000, "address": "東京都○○区見本町2丁目",
+                                   "land_area": 100.0, "floor_area": 90.0, "structure": "wood", "built": __import__("datetime").date(2015, 3, 1)}
+rec = sale_bot.record_calibration("house1", types.SimpleNamespace(事実=None), 30_000_000)
+sale_core.cost_inputs = _ci
+print("補正の記録（戸建）:", rec)
+assert rec and rec["city"] == "○○区" and rec["town"] == "見本町" and rec["actual_unit"] == 300000 and rec["est_unit"] > 0
+assert store.db().get("sale_calibration", "house1") == rec
+store.db().delete("sale_calibration", "house1")
+for i in range(3):
+    store.add_calib_record(f"x{i}", {"city": "練馬区", "town": "貫井", "est_unit": 400000, "actual_unit": 480000, "at": "2026-10-31"})
+assert abs(sale_bot.calib_factor("東京都練馬区貫井2丁目") - 1.2) < 1e-9
+assert sale_bot.calib_factor("東京都杉並区阿佐谷北1丁目") == 1.0
 assert store.quota(u_of(B))["remaining"] == before
 
 print("\nON: すべてOK")

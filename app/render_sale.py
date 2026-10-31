@@ -48,7 +48,7 @@ def rows(lines) -> str:
 
 def build_html(r: Result, f: SaleFacts, loan: LoanPlan | None, *, customer: str, property_name: str,
                address: str, made: date, contract_day: date, handover_day: date, company: dict,
-               font_dir: str, monthly: dict | None = None, dates_tentative: tuple = (False, True)) -> str:
+               font_dir: str, sim: list | None = None, dates_tentative: tuple = (False, True)) -> str:
     must = [l for l in r.lines if l.group == "must"]
     lns = [l for l in r.lines if l.group == "loan"]
     later = [l for l in r.lines if l.group == "later"]
@@ -79,11 +79,23 @@ def build_html(r: Result, f: SaleFacts, loan: LoanPlan | None, *, customer: str,
   <tr class="sub"><th>小計</th><td class="amt"><span class="yaku">約</span>{yen(r.total_loan)}</td><td class="note"></td></tr>
   </table>"""
     later_rows = rows(later)
-    monthly_row = ""
-    if monthly:
-        monthly_row = (f'<div class="row"><span class="l">月々のご返済の目安<small>金利{monthly["rate"]:g}%・{monthly["years"]}年・元利均等・ボーナス払いなし</small></span>'
-                       f'<b>約{yen(monthly["amount"])}</b></div>')
-        notes.insert(-1, "月々のご返済は、上記の金利が返済期間中ずっと変わらない場合の目安です。実際の金利は金融機関の審査や商品で決まります。")
+    sim_block = ""
+    if sim:
+        trs = "".join(
+            f'<tr{" class=\'sel\'" if (x["selected"] and len(sim) > 1) else ""}><th>{html.escape(x["label"])}</th><td>年{x["rate"]:g}%</td>'
+            f'<td class="amt"><span class="yaku">約</span>{yen(x["monthly"])}</td><td class="amt">約{yen(x["yearly"])}</td>'
+            f'<td class="amt">約{yen(x["total"])}</td></tr>' for x in sim)
+        sim_block = f"""
+  <h2>住宅ローンシミュレーション（目安）</h2>
+  <p class="simcond">借入額 {man(sim[0]["amount"])}・返済期間 {sim[0]["years"]}年・元利均等返済・ボーナス返済なし</p>
+  <table class="t sim"><tr class="hd"><th>金利タイプ</th><th>金利</th><th>毎月のご返済</th><th>年間のご返済</th><th>総返済額</th></tr>{trs}</table>"""
+        types = {x["type"] for x in sim}
+        msg = "ローンのご返済額は、上記の金利が返済期間中ずっと変わらない場合の目安です"
+        if "hendo" in types:
+            msg += "。変動金利は、今後の金利の動きでご返済額が変わります"
+        if "kotei_kikan" in types:
+            msg += "。固定期間選択は、固定期間が終わった後の金利で変わります"
+        notes.insert(-1, msg + "。実際の金利は、金融機関の審査や商品で決まります。")
     others = "、".join(OTHERS[f.property_type])
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
@@ -129,13 +141,17 @@ ul.notes {{ margin: 2.6mm 0 0; padding-left: 4.5mm; font-size: 7.8pt; color: #3c
 ul.notes li {{ margin: .3mm 0; }}
 .band {{ position: absolute; left: 0; right: 0; bottom: 0; background: var(--blue); color: #fff; padding: 3mm 13mm; display: flex; justify-content: space-between; align-items: center; }}
 .band .co {{ font-size: 12pt; font-weight: 700; }}
+.simcond {{ font-size: 8.2pt; margin: 0 0 1mm; }}
+table.sim th, table.sim td {{ padding: .9mm 2mm; font-size: 8.8pt; }}
+table.sim tr.hd th {{ background: var(--pale); font-weight: 700; font-size: 8pt; text-align: center; }}
+table.sim tr.sel th, table.sim tr.sel td {{ font-weight: 700; }}
 .nw {{ white-space: nowrap; display: inline-block; }}
 .band .meta {{ font-size: 7.8pt; line-height: 1.55; }}
 .band > div:first-child {{ min-width: 0; flex: 1 1 auto; padding-right: 5mm; }}
 .band .tan {{ text-align: right; font-size: 9pt; line-height: 1.5; white-space: nowrap; flex: 0 0 auto; }}
 .band .tan b {{ font-size: 11pt; }}
 </style></head>
-<body><div class="page">
+<body><div class="page"><div class="content">
   <div class="head"><h1>購入諸費用の概算書</h1>
     <div class="made">作成日 {jdate(made)}</div></div>
   <div class="to">{html.escape(customer)} 様<small>ご購入にかかる費用の目安をまとめました。</small></div>
@@ -162,15 +178,27 @@ ul.notes li {{ margin: .3mm 0; }}
   <div class="sum">
     <div class="row"><span class="l">諸費用の合計（目安）<small>{"「要確認」の項目を除く" if has_check else "参考の費用を除く"}</small></span><b>約{yen(shohiyou)}</b></div>
     <div class="row"><span class="l">物件価格と諸費用の合計</span><b>約{yen(total)}</b></div>
-    {monthly_row}
     <div class="row"><span class="l">ご用意いただく自己資金の目安<small>{"住宅ローン " + man(loan.amount) + " を除いた額" if loan else ""}</small></span><b>約{yen(self_fund)}</b></div>
   </div>
 
+  {sim_block}
   <ul class="notes">{"".join(f"<li>{html.escape(n)}</li>" for n in notes)}</ul>
 
+  </div>
   <div class="band">
     <div><div class="co">{html.escape(company.get("name", ""))}</div>
       <div class="meta">{"　".join(f'<span class="nw">{html.escape(x)}</span>' for x in company.get("license", "").split("　") if x)}<br>{html.escape(company.get("address", ""))}　TEL {html.escape(company.get("tel", ""))}</div></div>
     <div class="tan">担当 <b>{html.escape(company.get("staff", ""))}</b>{("<br>携帯 " + html.escape(company["mobile"])) if company.get("mobile") else ""}</div>
   </div>
-</div></body></html>"""
+</div>
+<script>
+// A4 1枚に収める：はみ出すときだけ縮小（最小70%）
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {{
+  const pg = document.querySelector('.page'), c = document.querySelector('.content'), b = document.querySelector('.band');
+  const avail = pg.clientHeight - b.offsetHeight - c.offsetTop - 4;
+  const h = c.scrollHeight;
+  if (h > avail) {{ const z = Math.max(0.7, avail / h); c.style.zoom = z; c.style.width = (100 / z) + '%'; }}
+  document.body.dataset.fitted = '1';
+}});
+</script>
+</body></html>"""
