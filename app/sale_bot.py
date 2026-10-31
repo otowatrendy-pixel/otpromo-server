@@ -31,7 +31,10 @@ DEFAULT_SETTINGS = {"fee_mode": "max", "fee_custom": None, "fee_rate": None, "te
                     "shihoshoshi_transfer": 66_000, "shihoshoshi_preserve": 33_000,
                     "shihoshoshi_mortgage": 44_000, "touki_jippi": 8_000}
 # 月々の返済の目安（概算書に小さく入れる）。金利は仮置き（本人確認待ち）
-DEFAULT_LOAN = {"show": True, "rate": 1.0, "years": 35}
+# 住宅ローンシミュレーション（概算書に付ける）。金利は仮置き（本人確認待ち）。項目名は概算書スレッドとそろえる
+LOAN_TYPES = {"hendo": "変動金利", "kotei_kikan": "固定期間選択", "zenki_kotei": "全期間固定"}
+DEFAULT_LOAN = {"show": True, "type": "hendo", "rates": {"hendo": 0.9, "kotei_kikan": 1.8, "zenki_kotei": 2.1},
+                "kotei_years": 10, "years": 35, "amount_mode": "ratio", "ratio": 1.0}
 FEE_NAMES = {"max": "上限どおり（価格×3%＋6万円・税別）", "half": "上限の半額", "free": "無料", "custom": "定額"}
 
 
@@ -94,7 +97,27 @@ def settings(co):
 
 
 def loan(co):
-    return {**DEFAULT_LOAN, **(co.get("売買ローン目安") or {})}
+    """会社の住宅ローンシミュレーションの設定（初期値で埋める）。rate は今のタイプの金利（互換のため）。"""
+    saved = dict(co.get("売買ローン目安") or {})
+    L = {**DEFAULT_LOAN, **saved, "rates": {**DEFAULT_LOAN["rates"], **(saved.get("rates") or {})}}
+    if "rate" in saved and "rates" not in saved:  # 古い形（rate だけ）は今のタイプの金利として読む
+        L["rates"][L["type"]] = float(saved["rate"])
+    L["rate"] = L["rates"].get(L["type"], DEFAULT_LOAN["rates"]["hendo"])
+    return L
+
+
+def loan_label(L):
+    t = LOAN_TYPES.get(L.get("type"), "変動金利")
+    if L.get("type") == "kotei_kikan":
+        t += f"（{L.get('kotei_years', 10)}年）"
+    return f"{t} 年{float(L['rate']):g}%・{L['years']}年"
+
+
+def amount_label(L):
+    if L.get("amount_mode") == "price_plus_costs":
+        return "物件価格＋諸費用"
+    r = float(L.get("ratio", 1.0))
+    return "物件価格の全額" if r >= 1 else f"物件価格の{r * 100:g}%"
 
 
 def fee_label(co):
@@ -312,7 +335,7 @@ def resume_after_setup(c):
 FONT_DIR = str(__import__("pathlib").Path(__file__).parent / "fonts" / "noto-sans-jp-ttf")
 
 
-def estimate_html(company, evals=None):
+def estimate_html(company, evals=None, loan_override=None):
     """購入諸費用の概算書（A4 1枚のHTML）を作る関数を返す。sale_core.render_documents の estimate_html に渡す。
     evals はスタッフが送った評価額 {"land_eval", "bldg_eval", ...}（なければ価格から推計）。
     スタッフ向けの確認事項は、返した関数の .notes に入る（お客様向けPDFには出さず、社内向けの注意へ）。"""
@@ -329,9 +352,24 @@ def estimate_html(company, evals=None):
                 "address": co.get("住所", ""), "tel": co.get("電話", ""), "staff": co.get("担当者名", ""),
                 "mobile": co.get("携帯", "") if co.get("携帯を載せる", True) else ""}
         name = " ".join(x for x in (f.物件名, f.号室 and f"{f.号室}号室") if x) or f.所在地 or ""
-        co = {**co, "売買ローン目安": loan(co)}  # 返済の目安は会社の設定がなければ初期値（年1.0%・35年）
+        L = loan(co)
+        kw = {}
+        if loan_override:  # 物件ごとの指定（LINEで「借入 3500万 変動 0.9% 35年」など）
+            if loan_override.get("show") is False:
+                L["show"] = False
+            else:
+                L.update({k: v for k, v in loan_override.items() if k in ("type", "years", "kotei_years") and v})
+                if loan_override.get("rate"):
+                    L["rates"] = {**L["rates"], L["type"]: float(loan_override["rate"])}
+                    L["rate"] = float(loan_override["rate"])
+                if loan_override.get("amount"):
+                    kw["loan_amount"] = int(loan_override["amount"])
+        co = {**co, "売買ローン目安": L}
+        import inspect
+        if loan_override and "loan_override" in inspect.signature(sale_estimate.make_estimate).parameters:
+            kw["loan_override"] = loan_override
         out = sale_estimate.make_estimate(co, sale_core.cost_inputs(f), evals, customer=co.get("宛名") or "",
-                                          property_name=name, band=band, font_dir=FONT_DIR)
+                                          property_name=name, band=band, font_dir=FONT_DIR, **kw)
         build.notes[:] = list(out.get("staff_notes") or [])
         return out["html"]
     build.notes = []
@@ -440,16 +478,111 @@ def edit_postback(c, k, v):
                            保存=f"{s['shihoshoshi_preserve']:,}", 実費=f"{s['touki_jippi']:,}"))
         return True
     if k == "edit" and v == "loan":
-        L = loan(co)
-        store.update_user(c.uid, {"sale_edit": "loan"})
-        c.send(texts.build("sale_edit_loan", 金利=f"{L['rate']:g}", 年数=L["years"]))
-        return True
-    if k == "loan" and v == "off":
-        set_company(c, 売買ローン目安={**loan(co), "show": False})
-        store.update_user(c.uid, {"sale_edit": None})
-        c.send(texts.build("sale_edit_done", 項目="月々の返済の目安（載せない）"))
-        return True
+        return loan_menu(c)
+    if k == "loan":
+        return loan_postback(c, v)
     return False
+
+
+# ---------- 住宅ローンシミュレーション（会社の設定） ------------------------------------------
+
+def _save_loan(c, **kv):
+    L = loan(c.u.get("company") or {})
+    L.update(kv)
+    L.pop("rate", None)
+    set_company(c, 売買ローン目安=L)
+
+
+def loan_menu(c, prefix=None):
+    L = loan(c.u.get("company") or {})
+    store.update_user(c.uid, {"sale_edit": "loan"})
+    r = L["rates"]
+    msg = texts.build("sale_edit_loan", 付ける="付ける" if L["show"] else "付けない", 条件=loan_label(L),
+                      変動=f"{r['hendo']:g}", 固定期間=f"{r['kotei_kikan']:g}", 固定期間の年数=str(L["kotei_years"]),
+                      全期間固定=f"{r['zenki_kotei']:g}", 借入額=amount_label(L),
+                      drop=("postback loan=on",) if L["show"] else ("postback loan=off",))
+    return c.send(*([prefix] if prefix else []), msg) or True
+
+
+def loan_postback(c, v):
+    if v in ("on", "off"):
+        _save_loan(c, show=v == "on")
+        return loan_menu(c, texts.build("sale_edit_done", 項目="住宅ローンシミュレーション（" + ("付ける" if v == "on" else "付けない") + "）"))
+    if v == "type":
+        c.send(texts.build("sale_loan_type"))
+        return True
+    if v in LOAN_TYPES:
+        _save_loan(c, type=v)
+        return loan_menu(c, texts.build("sale_edit_done", 項目=f"金利のタイプ（{LOAN_TYPES[v]}）"))
+    if v == "amount":
+        c.send(texts.build("sale_loan_amount"))
+        return True
+    if v in ("full", "plus_costs"):
+        _save_loan(c, amount_mode="price_plus_costs" if v == "plus_costs" else "ratio", ratio=1.0)
+        return loan_menu(c, texts.build("sale_edit_done", 項目="借入額の決め方"))
+    return False
+
+
+LOAN_TYPE_WORDS = [("zenki_kotei", r"全期間固定|フラット"), ("kotei_kikan", r"固定期間|固定\s*\d+\s*年|固定(?!.*全期間)"),
+                   ("hendo", r"変動")]
+
+
+def parse_loan(s):
+    """「借入 3500万 変動 0.9% 35年」「固定10年 1.6」「ローンなし」などを読む。読めた項目だけ返す。"""
+    s = unicodedata.normalize("NFKC", s or "").replace(",", "")
+    out = {}
+    if re.search(r"ローン(は)?(なし|無し|使わない)|現金", s):
+        return {"show": False}
+    m = re.search(r"借入(額)?\D{0,4}?(\d+(?:\.\d+)?)\s*(億|万)?", s)
+    if m:
+        out["amount"] = int(round(float(m.group(2)) * {"億": 100_000_000, "万": 10_000}.get(m.group(3), 1)))
+    for key, pat in LOAN_TYPE_WORDS:
+        if re.search(pat, s):
+            out["type"] = key
+            break
+    m = re.search(r"固定\s*(\d+)\s*年", s)
+    if m and out.get("type") == "kotei_kikan":
+        out["kotei_years"] = int(m.group(1))
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%", s) or re.search(r"金利\D{0,3}?(\d+(?:\.\d+)?)", s)
+    if not m and out.get("type"):  # 「全期間固定 2.0」のように%がないときは、タイプの後ろの小さい数字を金利とみる
+        rest = re.sub(r"固定\s*\d+\s*年", "", s)
+        m = re.search(r"(?<![\d.])(\d{1,2}(?:\.\d+)?)(?![\d.]|\s*(年|万|億|円))", rest)
+    if m and 0 < float(m.group(1)) < 20:
+        out["rate"] = float(m.group(1))
+    s2 = re.sub(r"固定\s*\d+\s*年", "", s)
+    m = re.search(r"(\d+)\s*年(?!\s*目)", s2) or re.search(r"年数\D{0,3}?(\d+)", s2)
+    if m and 1 <= int(m.group(1)) <= 50:
+        out["years"] = int(m.group(1))
+    return out
+
+
+def loan_settings_text(c, s):
+    """会社の設定：「変動 0.9」「固定10年 1.6」「全期間固定 2.0」「年数 35」「割合 90」。"""
+    L = loan(c.u.get("company") or {})
+    rates = dict(L["rates"])
+    hit = False
+    for key, pat in LOAN_TYPE_WORDS:
+        m = re.search(f"(?:{pat})[^\\d\\n]{{0,6}}?(\\d+(?:\\.\\d+)?)(?![\\d.])[ \\t]*%?(?![ \\t]*年)", s)
+        if m and 0 < float(m.group(1)) < 20:
+            rates[key] = float(m.group(1))
+            hit = True
+    kv = {"rates": rates}
+    m = re.search(r"固定\s*(\d+)\s*年", s)
+    if m:
+        kv["kotei_years"] = int(m.group(1)); hit = True
+    m = re.search(r"年数\D{0,3}?(\d+)", s) or re.search(r"(?<!固定)(?<!\d)(\d{2})\s*年", re.sub(r"固定\s*\d+\s*年", "", s))
+    if m and 1 <= int(m.group(1)) <= 50:
+        kv["years"] = int(m.group(1)); hit = True
+    m = re.search(r"割合\D{0,3}?(\d+(?:\.\d+)?)", s)
+    if m and 10 <= float(m.group(1)) <= 100:
+        kv.update(amount_mode="ratio", ratio=float(m.group(1)) / 100); hit = True
+    if not hit:
+        return False
+    _save_loan(c, **kv)
+    store.update_user(c.uid, {"sale_edit": None})
+    loan_menu(c, texts.build("sale_edit_done", 項目="住宅ローンシミュレーションの条件"))
+    store.update_user(c.uid, {"sale_edit": "loan"})
+    return True
 
 
 SHIHO_KEYS = {"移転": "shihoshoshi_transfer", "抵当権": "shihoshoshi_mortgage", "保存": "shihoshoshi_preserve",
@@ -470,18 +603,11 @@ def edit_text(c, t):
             return False
         set_settings(c, **kv)
     elif mode == "loan":
-        r = re.search(r"金利\D*?(\d+(?:\.\d+)?)", s)
-        y = re.search(r"年数\D*?(\d+)", s)
-        if not (r or y):
-            return False
-        L = loan(c.u.get("company") or {})
-        if r and 0 < float(r.group(1)) < 20:
-            L["rate"] = float(r.group(1))
-        if y and 1 <= int(y.group(1)) <= 50:
-            L["years"] = int(y.group(1))
-        set_company(c, 売買ローン目安={**L, "show": True})
+        return loan_settings_text(c, s)
+    elif mode == "lsim":
+        return lsim_text(c, s)
     store.update_user(c.uid, {"sale_edit": None})
-    c.send(texts.build("sale_edit_done", 項目="司法書士報酬の目安" if mode == "shiho" else "月々の返済の目安"))
+    c.send(texts.build("sale_edit_done", 項目="司法書士報酬の目安"))
     return True
 
 
@@ -507,28 +633,68 @@ def parse_evals(s):
     return out
 
 
-def eval_text(c, s):
+def rerender(c, jid, evals=None, loan_override=None):
+    """預かっている図面と読み取り結果で、概算書を作り直す（AIは使わない・件数に数えない）。
+    これまでに送られた評価額・ローンの条件は残し、新しく送られた方で上書きする。お客様向けPDFのURLを返す（できなければ None）。"""
     import bot
     import sale_core
     import sale_schema
     from PIL import Image
-    ev = parse_evals(s)
-    if not ev:
-        return False
-    jid = c.u.get("sale_eval_job")
-    store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
     job = store.get_job(jid) if jid else None
     page = store.get_page(jid) if job else None
-    est = estimate_html(c.u.get("company") or {}, ev)
-    if not job or job.get("user_id") != c.uid or job.get("kind") != "sale" or not page or est is None:
-        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
-        return True
+    if not job or job.get("user_id") != c.uid or job.get("kind") != "sale" or not page:
+        return None
+    ev = {**(job.get("evals") or {}), **(evals or {})}
+    lo = loan_override if loan_override is not None else job.get("loan")
+    if lo and lo.get("show") is not False and job.get("loan") and loan_override:
+        lo = {**{k: v for k, v in job["loan"].items() if k != "show"}, **loan_override}
+    est = estimate_html(c.u.get("company") or {}, ev or None, lo)
+    if est is None:
+        return None
     company = {**bot.company_for_render(c.uid, c.u), "宛名": job.get("宛名") or ""}
     r = sale_schema.SaleResult.model_validate(job["result"])
     out = sale_core.render_documents(company, Image.open(io.BytesIO(page)).convert("RGB"), r,
                                      job.get("pages") or 0, job.get("log") or {}, estimate_html=est)
     store.save_files(jid, out)
-    store.update_job(jid, {"evals": ev})
-    url_okyaku, _ = store.pdf_urls(jid, store.get_job(jid))
-    c.send(texts.build("sale_eval_done", お客様向けリンク=url_okyaku))
+    store.update_job(jid, {"evals": ev, "loan": lo})
+    return store.pdf_urls(jid, store.get_job(jid))[0]
+
+
+def eval_text(c, s):
+    ev = parse_evals(s)
+    if not ev:
+        return False
+    jid = c.u.get("sale_eval_job")
+    store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
+    url = rerender(c, jid, evals=ev)
+    if not url:
+        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
+        return True
+    c.send(texts.build("sale_eval_done", お客様向けリンク=url))
+    return True
+
+
+# ---------- 物件ごとのローン条件（この資料だけ作り直す） ----------------------------------------
+
+def lsim_ask(c, jid):
+    store.update_user(c.uid, {"sale_edit": "lsim", "sale_eval_job": jid})
+    L = loan(c.u.get("company") or {})
+    job = store.get_job(jid) or {}
+    cur = job.get("loan") or {}
+    now = "このローン条件では載せていません" if cur.get("show") is False else (
+        loan_label({**L, **{k: v for k, v in cur.items() if v}}) + (f"・借入{cur['amount'] // 10_000:,}万円" if cur.get("amount") else f"・借入は{amount_label(L)}"))
+    return c.send(texts.build("sale_lsim_ask", 今の条件=now))
+
+
+def lsim_text(c, s):
+    lo = parse_loan(s)
+    if not lo:
+        return False
+    jid = c.u.get("sale_eval_job")
+    store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
+    url = rerender(c, jid, loan_override=lo)
+    if not url:
+        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
+        return True
+    c.send(texts.build("sale_lsim_done", お客様向けリンク=url))
     return True

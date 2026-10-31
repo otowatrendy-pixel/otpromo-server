@@ -31,6 +31,7 @@ import bot  # noqa: E402
 import core  # noqa: E402
 import line  # noqa: E402
 import person  # noqa: E402
+import sale_bot  # noqa: E402
 import sale_core  # noqa: E402
 import store  # noqa: E402
 from PIL import Image  # noqa: E402
@@ -191,9 +192,21 @@ pb(A, "edit=shiho")
 out = text(A, "移転 77,000 抵当権 50000")
 s = u_of(A)["company"]["売買設定"]
 assert s["shihoshoshi_transfer"] == 77000 and s["shihoshoshi_mortgage"] == 50000, s
-pb(A, "edit=loan")
-text(A, "金利 0.9 年数 30")
-assert u_of(A)["company"]["売買ローン目安"] == {"show": True, "rate": 0.9, "years": 30}
+# 住宅ローンシミュレーション（会社の設定）
+out = pb(A, "edit=loan")
+assert "変動金利：0.9%" in out and "付けない" in out
+pb(A, "loan=type")
+out = pb(A, "loan=kotei_kikan")
+assert "固定期間選択" in out
+text(A, "固定10年 1.6\n変動 0.8\n年数 30")
+L = sale_bot.loan(u_of(A)["company"])
+assert L["type"] == "kotei_kikan" and L["rates"]["kotei_kikan"] == 1.6 and L["rates"]["hendo"] == 0.8 and L["years"] == 30, L
+pb(A, "loan=amount")
+pb(A, "loan=plus_costs")
+assert sale_bot.loan(u_of(A)["company"])["amount_mode"] == "price_plus_costs"
+out = pb(A, "loan=off")
+assert sale_bot.loan(u_of(A)["company"])["show"] is False and "付ける" in out
+pb(A, "loan=on")
 pb(A, "edit=torihiki")
 pb(A, "torihiki=代理")
 assert sale_core.band_company(u_of(A)["company"])["帯_3行目"] == "取引態様：代理"
@@ -243,10 +256,25 @@ assert "購入諸費用" in okyaku_text and "見本 一郎" in okyaku_text, okya
 assert u_of(B)["company"]["所属団体"] == "（公社）全日本不動産協会会員　（公社）首都圏不動産公正取引協議会加盟"
 
 # 月々の返済の計算（元利均等）：3,000万円・年1%・35年 ≒ 84,686円
-import sale_bot  # noqa: E402
 assert sale_bot.monthly_payment(30_000_000, 1.0, 35) == 84686, sale_bot.monthly_payment(30_000_000, 1.0, 35)
 assert sale_bot.prefecture("東京都練馬区") == "東京都" and sale_bot.prefecture("京都府京都市") == "京都府"
 assert sale_bot.parse_evals("土地 12,345,678\n建物 456万") == {"land_eval": 12345678, "bldg_eval": 4560000}
+
+# 物件ごとのローン条件（この資料だけ作り直す、件数に数えない）
+jidB = u_of(B)["last_job"]
+before = store.quota(u_of(B))["remaining"]
+out = pb(B, f"lsim=ask&doc={jidB}")
+assert "今の条件" in out, out
+out = text(B, "借入 3500万 全期間固定 2.0% 30年")
+assert "作り直しました" in out, out
+assert store.get_job(jidB)["loan"] == {"amount": 35000000, "type": "zenki_kotei", "rate": 2.0, "years": 30}
+pdf = store.db().get_file(f"jobs/{jidB}/okyaku.pdf")
+t2 = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(pdf)).pages))
+assert "3,500万" in t2, [l for l in t2.splitlines() if "ローン" in l]
+pb(B, f"lsim=ask&doc={jidB}")
+text(B, "ローンなし")
+assert store.get_job(jidB)["loan"] == {"show": False}
+assert store.quota(u_of(B))["remaining"] == before
 
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})

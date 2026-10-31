@@ -479,6 +479,8 @@ def on_postback(c, data):
     if k == "bfax" and sale_bot.on(c):
         # 売買の物件確認・内見依頼書（中身は claude/baibai-naiken-fax ブランチ。つなぐまでは案内だけ）
         return c.send(texts.build("sale_fax_start"))
+    if k == "lsim" and sale_bot.on(c):  # この資料だけ、住宅ローンの条件を変えて作り直す
+        return sale_bot.lsim_ask(c, v.partition("doc=")[2] or c.u.get("last_job"))
     if k == "eval" and sale_bot.on(c):
         store.update_user(c.uid, {"sale_edit": "eval", "sale_eval_job": v.partition("doc=")[2] or c.u.get("last_job")})
         return c.send(texts.build("sale_eval_ask"))
