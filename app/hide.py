@@ -164,7 +164,9 @@ def find(page: Image.Image, facts, texts, band_top: float, extra=None, protect=N
             t = unicodedata.normalize("NFKC", text)
             for m in extra.finditer(t):
                 tail = _TAIL.match(t, m.end())
-                a, b = m.start(), tail.end() if tail else m.end()
+                # 名前つきの組「c」があれば、そこだけを消す（売主の会社名は残し、連絡先だけを消す）
+                c = m.start("c") if "c" in m.re.groupindex and m.group("c") else -1
+                a, b = (c if c >= 0 else m.start()), tail.end() if tail else m.end()
                 boxes.append(_span_box(box, text, a, b, pad))
                 notes.append(text[a:b])
                 hit = True

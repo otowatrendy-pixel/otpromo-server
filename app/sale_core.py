@@ -47,7 +47,7 @@ HIDE_EXTRA = re.compile(
     r"元付[^、,/]{0,6}[0-9０-９.]+\s*[%％]|客付[^、,/]{0,6}[0-9０-９.]+\s*[%％]|"
     r"レインズ|REINS|R[EＥ]INS|"
     r"広告(転載|掲載)?(可|不可|否|禁止|要承諾|要相談|要確認|NG)|(ネット|チラシ|ポータル|SUUMO|ホームズ|アットホーム)(掲載)?(可|不可|NG)|"
-    r"売主[^、,/]{0,24}?(TEL|Tel|tel|電話|☎|FAX|Fax|fax|E-?mail|メール)\s*[:：]?\s*[0-9０-９\-－()（）a-zA-Z@.]{6,}|"
+    r"売主[^、,/]{0,24}?(?P<c>(TEL|Tel|tel|電話|☎|FAX|Fax|fax|E-?mail|メール)\s*[:：]?\s*[0-9０-９\-－()（）a-zA-Z@.]{6,})|"
     r"infosheet|athome|at\s*home|物件番号\s*[:：]?\s*[0-9A-Za-z\-]*|情報公開日\s*[:：]?\s*[0-9./年月日]*|前回公開日\s*[:：]?\s*[0-9./年月日]*|"
     r"客付(会社|業者)?(さま|様)へ|"
     r"業者様へ|業者間限り|業者限り|業者専用|一般公開不可|未公開|"
@@ -147,7 +147,10 @@ def analyze(data: bytes) -> dict:
             camera = scan.is_camera(Image.open(io.BytesIO(data)))
         except Exception:
             camera = False
-        img, fix = core.make_page(img, result, camera)
+        # パソコンで作った画像（スクリーンショット・PNG書き出し）は補正しない。
+        # 白い背景に太い枠の表がある図面を「用紙の縁」と取り違えて、表だけを切り出して歪ませてしまうため。
+        if camera or result.用紙.写真:
+            img, fix = core.make_page(img, result, camera)
     t3 = time.perf_counter()
     log = {"種類": "売買", "秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "秒_写真補正": round(t3 - t2, 2),
            "写真の補正": fix, "モデル": config.MODEL, "思考の深さ": effort, "文字データ": layer[1], **usage}

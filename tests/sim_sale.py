@@ -62,11 +62,11 @@ assert ci["seller_is_business"] is None and ci["kanri_hi"] == 12300 and not ci["
 assert [sale_core.structure_code(x) for x in ("SRC造", "鉄筋コンクリート造", "軽量鉄骨造", "鉄骨造", "木造2階建", "")] == ["src", "rc", "light_steel", "steel", "wood", None]
 assert sale_core._percent("300％（前面道路により240%）") == 240 and ci["address"] == "東京都○○区見本町2丁目" and ci["commercial_area"] is False
 assert sale_core.walk_min(["A線 B駅 徒歩12分", "C線 D駅 バス10分 停歩3分", "E線 F駅 徒歩7分"]) == 7.0 and ci["station_walk_min"] == 6.0
-assert sale_core.first_youto("第一種低層住居専用地域・第一種中高層住居専用地域") == "第一種低層住居専用地域" and ci["youto"] is None
+assert sale_core.first_youto("第一種低層住居専用地域・第一種中高層住居専用地域") == "第一種低層住居専用地域" and ci["youto"] == "第一種住居地域"
 assert sale_core._yen("年額 12.5万円") == 125000 and sale_core._yen("98,000円") == 98000
 
 # おすすめポイント：お客様に送る文章。強い言葉・図面にない数字のポイントは外す（10/31本人）
-assert len(r.おすすめポイント) == 3, [p.見出し for p in r.おすすめポイント]  # 見本のポイントは全部残る
+assert len(r.おすすめポイント) == 5, [p.見出し for p in r.おすすめポイント]  # 見本のポイントは全部残る
 from schema import Point
 r5 = r.model_copy(deep=True)
 r5.おすすめポイント += [Point(見出し="格安の掘出し物", 説明="ぜひご検討ください。", 根拠="価格"),
@@ -74,12 +74,24 @@ r5.おすすめポイント += [Point(見出し="格安の掘出し物", 説明=
                       Point(見出し="駅から近い", 説明="駅まで約480mです。", 根拠="交通"),
                       Point(見出し="築46年", 説明="2019年にリフォーム済みです。", 根拠="築年月"),
                       Point(見出し="新築同様", 説明="きれいなお部屋です。", 根拠="リフォーム")]
-dropped = sale_core.check_points(r5, "見本線 見本駅 徒歩6分 3LDK 65.12㎡ 1980年4月 8階建の3階 39,800,000円")
+dropped = sale_core.check_points(r5, "見本線 見本駅 徒歩6分 見本東駅 徒歩11分 3LDK 65.12㎡ 8.40㎡ 1980年4月 2022年6月 8階建の3階 32戸 徒歩3分 徒歩2分 徒歩5分 39,800,000円")
 assert dropped == ["格安の掘出し物", "駅から近い", "築46年", "新築同様"], dropped
 assert any("「格安」" in t and "外しました" in t for t in r5.スタッフへの注意)
 assert sale_core.OSUSUME_NOTE == "お客様へ送る前に内容をご確認ください"
 
-out = sale_core.render_documents(company, a["img"], r, a["pages"], a["log"])
+# ③ 購入諸費用の概算書（諸費用スレッドの sale_estimate.py。置き場所にあれば一緒に作る）
+SHOHI = Path("/mnt/project-files/baibai-ban/shohiyou")
+estimate_html = None
+if (SHOHI / "sale_estimate.py").exists():
+    sys.path.insert(0, str(SHOHI))
+    from datetime import date
+    from sale_estimate import make_estimate
+    band = {"name": company["会社名"], "license": company["免許"] + "　" + company["所属団体"], "address": company["住所"],
+            "tel": company["電話"], "staff": company["担当者名"], "mobile": company["携帯"]}
+    estimate_html = lambda res, comp: make_estimate(
+        comp, sale_core.cost_inputs(res.事実), customer="見本 花子", property_name="メゾン見本 302号室", band=band,
+        today=date(2026, 11, 2), drawing_day=date(2026, 11, 2))["html"]
+out = sale_core.render_documents(company, a["img"], r, a["pages"], a["log"], estimate_html=estimate_html)
 hidden = out["log"]["白で消した文字"]; print("白で消した：", hidden)
 joined = "".join(hidden)
 if "文字認識に失敗" in joined:  # rapidocr_onnxruntime が入っていない環境（pip install --no-deps rapidocr-onnxruntime==1.2.3）
@@ -88,6 +100,8 @@ if "文字認識に失敗" in joined:  # rapidocr_onnxruntime が入っていな
 for w in ("分かれ", "広告転載不可", "レインズ", "内見", "専任媒介", "03-0000-3333") if hidden is not None else ():
     assert w in joined, w
 assert "告知" not in joined
+assert "ホ" not in joined, joined  # 事業者の売主の会社名は消さない（連絡先だけ消す）
+assert a["log"]["写真の補正"] == "補正なし"  # パソコンで作った画像は台形補正しない（表の枠を用紙と取り違えない）
 (OUT / "obikae.jpg").write_bytes(out["obikae_jpg"])
 (OUT / "okyaku.pdf").write_bytes(out["pdf_okyaku"]); (OUT / "shanai.pdf").write_bytes(out["pdf_shanai"])
 assert out["texts"]["osusume_note"] == "お客様へ送る前に内容をご確認ください"
