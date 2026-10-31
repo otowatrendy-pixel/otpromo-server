@@ -537,7 +537,9 @@ def finish(c, jid, a, atena="", after=()):
     try:
         if not store.try_consume(c.uid):
             store.update_job(jid, {"status": "failed", "error": "quota"})
-            return c.send(texts.build("plan_needed", urls=bot.plan_urls(c)), *after)
+            q = store.quota(store.get_user(c.uid))
+            mid = {"light": "plan_light_empty", "unlimited": "plan_max_empty"}.get(q["plan"], "plan_needed")
+            return c.send(texts.build(mid, urls=bot.plan_urls(c), 更新日=store.renew_date(c.u), **bot.plan_kw()), *after)
         consumed = True
         company = {**bot.company_for_render(c.uid, c.u), "宛名": atena}
         job0 = store.get_job(jid) or {}

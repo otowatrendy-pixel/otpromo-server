@@ -27,8 +27,9 @@ WEEK = "月火水木金土日"
 # モニター（ライトの無料期間）と店舗まとめ割のメンバーは plan が light/unlimited なので使える
 LIMITS = {
     "free": (int(config.env("NAIKEN_FREE_MONTH", "0")), int(config.env("NAIKEN_DAY", "20"))),
-    "light": (int(config.env("NAIKEN_LIGHT_MONTH", "20")), int(config.env("NAIKEN_DAY", "20"))),
-    "unlimited": (int(config.env("NAIKEN_UNLIMITED_MONTH", "50")), int(config.env("NAIKEN_DAY", "20"))),
+    # 売買版はライト10回・MAX30回（10/31本人決定）
+    "light": (int(config.env("NAIKEN_LIGHT_MONTH", "10" if config.APP_MODE == "sale" else "20")), int(config.env("NAIKEN_DAY", "20"))),
+    "unlimited": (int(config.env("NAIKEN_UNLIMITED_MONTH", "30" if config.APP_MODE == "sale" else "50")), int(config.env("NAIKEN_DAY", "20"))),
 }
 PACK_SIZE = int(config.env("FAX_PACK_SIZE", "10"))     # 追加FAX：10回500円
 PACK_DAYS = int(config.env("FAX_PACK_DAYS", "90"))     # 購入から3か月有効（月末にリセットしない）

@@ -548,7 +548,23 @@ assert a["log"]["原価_円"] == 16.75 and a["log"]["やり直し"] == 1, a["log
 dd = usage._get("usage_d_" + usage._day())
 assert dd["doc_ai_n"] == n0 + 1 and abs(dd["doc_ai_yen"] - y0 - 16.75) < 1e-6
 import texts
-import json as _j; ps = _j.dumps(line.out(texts.build("plan_show", urls={f"Stripe決済ページ（{a}{b}）": "https://x" for a in ("ライト", "使い放題") for b in ("月額", "年額")})), ensure_ascii=False)
+import json as _j; ps = _j.dumps(line.out(texts.build("plan_show", **bot.plan_kw(), urls={f"Stripe決済ページ（{a}{b}）": "https://x" for a in ("ライト", "使い放題") for b in ("月額", "年額")})), ensure_ascii=False)
+assert "販売図面 月30件分" in ps and "内見依頼FAX　月10回" in ps and "販売図面 月100件分" in ps and "内見依頼FAX　月30回" in ps and "【◯】" not in ps, ps
+# MAXは月100件まで（仮、MAX_SHEETS）。使い切ったら MAX 用の案内（切り替えの案内は出さない）
+uidM = store.user_by_line(B)[0]
+store.update_user(uidM, {"plan": "unlimited", "month_used": 100, "month_key": store.db().get("users", uidM).get("month_key")})
+q = store.quota(store.get_user(uidM))
+assert q["remaining"] == 0, q
+out = image(B)
+assert "今月の100件分を" in out and "切り替え" not in out and "使い放題" not in out, out
+store.update_user(uidM, {"month_used": 95})
+assert "今月のこり5件です" in bot.remain_note(store.get_user(uidM)) and "100件に戻ります" in bot.remain_note(store.get_user(uidM))
+store.update_user(uidM, {"month_used": 0})
+assert bot.remain_note(store.get_user(uidM)) == ""
+for mid in ("remain_free_last", "remain_light_low", "naiken_trial", "nudge_free_used", "plan_light_empty", "plan_needed"):
+    t = _j.dumps(line.out(texts.build(mid, n=3, 更新日="12月1日", urls={})), ensure_ascii=False)
+    assert "1,480" not in t and "2,980" not in t and "使い放題" not in t and "{" not in t.replace('{"', "").replace("{}", ""), (mid, t[:300])
+assert store.quota(store.get_user(uidM))["remaining"] == 100
 assert "MAX（月払い）" in ps and "使い放題" not in ps and "月額2,480円" in ps and "年額24,800円" in ps and "月額4,280円" in ps and "年額42,800円" in ps and "1,480" not in ps, ps
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})

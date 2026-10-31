@@ -101,7 +101,7 @@ def run_due():
         if "nudge_free_used" in texts._MSG:
             msg = texts.build("nudge_free_used", urls=urls)  # ボタン2つ（ライト・使い放題の月払い）
         else:
-            msg = texts.build("plan_show", urls=urls) if "plan_show" in texts._MSG else line.text("料金プランのご案内です。")
+            msg = texts.build("plan_show", urls=urls, **bot.plan_kw()) if "plan_show" in texts._MSG else line.text("料金プランのご案内です。")
         line.push(u["line_uid"], [msg])
         usage.count("upsell")
         n += 1

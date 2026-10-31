@@ -362,7 +362,9 @@ def quota(u):
     _roll_month(u)
     plan = u.get("plan") or "free"
     if plan == "unlimited":
-        return {"plan": plan, "remaining": None, "free_left": 0, "month_used": u["month_used"]}
+        # 売買版のMAXは月の上限あり（config.MAX_SHEETS）。賃貸版の使い放題は 0＝上限なし
+        rem = max(0, config.MAX_SHEETS - u["month_used"]) if config.MAX_SHEETS else None
+        return {"plan": plan, "remaining": rem, "free_left": 0, "month_used": u["month_used"]}
     if plan == "light":
         return {"plan": plan, "remaining": ai_balance(u), "free_left": 0, "month_used": u["month_used"]}
     left = max(0, u.get("free_limit", config.FREE_SHEETS) - u.get("free_used", 0))

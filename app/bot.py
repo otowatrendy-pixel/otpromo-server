@@ -559,9 +559,14 @@ def plan_urls(c):
             "Stripeのカード登録ページ": f"{config.BASE_URL}/card?t={billing.sign(c.uid)}"}
 
 
+def plan_kw():
+    """料金の文面の差し込み（売買版の件数・回数）。賃貸版では空。"""
+    return texts._defaults()
+
+
 def plan_show(c):
     """料金プランの案内。新人さん応援の期間中は、初めての方に案内を先に付ける（同じ応答で1通分）。"""
-    msgs = [texts.build("plan_show", urls=plan_urls(c))]
+    msgs = [texts.build("plan_show", urls=plan_urls(c), **plan_kw())]
     import referral
     if campaign.newbie_eligible(c.u):
         msgs.insert(0, texts.build("shinjin_plan_note"))
@@ -650,6 +655,8 @@ def _md(dt):
 def remain_note(u):
     q = store.quota(u)
     if q["plan"] == "unlimited":
+        if q["remaining"] is not None:  # 売買版のMAX（月の上限あり）：のこり10件以下でお知らせ
+            return texts.note("remain_max", n=q["remaining"], 更新日=store.renew_date(u)) if q["remaining"] <= 10 else ""
         if q["month_used"] == store.UNLIMITED_SOFT_CAP + 1:
             return texts.note("unlimited_over")
         return ""
@@ -733,8 +740,8 @@ def process(c, data, held=None):
     q = store.quota(c.u)
     if q["remaining"] is not None and q["remaining"] <= 0:
         hold(c, data, "quota")
-        mid = "plan_light_empty" if q["plan"] == "light" else "plan_needed"
-        return c.send(texts.build(mid, urls=plan_urls(c), 更新日=store.renew_date(c.u)))
+        mid = {"light": "plan_light_empty", "unlimited": "plan_max_empty"}.get(q["plan"], "plan_needed")  # MAX（売買版）
+        return c.send(texts.build(mid, urls=plan_urls(c), 更新日=store.renew_date(c.u), **plan_kw()))
     # 費用の上限（AI利用料が月5万円）と、1人1日60件まで（10/29本人承認）
     if usage.ai_stopped():
         return c.send(usage.busy_message())
@@ -1301,7 +1308,9 @@ def _notify(uid, mid, kw, wrap=None):
         q = store.quota(u)
         import naiken
         body = {"light": f"毎月、募集図面{config.LIGHT_SHEETS}件分の資料と内見申込FAX{naiken.LIMITS['light'][0]}回をお使いいただけます。",
-                "unlimited": f"資料は件数を気にせず、内見申込FAXは月{naiken.LIMITS['unlimited'][0]}回までお使いいただけます。"}.get(q["plan"], "")
+                "unlimited": (f"毎月、販売図面{config.MAX_SHEETS}件分の資料と内見依頼FAX{naiken.LIMITS['unlimited'][0]}回をお使いいただけます。"
+                              if config.MAX_SHEETS else
+                              f"資料は件数を気にせず、内見申込FAXは月{naiken.LIMITS['unlimited'][0]}回までお使いいただけます。")}.get(q["plan"], "")
         kw = {"プラン名": billing.plan_name(u), "プランの内容": body, "更新日": store.billing_renew_date(u)}
     elif mid == "plan_canceled":
         kw = {"期限": store.renew_date(u)}

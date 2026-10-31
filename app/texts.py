@@ -44,7 +44,21 @@ class _Safe(dict):
         return "{" + k + "}"
 
 
+def _defaults():
+    """売買版だけ、料金の件数・回数を文面の差し込みの初期値にする（{ライトの件数} など）。賃貸版は何もしない。"""
+    import config
+    if config.APP_MODE != "sale":
+        return {}
+    import naiken
+    return {"ライトの件数": config.LIGHT_SHEETS, "MAXの件数": config.MAX_SHEETS,
+            "ライトのFAX": naiken.LIMITS["light"][0], "MAXのFAX": naiken.LIMITS["unlimited"][0]}
+
+
 def fill(t, **kw):
+    if "{" in t:
+        d = _defaults()
+        if d:
+            kw = {**d, **kw}
     t = t.format_map(_Safe(**kw))
     # 空の差し込みでできた空行の重なりを1つにする
     return re.sub(r"\n{3,}", "\n\n", t).strip()
