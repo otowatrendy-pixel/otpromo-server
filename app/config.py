@@ -14,6 +14,12 @@ STORE = env("STORE", "gcp")
 GCP_PROJECT = env("GCP_PROJECT", "otpromo-maisoku")
 BUCKET = env("BUCKET", "otpromo-maisoku-files")
 LOCAL_DIR = env("LOCAL_DIR", "/tmp/otpromo-local")
+# 賃貸版と売買版は入口を分ける（2026-10-31本人決定）。同じコードを APP_MODE=sale で別の Cloud Run サービスとして動かす。
+# 売買版は Firestore も別のデータベース（FIRESTORE_DB=sale など）にし、賃貸版のデータは「引き継ぎ」のときに読むだけ
+APP_MODE = env("APP_MODE", "rent")
+FIRESTORE_DB = env("FIRESTORE_DB", "(default)")
+RENT_FIRESTORE_DB = env("RENT_FIRESTORE_DB", "(default)")  # 売買版から賃貸版の登録内容を読む先（読むだけ）
+RENT_LINE_URL = env("RENT_LINE_URL", "https://lin.ee/tlnsKca")  # 売買版で賃貸の図面が届いたときの案内先
 
 # Claude
 ANTHROPIC_KEY = env("MAISOKU_API_KEY") or env("ANTHROPIC_API_KEY")

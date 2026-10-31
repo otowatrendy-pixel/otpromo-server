@@ -148,7 +148,7 @@ class _Local:
 class _GCP:
     def __init__(self):
         from google.cloud import firestore, storage
-        self.fs = firestore.Client(project=config.GCP_PROJECT)
+        self.fs = firestore.Client(project=config.GCP_PROJECT, database=config.FIRESTORE_DB)
         self.firestore = firestore
         self.bucket = storage.Client(project=config.GCP_PROJECT).bucket(config.BUCKET)
 
@@ -253,6 +253,29 @@ def user_by_firebase(fb_uid, create=True):
 
 def get_user(uid):
     return db().get("users", uid)
+
+
+# 売買版から、賃貸版に登録済みの会社情報を読む（読むだけ。書き込みはしない）。
+# 2つのLINE公式アカウントを同じプロバイダーに置くと、同じ方の LINE のユーザーIDが同じになる
+RENT_LOCAL = {}  # 手元の確認用（STORE=local）：{LINEのユーザーID: 賃貸版の users の中身}
+
+
+def rental_user(line_uid):
+    if config.APP_MODE != "sale" or not line_uid:
+        return None
+    if config.STORE == "local":
+        return RENT_LOCAL.get(line_uid)
+    if config.RENT_FIRESTORE_DB == config.FIRESTORE_DB:
+        return None  # 同じデータベースを指していたら読まない（設定の間違いで混ざらないように）
+    try:
+        from google.cloud import firestore
+        s = firestore.Client(project=config.GCP_PROJECT, database=config.RENT_FIRESTORE_DB) \
+            .collection("users").document("L" + line_uid).get()
+        return s.to_dict() if s.exists else None
+    except Exception:
+        import logging
+        logging.getLogger("store").exception("賃貸版の登録内容を読めない")
+        return None
 
 
 def update_user(uid, data):

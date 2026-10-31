@@ -185,7 +185,12 @@ def on_follow(c):
         return c.send(texts.build("refollow", 会社名=c.u["company"].get("会社名", ""), のこり枚数の案内=remain_note(c.u)))
     link_menu(c.line_uid, False)
     name = line.profile(c.line_uid).get("displayName", "")
-    c.send(texts.build("sale_follow" if sale_bot.on() else "follow", 表示名=name))
+    if sale_bot.SALE_ONLY:
+        co = sale_bot.rental_company(c)
+        if co:  # 賃貸版にも登録済みの方：会社情報を引き継げる
+            return c.send(texts.build("sale_follow_copy", 表示名=name, 会社名=co.get("会社名", "")))
+        return c.send(texts.build("sale_follow", 表示名=name))
+    c.send(texts.build("follow", 表示名=name))
 
 
 def link_menu(line_uid, registered):
@@ -405,9 +410,17 @@ def on_postback(c, data):
     k, _, v = data.partition("=")
     if k == "reg" and v == "start":
         store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION})
-        if sale_bot.on():  # 売買版の公開後は、最初に「賃貸／売買／両方」を聞く
-            return start_steps(c, ["kind"], "new")
+        if sale_bot.SALE_ONLY:  # 売買版のLINE：賃貸の仲介手数料は聞かず、住所の後に所属団体と売買の仲介手数料
+            store.update_user(c.uid, {"use_kind": "sale"})
+            return start_steps(c, sale_bot.reg_steps(REG_STEPS, "sale"), "new")
         return start_steps(c, list(REG_STEPS), "new")
+    if k == "reg" and v == "copy" and sale_bot.SALE_ONLY:  # 賃貸版の会社情報を引き継ぐ
+        store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION})
+        if not sale_bot.copy_from_rental(c):
+            store.update_user(c.uid, {"use_kind": "sale"})
+            return start_steps(c, sale_bot.reg_steps(REG_STEPS, "sale"), "new",
+                               prefix=line.text("賃貸版の登録内容が見つかりませんでした。お手数ですが、はじめから登録をお願いします。"))
+        return start_steps(c, ["assoc", "sfee"], "new", prefix=texts.build("sale_copy_done", 会社名=c.u["company"].get("会社名", "")))
     if k == "reg" and v == "done":
         if not c.u.get("company", {}).get("会社名"):
             return start_steps(c, list(REG_STEPS), "new")
@@ -426,8 +439,8 @@ def on_postback(c, data):
         ask = asks_name(c.u)
         btns = [dict(b, label="宛名を聞かない" if ask else "宛名を毎回聞く") if b["action"] == "postback edit=atena" else b
                 for b in texts.buttons_of("reg_edit")]
-        if sale_bot.on():  # 「仲介手数料」を「賃貸・売買の設定」に（ボタンの数は変えない）
-            btns = [{"label": "賃貸・売買の設定", "action": "postback edit=deal"} if b["action"] == "postback edit=fee" else b
+        if sale_bot.on():  # 「仲介手数料」を「売買の設定」に（ボタンの数は変えない）
+            btns = [{"label": "売買の設定", "action": "postback edit=deal"} if b["action"] == "postback edit=fee" else b
                     for b in btns]
         return c.send(texts.build("reg_edit", buttons=btns, extra_buttons=[toggle]))
     if k == "edit" and v in ("mobile_hide", "mobile_show") and c.u.get("registered"):
@@ -740,6 +753,11 @@ def process(c, data, held=None):
             img, _ = core.load_image(data)
             a = {"img": img, "pages": held.get("pages", 0), "result": Result.model_validate(held["result"]), "log": {}}
         else:
+            if sale_bot.SALE_ONLY:  # 売買版のLINE：はじめから売買版で読む（AIは1回）。賃貸の図面なら賃貸版へご案内
+                try:  # 時間がかかったときのお知らせ（deliver_slow）はそのまま生かす
+                    return sale_bot.handle_sale(c, data, jid)
+                finally:
+                    done.set()
             a = core.analyze(data)
             v = core.verdict(a["result"])
             # 事業用の賃貸も、そのまま作る（お届けのときに一言添える）
@@ -830,6 +848,8 @@ def analyze_and_ask(c, jid, data):
     store.update_user(c.uid, {"name_wait": waiting + [jid]})
     c.send(name_question(waiting + [jid], "more") if waiting else name_question())
     try:
+        if sale_bot.SALE_ONLY:
+            return sale_bot.analyze_for_atena(c, jid, data, None)
         a = core.analyze(data)
         v = core.verdict(a["result"])
         if v == "sale" and sale_bot.on(c):  # 売買の図面：売買版で読み直して預かる（宛名が届いたら作る）

@@ -2,12 +2,13 @@
 
 CHROME_PATH=/opt/pw-browsers/chromium python tests/sim_baibai_line.py
 
+売買版は専用のLINE・専用のサーバー（APP_MODE=sale）で動かす（2026-10-31本人決定：入口を分け、共通部品は共有）。
 確かめること
-1. SALE_ENABLED=1：登録の最初に「賃貸／売買／両方」→「両方」で所属団体と売買の手数料も聞く
-2. 売買の図面 → 売買の資料（kind=sale）が届き、件数を1つ使う
-3. 賃貸だけで登録した方が売買の図面を送る → 預かって2つ聞く → 終わったら同じ図面で作る（AIは1回だけ）
-4. メニュー「元付へFAX」の振り分け、登録内容の変更（売買の設定）
-5. SALE_ENABLED=0 のときは今の賃貸版と同じ（売買の図面は断る）… 最後に別のプロセスで確認
+1. APP_MODE=sale：友だち追加は売買版のあいさつ。登録は賃貸の仲介手数料を聞かず、住所の後に所属団体と売買の手数料
+2. 売買の図面 → 売買の資料（kind=sale）が届き、件数を1つ使う。AIは売買版の読み取り1回だけ
+3. 賃貸版に登録済みの方 → 会社情報を引き継いで2問だけ。賃貸の図面が届いたら賃貸版のLINEへご案内（件数に数えない）
+4. メニュー「元付へFAX」は売買の物件確認・内見依頼書、登録内容の変更（売買の設定）
+5. APP_MODE=rent（初期値）のときは今の賃貸版と同じ（売買の図面は断る）… 最後に別のプロセスで確認
 """
 import io
 import os
@@ -23,7 +24,7 @@ os.environ.setdefault("INVOICE_TRN", "")
 os.environ.setdefault("LOCAL_DIR", "/tmp/otpromo-sim-baibai")
 os.environ.setdefault("SALE_MOCK_RESULT", str(ROOT / "tests" / "fixtures" / "mihon-baibai.json"))
 OFF = len(sys.argv) > 1 and sys.argv[1] == "off"
-os.environ["SALE_ENABLED"] = "0" if OFF else "1"
+os.environ["APP_MODE"] = "rent" if OFF else "sale"
 import shutil  # noqa: E402
 shutil.rmtree(os.environ["LOCAL_DIR"], ignore_errors=True)
 
@@ -44,7 +45,7 @@ line.profile = lambda uid: {"displayName": "テスト太郎"}
 line.content = lambda mid: FILES[mid]
 person.try_name = lambda uid, u, t: (store.update_user(uid, {"company": {**(u.get("company") or {}), "担当者名": t}}), "ok")[1]
 
-# 賃貸版の読み取り（AI）の代わり：売買の図面なので「賃貸以外」と返す
+# 賃貸版の読み取り（AI）の代わり：売買版のサーバーでは呼ばれないはず（呼ばれたら数える）
 AI_CALLS = {"rental": 0, "sale": 0}
 IMG = Image.open(ROOT / "tests" / "fixtures" / "mihon-baibai.png").convert("RGB")
 
@@ -132,41 +133,37 @@ if OFF:
     print("\nOFF: 賃貸版のまま OK")
     sys.exit(0)
 
-# ---- 1) 新しく登録する方（両方） ----
-A = "Uboth"
+# ---- 1) 新しく登録する方（売買版のLINE） ----
+A = "Unew"
 out = ev(A, "follow")
-assert "賃貸でも売買でも" in out
+assert "1分資料 売買版" in out and "賃貸でも売買でも" not in out, out
 out = pb(A, "reg=start")
-assert "賃貸と売買のどちら" in out
-pb(A, "kind=both")
+assert "会社名" in out and "賃貸と売買のどちら" not in out, out
 text(A, "サンプル不動産株式会社")
 pb(A, "shop=none")
-text(A, "見本 太郎")
+out = text(A, "見本 太郎")
+assert "物件確認・内見依頼書" in out and "内見申込書" not in out, out  # 賃貸版と同じIDの文面を売買の言い方に
 text(A, "090-0000-0000")
 out = text(A, "東京都知事(1)第99999号")
-assert "所属されている業界団体" in out, out
-out = pb(A, "assoc=takken")
-assert "（公社）東京都宅地建物取引業協会会員" not in out  # 住所はまだなので都道府県は〇〇県
-pb(A, "assoc=ok")
+assert "業界団体" not in out  # 所属団体は住所の後
 text(A, "03-0000-9999")
 pb(A, "fax=none")
-text(A, "東京都〇〇区見本町1-1-1")
-pb(A, "fee=1")
+out = text(A, "東京都〇〇区見本町1-1-1")
+assert "所属されている業界団体" in out and "賃料の何ヶ月分" not in out, out
+out = pb(A, "assoc=takken")
+assert "（公社）東京都宅地建物取引業協会会員　（公社）首都圏不動産公正取引協議会加盟" in out, out  # 住所から正式名
+pb(A, "assoc=ok")
 out = pb(A, "sfee=custom")
 assert "税込" in out
 text(A, "55万")
 pb(A, "color=青")
 pb(A, "font=ゴシック")
-pb(A, "obi=auto")
+out = pb(A, "obi=auto")
+assert "FAXで受け取る" not in out, out
 out = pb(A, "recv=line")
-assert "所属団体" in out and "一律 550,000円" in out and "取引態様：媒介" in out, out
+assert "所属団体" in out and "一律 550,000円" in out and "取引態様：媒介" in out and "賃料" not in out, out
 out = pb(A, "reg=done")
-assert "賃貸か売買かは自動で見分けます" in out
-# 住所より先に団体を聞いたので、表記を住所に合わせて直す（変更から）
-pb(A, "edit=assoc")
-out = pb(A, "assoc=takken")
-assert "（公社）東京都宅地建物取引業協会会員　（公社）首都圏不動産公正取引協議会加盟" in out, out
-pb(A, "assoc=ok")
+assert "登録ありがとうございました" in out and "自動で見分けます" not in out, out
 store.update_user(store.user_by_line(A)[0], {"company": {**u_of(A)["company"], "宛名を聞く": False}})
 
 # ---- 2) 売買の図面 → 売買の資料 ----
@@ -175,14 +172,15 @@ assert "売買の資料ができました" in out, out
 uidA = store.user_by_line(A)[0]
 job = store.get_job(u_of(A)["last_job"])
 assert job["kind"] == "sale" and job["status"] == "done"
-assert AI_CALLS == {"rental": 1, "sale": 1}
+assert AI_CALLS == {"rental": 0, "sale": 1}, AI_CALLS  # 賃貸版の読み取りは呼ばない
 print("帯の会社情報:", sale_core.band_company(u_of(A)["company"])["免許"])
 
 # ---- 4) 元付へFAX（売買だけ作った方は、売買の物件確認へ） ----
 out = pb(A, "motofax=start")
 assert "物件確認・内見依頼書" in out
-# 登録内容の変更：「仲介手数料」が「賃貸・売買の設定」に
+# 登録内容の変更：「仲介手数料」が「売買の設定」に
 out = pb(A, "reg=edit")
+assert "売買の設定" in out, out
 out = pb(A, "edit=deal")
 assert "売買の仲介手数料" in out
 pb(A, "edit=tokurei")
@@ -218,32 +216,18 @@ pb(A, "edit=torihiki")
 pb(A, "torihiki=代理")
 assert sale_core.band_company(u_of(A)["company"])["帯_3行目"] == "取引態様：代理"
 
-# ---- 3) 賃貸だけで登録した方が売買の図面を送る ----
+# ---- 3) 賃貸版に登録済みの方：会社情報を引き継ぐ ----
 B = "Urent"
-ev(B, "follow")
-pb(B, "reg=start")
-pb(B, "kind=rent")
-text(B, "見本住宅株式会社")
-pb(B, "shop=none")
-text(B, "見本 花子")
-text(B, "090-0000-1111")
-out = text(B, "東京都知事(2)第88888号")
-assert "業界団体" not in out  # 賃貸だけなら聞かない
-text(B, "03-0000-1111")
-pb(B, "fax=none")
-text(B, "東京都〇〇区見本町2-2-2")
-out = pb(B, "fee=1")
-assert "売買の仲介手数料" not in out
-pb(B, "color=青"); pb(B, "font=ゴシック"); pb(B, "obi=auto")
-out = pb(B, "recv=line")
-assert "所属団体" not in out  # 賃貸だけの方の確認は、今の賃貸版と同じ文
-pb(B, "reg=done")
-AI_CALLS.update(rental=0, sale=0)
-out = image(B)   # 宛名を聞く設定（初期値）のまま
-assert "宛名" in out
-out = text(B, "見本 一郎")
-assert "はじめての1回だけ" in out and "業界団体" in out, out
-assert AI_CALLS == {"rental": 1, "sale": 1}
+store.RENT_LOCAL[B] = {"registered": True, "plan": "light", "company": {
+    "会社名": "見本住宅株式会社", "担当者名": "見本 花子", "携帯": "090-0000-1111", "免許": "東京都知事(2)第88888号",
+    "電話": "03-0000-1111", "住所": "東京都〇〇区見本町2-2-2", "テーマ色": "緑", "書体": "明朝", "賃貸_仲介手数料_ヶ月": 1.0}}
+out = ev(B, "follow")
+assert "見本住宅株式会社" in out and "同意して引き継ぐ" in out, out
+out = pb(B, "reg=copy")
+assert "引き継ぎました" in out and "所属されている業界団体" in out, out
+co = u_of(B)["company"]
+assert co["テーマ色"] == "緑" and co["免許"] == "東京都知事(2)第88888号" and "賃貸_仲介手数料_ヶ月" not in co
+assert u_of(B).get("plan", "free") == "free"  # 料金・件数は引き継がない（賃貸版とは別のサービス）
 out = pb(B, "assoc=takken")
 assert "団体を選び直す" in out and "書き直す" not in out, out
 out = pb(B, "assoc=again")  # 打ち込まずに団体の一覧に戻る
@@ -253,8 +237,15 @@ out = pb(B, "assoc=ok")
 assert "売買の仲介手数料" in out
 pb(B, "sfee=rate")
 out = text(B, "2%")
+assert "登録内容のご確認" in out and "見本住宅株式会社" in out, out
+pb(B, "reg=done")
+assert u_of(B)["registered"] is True
+AI_CALLS.update(rental=0, sale=0)
+out = image(B)   # 宛名を聞く設定（初期値）のまま
+assert "宛名" in out
+out = text(B, "見本 一郎")
 assert "売買の資料ができました" in out, out
-assert AI_CALLS == {"rental": 1, "sale": 1}, AI_CALLS   # 預かった読み取りを使い、AIは呼び直さない
+assert AI_CALLS == {"rental": 0, "sale": 1}, AI_CALLS
 job = store.get_job(u_of(B)["last_job"])
 assert job["kind"] == "sale" and job["宛名"] == "見本 一郎"
 assert u_of(B)["company"]["売買設定"]["fee_mode"] == "rate" and u_of(B)["company"]["売買設定"]["fee_rate"] == 0.02

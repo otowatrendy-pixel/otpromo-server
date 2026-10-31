@@ -26,7 +26,14 @@ def load():
     sale = _PATH.with_name("messages_sale.json")
     if sale.exists():
         ds = json.loads(sale.read_text(encoding="utf-8"))
-        _MSG.update({m["id"]: m for s in ds["sections"] for m in s["messages"]})
+        _MSG.update({m["id"]: m for s in ds["sections"] if not s.get("override") for m in s["messages"]})
+        # 売買版のサーバー（APP_MODE=sale）だけ、賃貸版と同じIDの文面を売買の言い方に差し替える（賃貸版では読まない）
+        import config
+        if config.APP_MODE == "sale":
+            for s in ds["sections"]:
+                if s.get("override"):
+                    for m in s["messages"]:
+                        _MSG[m["id"]] = {**_MSG.get(m["id"], {}), **m}
 
 
 load()

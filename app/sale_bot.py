@@ -23,7 +23,10 @@ import texts
 
 log = logging.getLogger("sale_bot")
 
-ENABLED = config.env("SALE_ENABLED", "0") == "1"
+# 売買版は専用のLINE・専用のサーバー（APP_MODE=sale）で動かす（2026-10-31本人決定：入口を分け、共通部品は共有）。
+# 賃貸版のサーバー（APP_MODE=rent、初期値）では売買の処理は一切動かない
+SALE_ONLY = config.APP_MODE == "sale"
+ENABLED = SALE_ONLY
 # 試験公開で売買を開ける方（LINEのユーザーIDかサーバーのID、カンマ区切り）。空なら全員
 ALLOW = {x.strip() for x in config.env("SALE_ALLOW_UIDS").split(",") if x.strip()}
 
@@ -145,7 +148,10 @@ def reg_steps(base, kind):
     """賃貸版の登録の質問（base）から、選んだ使い方の質問の並びを作る。
     kind: rent（今と同じ）/ sale（賃貸の手数料を聞かない）/ both（全部）。"""
     steps = [s for s in base if not (kind == "sale" and s == "fee")]
-    if kind in ("sale", "both"):
+    if kind == "sale":  # 所属団体は住所の後に聞く（都道府県から正式な団体名を作れるので、打ち込みも直しも要らない）
+        i = steps.index("address") + 1
+        return steps[:i] + ["assoc", "sfee"] + steps[i:]
+    if kind == "both":
         steps.insert(steps.index("license") + 1, "assoc")
         after = "fee" if "fee" in steps else "address"
         steps.insert(steps.index(after) + 1, "sfee")
@@ -251,7 +257,7 @@ def handle_sale(c, data, jid, rental_a=None):
     if not on(c):
         store.update_job(jid, {"status": "failed", "error": "sale"})
         return c.send(texts.build("sale_err_disabled" if ENABLED else "err_sale"))
-    if rental_a is not None and not sale_core.route_from_rental(rental_a["result"]):
+    if rental_a is not None and not sale_core.route_from_rental(rental_a["result"]):  # 同じLINEで受けていたころの名残
         store.update_job(jid, {"status": "failed", "error": "not_maisoku"})
         return c.send(texts.build("err_not_maisoku"))
     a = sale_core.analyze(data)
@@ -273,6 +279,8 @@ def error_message(err):
         return texts.build("sale_err_unsupported", 物件種別=kind or "この種類")
     if code == "disabled":
         return texts.build("sale_err_disabled")
+    if code == "rental":
+        return texts.build("sale_err_rental", 賃貸版のLINE=config.RENT_LINE_URL)
     return texts.build({"blurry": "err_blurry", "not_maisoku": "err_not_maisoku"}.get(code, "err_system"))
 
 
@@ -296,7 +304,7 @@ def _load_analyzed(jid, job):
 def analyze_for_atena(c, jid, data, rental_a):
     """宛名を聞いているあいだに、売買版で読み直して預かる（bot.analyze_and_ask から）。宛名が届いたら after_atena。"""
     import sale_core
-    if not sale_core.route_from_rental(rental_a["result"]):
+    if rental_a is not None and not sale_core.route_from_rental(rental_a["result"]):
         return store.update_job(jid, {"status": "failed", "error": "not_maisoku"})
     a = sale_core.analyze(data)
     v = sale_core.verdict(a["result"])
@@ -481,6 +489,8 @@ def deliver(c, jid, after=()):
 # ---------- 元付へのFAX（振り分け） --------------------------------------------------------
 
 def fax_start(c):
+    if SALE_ONLY:  # 売買版のLINE：元付へのFAXは、売買の物件確認・内見依頼書だけ
+        return c.send(texts.build("sale_fax_start")) or True
     kinds = {r.get("kind", "rent") for r in (c.u.get("recent_jobs") or [])}
     if kinds == {"sale"}:
         return c.send(texts.build("sale_fax_start"))
@@ -504,6 +514,29 @@ def bfax_postback(c, v):
         q = [line.qr_postback(naiken_bot.short_label(r["title"]), f"bfax=from_last&doc={r['id']}") for r in rec]
         return c.send(line.text("どの物件の物件確認・内見依頼書を作りますか？（最近7日の売買の物件）", quick=q))
     return c.send(texts.build("sale_fax_start"))
+
+
+# ---------- 賃貸版の登録内容を引き継ぐ（売買版のLINEで友だち追加されたとき） -------------------
+# 帯・名刺の会社情報だけ写す。料金・件数・資料・FAXの履歴は写さない（賃貸版と売買版は別のサービス）
+RENT_ONLY_KEYS = {"賃貸_仲介手数料_ヶ月"}
+
+
+def rental_company(c):
+    r = store.rental_user(c.line_uid)
+    co = (r or {}).get("company") or {}
+    return co if (r or {}).get("registered") and co.get("会社名") else None
+
+
+def copy_from_rental(c):
+    """賃貸版の会社情報を写して、売買だけの2問（所属団体・売買の仲介手数料）を聞く。写せたら True。"""
+    co = rental_company(c)
+    if not co:
+        return False
+    keep = {k: v for k, v in (c.u.get("company") or {}).items() if k in ("所属団体", "所属団体_種類", "売買設定", "売買ローン目安")}
+    store.update_user(c.uid, {"company": {**{k: v for k, v in co.items() if k not in RENT_ONLY_KEYS}, **keep},
+                              "use_kind": "sale", "copied_from_rent_at": store.now()})
+    c.refresh()
+    return True
 
 
 # ---------- 登録内容の変更（売買の設定） ----------------------------------------------------
