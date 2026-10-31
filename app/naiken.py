@@ -232,8 +232,9 @@ def me_from_company(co, guide=None):
             "email": co.get("メール", ""), "license": co.get("免許", "")}
 
 
-def build(d, company):
-    """下書きと会社情報から、申込書のPDFとプレビュー画像（PNG）を作る。"""
+def build(d, company, fax=False):
+    """下書きと会社情報から、申込書のPDFとプレビュー画像（PNG）を作る。
+    fax=True は売買の内見依頼書のFAX送信用（文字・線・帯をすべて黒）。プレビュー・控えは fax=False（青のまま）。"""
     to = dict(d.get("to") or {})
     to["fax"] = fax_display(to.get("fax", ""))
     to.setdefault("person", "")
@@ -241,7 +242,8 @@ def build(d, company):
     if d.get("kind") == "sale":
         import baibai_naiken
         html_text = baibai_naiken.html(to=to, me=me_from_company(company, d.get("guide")), prop=prop,
-                                       wishes=[wish_label(w) for w in d.get("wishes", [])])
+                                       wishes=[wish_label(w) for w in d.get("wishes", [])],
+                                       fax=fax, **_sale_qr_kw(company))
         return _pdf_png(html_text)
     r = Result(事実=Facts(取引="賃貸"))
     html_text = render.naiken_html(r, company, wishes=[wish_label(w) for w in d.get("wishes", [])],
@@ -249,6 +251,26 @@ def build(d, company):
                                    prop={"name": prop.get("name", ""), "room": prop.get("room"),
                                          "address": prop.get("address", "")})
     return _pdf_png(html_text)
+
+
+def _sale_qr_kw(company):
+    """会社の設定で、QRと一言を載せるか。載せないときは空にする。"""
+    import sale_bot
+    if not sale_bot.naiken_qr_on(company):
+        return {"qr_svg": "", "qr_caption": ""}
+    qr = _sale_qr()
+    return {"qr_svg": qr} if qr else {}
+
+
+def _sale_qr():
+    """内見依頼書のQR（static/naiken-qr-sale.svg、中身は短い https://otpromo.com/b/fax で25マス。FAXの標準画質でも読めるように）。
+    HP側で https://otpromo.com/ippun-baibai.html?utm_source=naiken_fax へ転送する
+    （10/31集客スレッドの決定。友だち追加URLではない）。無ければ None（baibai_naiken 側の既定を使う）。"""
+    p = Path(__file__).parent / "static" / "naiken-qr-sale.svg"
+    if not p.exists():
+        return None
+    from markupsafe import Markup
+    return Markup(p.read_text(encoding="utf-8"))
 
 
 def _pdf_png(html_text):
@@ -356,6 +378,8 @@ def save_preview(uid, d, company):
     store.db().set("faxes", fid, rec)
     store.db().put_file(f"faxes/{fid}/naiken.pdf", pdf, "application/pdf")
     store.db().put_file(f"faxes/{fid}/naiken.png", png, "image/png")
+    if d.get("kind") == "sale":  # 売買はFAXで送る版（真っ黒）を別に作っておく。送るときはこちらを使う
+        store.db().put_file(f"faxes/{fid}/naiken_fax.pdf", build(d, company, fax=True)[0], "application/pdf")
     return fid, rec
 
 
@@ -399,7 +423,7 @@ def send(uid, fid):
 def _dispatch(uid, fid, rec, u, source):
     """回数を数えた後、faximo へ渡す。送れなければ回数を戻す。今すぐ送る・予約の時刻の両方から使う。"""
     to = rec["draft"]["to"]
-    pdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
+    pdf = store.db().get_file(f"faxes/{fid}/naiken_fax.pdf") or store.db().get_file(f"faxes/{fid}/naiken.pdf")
     sender = delivery.fax_sender((u.get("company") or {}).get("会社名"))
     ready = delivery.fax_ready() or bool(u.get("review"))  # 審査用アカウントは送ったことにする
     ok = ready and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender,

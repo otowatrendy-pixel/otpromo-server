@@ -546,6 +546,10 @@
             {
               "label": "住宅ローンシミュレーション",
               "action": "postback edit=loan"
+            },
+            {
+              "label": "内見依頼書のQRコード",
+              "action": "postback edit=nqr"
             }
           ],
           "note": "賃貸版の reg_edit はボタンが上限（13）に近いので、売買版の公開後は reg_edit の「仲介手数料」を「賃貸・売買の設定」（postback edit=deal）に置き換え、この一覧を出す。"
@@ -566,6 +570,23 @@
             }
           ],
           "note": "「売主」は選べないようにする（自社が売主の物件は、このサービスの帯替えの対象外）。表示規約では「媒介」と「仲介」は同じ意味の言葉として使える。"
+        },
+        {
+          "id": "sale_edit_nqr",
+          "when": "「内見依頼書のQRコード」を押したとき",
+          "send": "reply",
+          "text": "内見依頼書のいちばん下に、小さなQRコードと「この依頼書は、スマホからLINEで作りました（1分資料 売買版）」の一言を載せています。QRコードからは、1分資料 売買版のご紹介ページが開きます。\n\n今の設定：{今の設定}",
+          "buttons": [
+            {
+              "label": "載せる",
+              "action": "postback nqr=on"
+            },
+            {
+              "label": "載せない",
+              "action": "postback nqr=off"
+            }
+          ],
+          "note": "会社ごとの設定（company[\"内見依頼書のQR\"]、初期値は載せる）。載せないときは qr_svg・qr_caption を空にする。有料オプションにするかは料金スレッドで検討中（10/31）。"
         },
         {
           "id": "sale_edit_tokurei",

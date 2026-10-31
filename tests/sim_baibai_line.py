@@ -198,7 +198,14 @@ assert "内見依頼書" in out and "物件確認" not in out
 out = pb(A, "reg=edit")
 assert "売買の設定" in out, out
 out = pb(A, "edit=deal")
-assert "売買の仲介手数料" in out
+assert "売買の仲介手数料" in out and "賃貸の仲介手数料" not in out and "内見依頼書のQRコード" in out
+# 内見依頼書のQRコード（HPの売買ページへ）と一言：初期値は載せる。載せないときは空
+import naiken
+assert "今の設定：載せる" in pb(A, "edit=nqr")
+assert naiken._sale_qr_kw(u_of(A)["company"])["qr_svg"].startswith("<svg")
+assert "変更しました" in pb(A, "nqr=off") and u_of(A)["company"]["内見依頼書のQR"] is False
+assert naiken._sale_qr_kw(u_of(A)["company"]) == {"qr_svg": "", "qr_caption": ""}
+pb(A, "nqr=on")
 pb(A, "edit=tokurei")
 out = pb(A, "tokurei=on")
 assert "変更しました" in out and u_of(A)["company"]["売買設定"]["teiren_tokurei"] is True
@@ -351,7 +358,17 @@ import re
 ft = re.sub(r"\s", "", unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(fpdf)).pages)))
 assert "内見依頼書" in ft and "3,980万円" in ft and "評価額" not in ft and "ご回答欄" not in ft and "2名" not in ft and "見本一郎" not in ft, ft[:600]
 assert len(pypdf.PdfReader(io.BytesIO(fpdf)).pages) == 1
+assert "スマホからLINEで作りました" in ft
+# FAXで送るのは真っ黒の版（naiken_fax.pdf）。プレビュー（青）とは別に作ってあり、送信にはそちらを使う
+xpdf = store.db().get_file(f"faxes/{fid}/naiken_fax.pdf")
+assert xpdf and xpdf != fpdf
+import delivery
+_sf, _fr, _sent_pdf = delivery.send_fax, delivery.fax_ready, []
+delivery.send_fax = lambda to, pdf, *a, **k: _sent_pdf.append(pdf) or "FAXTEST1"
+delivery.fax_ready = lambda: True
 out = pb(B, "naiken=send")
+delivery.send_fax, delivery.fax_ready = _sf, _fr
+assert _sent_pdf == [xpdf], "FAX用の版で送っていない"
 assert "管理会社" not in out and "内見申込書" not in out, out
 print("内見依頼FAXの送信結果:", out[:120])
 # 賃貸の内見申込書は今までどおりの言い方（売買の下書きのあとでも）

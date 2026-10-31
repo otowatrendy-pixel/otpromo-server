@@ -564,7 +564,7 @@ def finish(c, jid, a, atena="", after=()):
         c.send(texts.build("err_system"), *after)
 
 
-KEY_NOTES = re.compile(r"告知事項|物件確認|再建築")  # 案内用の資料なので、広告の可否は要点に出さない
+KEY_NOTES = re.compile(r"告知事項|物件確認|再建築|ページありました")  # 案内用の資料なので、広告の可否は要点に出さない。複数ページのPDFは1ページ目で作った旨をLINEにも出す
 
 
 def key_notes(job):
@@ -653,7 +653,15 @@ def edit_postback(c, k, v):
     """「賃貸・売買の設定」以下のボタン。扱ったら True。"""
     co = c.u.get("company") or {}
     if k == "edit" and v == "deal":
-        c.send(texts.build("sale_edit_menu"))
+        # 売買版のLINE（SALE_ONLY）では賃貸の仲介手数料は出さない
+        c.send(texts.build("sale_edit_menu", drop=("postback edit=fee",) if SALE_ONLY else ()))
+        return True
+    if k == "edit" and v == "nqr":
+        c.send(texts.build("sale_edit_nqr", 今の設定="載せる" if naiken_qr_on(co) else "載せない"))
+        return True
+    if k == "nqr" and v in ("on", "off"):
+        set_company(c, 内見依頼書のQR=v == "on")
+        c.send(texts.build("sale_edit_done", 項目="内見依頼書のQRコード"))
         return True
     if k == "edit" and v == "torihiki":
         c.send(texts.build("sale_edit_torihiki"))
@@ -680,6 +688,11 @@ def edit_postback(c, k, v):
     if k == "loan":
         return loan_postback(c, v)
     return False
+
+
+def naiken_qr_on(co):
+    """内見依頼書の下に、1分資料のQR（HPの売買ページへ）と一言を載せるか（会社の設定。初期値は載せる）。"""
+    return (co or {}).get("内見依頼書のQR", True) is not False
 
 
 # ---------- 住宅ローンシミュレーション（会社の設定） ------------------------------------------
