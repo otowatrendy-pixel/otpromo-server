@@ -210,6 +210,76 @@ def notes(f) -> list:
     return out
 
 
+# ---- 購入諸費用の計算（costs_sale.SaleFacts）に渡す形 ------------------------------------
+_AREA = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*(?:㎡|m2|m²|平米)")
+_MANYEN = re.compile(r"([0-9,]+(?:\.[0-9]+)?)\s*万")
+
+
+def _area(text):
+    m = _AREA.search(unicodedata.normalize("NFKC", text or "").replace(",", ""))
+    return float(m.group(1)) if m else None
+
+
+def _yen(text):
+    """「12,300円」「1.5万円」「年額12万円」→ 円の整数。読めなければ None。"""
+    t = unicodedata.normalize("NFKC", text or "")
+    m = _MANYEN.search(t)
+    if m:
+        return round(float(m.group(1).replace(",", "")) * 10000)
+    m = re.search(r"([0-9][0-9,]*)\s*円", t)
+    return int(m.group(1).replace(",", "")) if m else None
+
+
+def built_date(text):
+    """築年月の表記から date（その月の1日）。月が読めなければ None（計算側で要確認にする）。"""
+    from datetime import date
+    y = built_year(text)
+    m = re.search(r"年\s*([0-9]{1,2})\s*月", unicodedata.normalize("NFKC", text or ""))
+    if not y or not m or not 1 <= int(m.group(1)) <= 12:
+        return None
+    return date(y, int(m.group(1)), 1)
+
+
+def cost_inputs(f) -> dict:
+    """読み取った事実を、購入諸費用の計算（costs_sale.SaleFacts）の引数にする。
+    計算できない種別（収益・事業用など）や価格が読めないときは None。書いていない項目は None のまま。"""
+    kind = {"区分マンション": "mansion", "収益区分": "mansion", "戸建": "house", "土地": "land"}.get(f.物件種別)
+    price = f.価格.金額円
+    if kind is None or not price or f.区画が複数 and f.選んだ区画 is None:
+        return None
+    if f.区画が複数 and f.選んだ区画 is not None and 0 <= f.選んだ区画 < len(f.区画が複数):
+        sec = f.区画が複数[f.選んだ区画]
+        price = sec.価格.金額円 or price
+    tt = f.取引態様 or ""
+    st = unicodedata.normalize("NFKC", f.構造 or "")
+    structure = ("rc" if re.search(r"RC|SRC|鉄筋|鉄骨鉄筋|コンクリート", st)
+                 else "steel" if re.search(r"鉄骨|S造|軽量", st) else "wood" if re.search(r"木", st) else None)
+    area_text = f.専有面積 if kind == "mansion" else f.建物面積
+    land_text = f.敷地持分 if kind == "mansion" else f.土地面積
+    certified = f.認定住宅 or ""
+    return {
+        "property_type": kind,
+        "price": price,
+        "price_tax": f.価格_うち消費税.金額円,
+        "is_new": bool(f.新築),
+        "seller_is_business": True if "売主" in tt else None,  # 「代理」「媒介」では売主の種類はわからない
+        "land_area": _area(land_text),
+        "floor_area": _area(area_text) if kind != "land" else None,
+        "floor_area_is_wall_center": not re.search(r"内法|登記|公簿", area_text or ""),
+        "built": built_date(f.築年月),
+        "structure": structure,
+        "kanri_hi": f.管理費.金額円,
+        "shuzen_hi": f.修繕積立金.金額円,
+        "shuzen_kikin": f.修繕積立基金.金額円,
+        "kanri_junbikin": f.管理準備金.金額円,
+        "annual_property_tax": _yen(f.固定資産税_都市計画税),
+        "choki_yuryo": "長期優良" in certified,
+        "teitanso": "低炭素" in certified,
+        "kaitori_saihan": bool(f.買取再販),
+        "shakuchi": bool(re.search(r"借地|地上権|賃借", f.土地権利 or "")),
+    }
+
+
 # ---- 判定 -------------------------------------------------------------------------------
 def verdict(result: SaleResult) -> str:
     """作ってよい資料か。ok / blurry / not_maisoku / rental / unsupported"""

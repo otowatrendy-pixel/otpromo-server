@@ -37,6 +37,13 @@ r2 = r.model_copy(deep=True); r2.事実.取引 = "賃貸"; assert sale_core.verd
 sale_core.SALE_TYPES.discard("土地"); r2.事実.取引 = "売買"; r2.事実.物件種別 = "土地"; assert sale_core.verdict(r2) == "unsupported"
 sale_core.SALE_TYPES.add("土地")
 
+# 8) 購入諸費用の計算に渡す形
+ci = sale_core.cost_inputs(r.事実); print(ci)
+assert ci["property_type"] == "mansion" and ci["price"] == 39800000 and ci["floor_area"] == 65.12
+assert ci["floor_area_is_wall_center"] and ci["structure"] == "rc" and str(ci["built"]) == "1980-04-01"
+assert ci["seller_is_business"] is None and ci["kanri_hi"] == 12300 and not ci["shakuchi"]
+assert sale_core._yen("年額 12.5万円") == 125000 and sale_core._yen("98,000円") == 98000
+
 out = sale_core.render_documents(company, a["img"], r, a["pages"], a["log"])
 hidden = out["log"]["白で消した文字"]; print("白で消した：", hidden)
 joined = "".join(hidden)

@@ -64,9 +64,12 @@ class SaleFacts(BaseModel):
     建物面積: Optional[str] = Field(None, description="戸建・一棟。延床面積。各階の内訳があればそのまま")
     築年月: Optional[str] = Field(None, description="図面の表記どおり（例：1998年3月、平成10年3月築、2026年12月完成予定）")
     構造: Optional[str] = None
+    認定住宅: Optional[str] = Field(None, description="『長期優良住宅』『低炭素住宅』『ZEH』『住宅性能評価』など、図面に明記があるときだけ記載そのまま")
+    買取再販: Optional[str] = Field(None, description="『買取再販』『宅建業者が買い取ってリフォームした住宅』など、図面に明記があるときだけ記載そのまま")
     リフォーム: List[str] = Field(default_factory=list, description="リフォーム・リノベーションの時期と内容の記載（例：2024年 キッチン・浴室交換）")
     # 土地
     土地面積: Optional[str] = Field(None, description="公簿・実測の別があればそのまま")
+    敷地持分: Optional[str] = Field(None, description="区分マンションの敷地権の持分・敷地面積の記載があればそのまま")
     私道負担: Optional[str] = Field(None, description="『私道負担 約12㎡』『無』など記載そのまま")
     セットバック: Optional[str] = Field(None, description="『セットバック要 約5㎡』『無』など記載そのまま")
     土地権利: Optional[str] = Field(None, description="所有権・借地権（旧法・普通・定期）・地上権など記載そのまま。区分マンションの敷地権も")
@@ -91,6 +94,7 @@ class SaleFacts(BaseModel):
     告知事項: Optional[str] = Field(None, description="『告知事項あり』『心理的瑕疵あり』『事故物件』など、図面にあれば記載そのまま。なければ null")
     契約不適合責任: Optional[str] = Field(None, description="『契約不適合責任免責』『引渡しから2年』など記載そのまま（旧来の『瑕疵担保』の表記もここ）")
     固定資産税_都市計画税: Optional[str] = Field(None, description="年額の記載があればそのまま")
+    固定資産税評価額: Optional[str] = Field(None, description="土地・建物の評価額の記載があればそのまま（まれ）")
     # 収益物件
     満室想定年収: Money = Field(default_factory=Money)
     現況年収: Money = Field(default_factory=Money)
