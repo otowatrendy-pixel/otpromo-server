@@ -657,7 +657,8 @@ def edit_postback(c, k, v):
         c.send(texts.build("sale_edit_menu", drop=("postback edit=fee",) if SALE_ONLY else ()))
         return True
     if k == "edit" and v == "nqr":
-        c.send(texts.build("sale_edit_nqr", 今の設定="載せる" if naiken_qr_on(co) else "載せない"))
+        import baibai_naiken
+        c.send(texts.build("sale_edit_nqr", 今の設定="載せる" if naiken_qr_on(co) else "載せない", 一言=baibai_naiken.QR_CAPTION))
         return True
     if k == "nqr" and v in ("on", "off"):
         set_company(c, 内見依頼書のQR=v == "on")
