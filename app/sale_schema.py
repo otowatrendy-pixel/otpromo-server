@@ -108,6 +108,7 @@ class SaleFacts(BaseModel):
     物件番号: Optional[str] = Field(None, description="レインズの物件番号・元付業者の物件番号の記載そのまま（例：レインズ 100123456789）。物件確認・内見依頼のFAXに載せる。お客様向けの図面からは白で消す")
     取引態様: Optional[str] = Field(None, description="図面に書いてある取引態様そのまま（売主・代理・専任媒介・一般媒介・専属専任媒介・仲介など）")
     売主: Optional[str] = Field(None, description="図面に売主の名前・種類（『売主：見本ホーム株式会社』『売主 個人』など）が書いてあればそのまま。なければ null")
+    売主_連絡先: List[str] = Field(default_factory=list, description="図面に書いてある売主の電話・FAX・メール・URLを、書いてあるとおり1件ずつ（例：TEL 03-0000-3333）。お客様向けの図面からは白で消す")
     広告転載: Optional[str] = Field(None, description="『広告転載可』『広告不可』『ネット掲載不可』『広告は要承諾』など、広告についての記載そのまま。なければ null")
     仲介手数料_記載: Optional[str] = Field(None, description="お客様（買主）の手数料の負担に関わる記載だけ（例：仲介手数料不要）。業者間の配分（分かれ・片手・両手など）は入れない")
     読み取りに自信がない項目: List[str] = Field(default_factory=list)

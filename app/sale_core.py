@@ -46,6 +46,7 @@ HIDE_EXTRA = re.compile(
     r"元付[^、,/]{0,6}[0-9０-９.]+\s*[%％]|客付[^、,/]{0,6}[0-9０-９.]+\s*[%％]|"
     r"レインズ|REINS|R[EＥ]INS|"
     r"広告(転載|掲載)?(可|不可|否|禁止|要承諾|要相談|要確認|NG)|(ネット|チラシ|ポータル|SUUMO|ホームズ|アットホーム)(掲載)?(可|不可|NG)|"
+    r"売主[^、,/]{0,24}?(TEL|Tel|tel|電話|☎|FAX|Fax|fax|E-?mail|メール)\s*[:：]?\s*[0-9０-９\-－()（）a-zA-Z@.]{6,}|"
     r"業者様へ|業者間限り|業者限り|業者専用|一般公開不可|未公開|"
     r"専属専任媒介|専任媒介|一般媒介)")
 # 何があっても消さない行（お客様の判断に関わる大切な記載）。AIが業者向けと間違えても消さない
@@ -145,7 +146,6 @@ def built_year(text):
     return n if n >= 1800 else None
 
 
-_KOKOKU_NG = re.compile(r"不可|否|禁止|NG|要承諾|要相談|要確認|要連絡|承諾")
 _MONTHLY_TAX_Q = re.compile(r"管理費|修繕積立金")
 
 
@@ -160,6 +160,10 @@ def tidy(result: SaleResult) -> None:
         f.取引 = "売買"
     # お客様の判断に関わる記載は白で消さない
     result.帯の外の業者向け情報 = protect_list(result.帯の外の業者向け情報)
+    # 売主の連絡先は、AIが業者向け情報に入れ忘れても白で消す（お客様との連絡は当社が間に入る）
+    for c in f.売主_連絡先:
+        if c and c not in result.帯の外の業者向け情報:
+            result.帯の外の業者向け情報.append(c)
     # 管理費・修繕積立金の消費税を「要確認」にしていたら直す（管理組合に払うもので課税されない）
     for q in result.想定QA:
         text = f"{q.質問} {q.参考回答}"
@@ -171,12 +175,8 @@ def tidy(result: SaleResult) -> None:
 
 def notes(f) -> list:
     """スタッフ向けの注意（お客様にお渡しする資料には載せない）。"""
-    out = ["お客様にご紹介・広告する前に、元付業者へ物件確認（販売中か・価格の変更がないか）をしてください。成約済みの物件を載せ続けるとおとり広告になります。"]
-    ad = (f.広告転載 or "").strip()
-    if not ad:
-        out.append("募集図面に広告の可否の記載がありません。ネットやチラシに載せる場合は、先に元付業者へ確認してください。")
-    elif _KOKOKU_NG.search(ad):
-        out.append(f"募集図面に「{ad}」とあります。ネット・チラシなどの広告には使わず、元付業者の承諾を確認してください。")
+    # 案内用の図面を作るサービスなので、広告（物件確認・おとり広告・広告の可否）の注意書きは出さない（10/31本人）
+    out = []
     tt = f.取引態様 or ""
     if "売主" in tt:
         out.append("取引態様が「売主」です（図面を出している会社が売主）。建物の価格には消費税がかかり、契約不適合責任は原則として引渡しから2年以上になります。")
@@ -241,6 +241,22 @@ def built_date(text):
     return date(y, int(m.group(1)), 1)
 
 
+def structure_code(text):
+    """構造の表記 → wood / light_steel / steel / rc / src（読めなければ None）。SRCを先に見る。"""
+    st = unicodedata.normalize("NFKC", text or "").upper()
+    if re.search(r"SRC|鉄骨鉄筋", st):
+        return "src"
+    if re.search(r"RC|鉄筋コンクリート|コンクリート", st):
+        return "rc"
+    if re.search(r"軽量鉄骨|軽量S|LGS", st):
+        return "light_steel"
+    if re.search(r"鉄骨|S造|重量", st):
+        return "steel"
+    if re.search(r"木|W造", st):
+        return "wood"
+    return None
+
+
 def cost_inputs(f) -> dict:
     """読み取った事実を、購入諸費用の計算（costs_sale.SaleFacts）の引数にする。
     計算できない種別（収益・事業用など）や価格が読めないときは None。書いていない項目は None のまま。"""
@@ -253,8 +269,7 @@ def cost_inputs(f) -> dict:
         price = sec.価格.金額円 or price
     tt = f.取引態様 or ""
     st = unicodedata.normalize("NFKC", f.構造 or "")
-    structure = ("rc" if re.search(r"RC|SRC|鉄筋|鉄骨鉄筋|コンクリート", st)
-                 else "steel" if re.search(r"鉄骨|S造|軽量", st) else "wood" if re.search(r"木", st) else None)
+    structure = structure_code(st)
     area_text = f.専有面積 if kind == "mansion" else f.建物面積
     land_text = f.敷地持分 if kind == "mansion" else f.土地面積
     certified = f.認定住宅 or ""
@@ -278,7 +293,41 @@ def cost_inputs(f) -> dict:
         "teitanso": "低炭素" in certified,
         "kaitori_saihan": bool(f.買取再販),
         "shakuchi": bool(re.search(r"借地|地上権|賃借", f.土地権利 or "")),
+        # 評価額の推計用（地価公示＋構造・延床・築年数）
+        "address": f.所在地,
+        "youseki": _percent(f.容積率),
+        "commercial_area": bool(re.search(r"商業", f.用途地域 or "")),  # 近隣商業・商業
+        "station_walk_min": walk_min(f.交通),
+        "youto": first_youto(f.用途地域),
     }
+
+
+def walk_min(routes):
+    """交通の表記から、駅までの徒歩分のいちばん短いもの。「バス◯分」の行は使わない。なければ None。"""
+    best = None
+    for r in routes or []:
+        t = unicodedata.normalize("NFKC", r or "")
+        if re.search(r"バス|ﾊﾞｽ", t):
+            continue
+        for m in re.finditer(r"(?:徒歩|歩)\s*([0-9]+(?:\.[0-9]+)?)\s*分", t):
+            v = float(m.group(1))
+            best = v if best is None else min(best, v)
+    return best
+
+
+def first_youto(text):
+    """用途地域の表記の最初のもの（「第一種低層住居専用地域・第一種中高層…」→ 最初）。なければ None。"""
+    t = (text or "").strip()
+    if not t:
+        return None
+    return re.split(r"[、,，/／・\s]|及び", t)[0] or None
+
+
+def _percent(text):
+    """「200%」「容積率 300％（前面道路により240%）」→ いちばん小さい数字（前面道路で下がった実際の容積率）。
+    敷地持分の仮置きに使うため、建てられる容積に近い方を取る。読めなければ None。"""
+    nums = [int(n) for n in re.findall(r"([0-9]{2,4})\s*%", unicodedata.normalize("NFKC", text or ""))]
+    return min(nums) if nums else None
 
 
 # ---- 判定 -------------------------------------------------------------------------------

@@ -24,8 +24,10 @@ assert sale_core.verdict(r) == "ok"
 assert not any("告知" in t for t in r.帯の外の業者向け情報), r.帯の外の業者向け情報
 # 3) スタッフへの注意：物件確認・広告不可・告知事項・旧耐震・消費税不明
 chui = "\n".join(r.スタッフへの注意); print(chui)
-for w in ("物件確認", "広告転載不可", "告知事項", "1981年", "消費税"):
+for w in ("告知事項", "1981年", "消費税"):
     assert w in chui, w
+for w in ("物件確認", "広告", "おとり"):  # 案内用の図面なので、広告の注意書きは出さない
+    assert w not in chui, w
 # 4) 管理費の消費税のQ&Aは直す
 assert r.想定QA[0].要確認 is False and "かかりません" in r.想定QA[0].参考回答
 # 5) 帯に取引態様・所属団体
@@ -42,12 +44,16 @@ ci = sale_core.cost_inputs(r.事実); print(ci)
 assert ci["property_type"] == "mansion" and ci["price"] == 39800000 and ci["floor_area"] == 65.12
 assert ci["floor_area_is_wall_center"] and ci["structure"] == "rc" and str(ci["built"]) == "1980-04-01"
 assert ci["seller_is_business"] is None and ci["kanri_hi"] == 12300 and not ci["shakuchi"]
+assert [sale_core.structure_code(x) for x in ("SRC造", "鉄筋コンクリート造", "軽量鉄骨造", "鉄骨造", "木造2階建", "")] == ["src", "rc", "light_steel", "steel", "wood", None]
+assert sale_core._percent("300％（前面道路により240%）") == 240 and ci["address"] == "東京都○○区見本町2丁目" and ci["commercial_area"] is False
+assert sale_core.walk_min(["A線 B駅 徒歩12分", "C線 D駅 バス10分 停歩3分", "E線 F駅 徒歩7分"]) == 7.0 and ci["station_walk_min"] == 6.0
+assert sale_core.first_youto("第一種低層住居専用地域・第一種中高層住居専用地域") == "第一種低層住居専用地域" and ci["youto"] is None
 assert sale_core._yen("年額 12.5万円") == 125000 and sale_core._yen("98,000円") == 98000
 
 out = sale_core.render_documents(company, a["img"], r, a["pages"], a["log"])
 hidden = out["log"]["白で消した文字"]; print("白で消した：", hidden)
 joined = "".join(hidden)
-for w in ("分かれ", "広告転載不可", "レインズ", "内見", "専任媒介"):
+for w in ("分かれ", "広告転載不可", "レインズ", "内見", "専任媒介", "03-0000-3333"):
     assert w in joined, w
 assert "告知" not in joined
 (OUT / "obikae.jpg").write_bytes(out["obikae_jpg"])
