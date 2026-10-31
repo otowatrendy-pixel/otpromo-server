@@ -19,6 +19,8 @@ from pathlib import Path
 HERE = Path(__file__).parent
 TEMPLATE = HERE / "baibai_naiken_template.html"
 WEEK = "月火水木金土日"
+# QRの下に添える一言（11/1 本人：大きな広告はいらない。QRの下に一言だけ。飛び先は動画やYouTubeを含む紹介ページ）
+QR_CAPTION = "この依頼書は、スマホからLINEで作りました（1分資料 売買版）"
 BLANK_WISH = "　　月　　日（　　）　　時　　分頃"
 
 
@@ -34,7 +36,7 @@ FAX_CSS = """
   .card .addr { border-top-color: #000 !important; }
   /* FAXでは小さい細字がかすれるので、補助の文字を少し大きく・太くする */
   .card .branch, .card .lic, .card .role, .card .roma { font-size: 8.5pt !important; font-weight: 700 !important; }
-  .card .addr, .promo .pnote, .foot { font-size: 8.5pt !important; font-weight: 700 !important; }
+  .card .addr, .foot { font-size: 8.5pt !important; font-weight: 700 !important; }
 """
 
 
@@ -58,16 +60,15 @@ def from_sale_facts(facts):
     }
 
 
-def html(to, me, prop, wishes=None, now=None, qr_svg=None, promo=None, fax=False, **_old):
+def html(to, me, prop, wishes=None, now=None, qr_svg=None, qr_caption=QR_CAPTION, fax=False, **_old):
     """内見依頼書のHTMLを作る。
 
     to   : {"company", "branch", "person", "fax"}（元付業者）
     me   : naiken.me_from_company() と同じ形（自社・担当者の名刺情報）
     prop : {"name", "room", "address", "price", "number"}（販売図面から自動で入る）
     wishes: 希望日時の文字列の並び（最大3つ。LINEで聞くのはここだけ）。空文字は手書き用の空欄。None なら空欄2行
-    promo: 受け取った元付業者さま向けの宣伝枠（QR＋クーポン）。None なら従来どおり小さなQRだけ。
-           {"lead", "body", "offer", "code", "until", "note"}。中身（割引・期限・計測用URL）は集客担当が決める。
-           景品表示法のため、期限（◯月◯日まで）と条件は必ず書く
+    qr_svg / qr_caption: 一番下のQRと、その下の一言。QRの飛び先（使い方動画・YouTubeを含む紹介ページ）は集客担当が決め、
+           効果を測れるよう専用URLにする。qr_caption="" で一言なし。会社設定で消すときもここを空にする
     fax  : True ならFAXで送る版。文字・線・帯をすべて黒にする（濃紺はFAXの白黒変換で網点になり、細かい字がつぶれるため）。
            スマホで見せる控え・プレビューは False（青のまま）。送信用PDFだけ True で作り直す
     _old : 以前の版の guests・note・ad・tax は受け取っても使わない（つなぎ替えの途中で落ちないように）
@@ -82,7 +83,7 @@ def html(to, me, prop, wishes=None, now=None, qr_svg=None, promo=None, fax=False
     data = {
         "sent_date": sent_date(now), "to": to or {}, "me": me or {}, "prop": dict(prop or {}),
         "wishes": [w or BLANK_WISH for w in (wishes or [])][:3] or [BLANK_WISH, BLANK_WISH], "qr_svg": qr_svg,
-        "promo": promo,
+        "qr_caption": qr_caption,
     }
     tpl = TEMPLATE.read_text(encoding="utf-8")
     # 書体はネットから読まず、同梱のものを使う（賃貸版と同じ）
@@ -105,17 +106,11 @@ ME = {"company": "サンプル不動産株式会社", "branch": "見本駅前店
       "tel": "03-0000-1234", "fax": "03-0000-1235", "mobile": "090-0000-0000", "email": "mihon@example.jp",
       "license": "東京都知事（1）第00000号"}
 
-# 宣伝枠の見本。数字・コード・期限は未定なので「◯◯」のまま（集客担当が決めたら差し替える）
-PROMO_MIHON = {"lead": "この内見依頼書は「1分資料 売買版」で作りました",
-               "body": "販売図面をスマホからLINEに送るだけで、お客様向けの資料ができます。拡張機能もパソコンも不要",
-               "offer": "無料で使える件数を＋◯件", "code": "XXXXXX", "until": "友だち追加から30日以内にご利用ください",
-               "note": "1契約につき1回・ほかの特典との併用不可"}
-
 SAMPLES = {
     "mihon_mansion": dict(
         to={"company": "見本住宅販売株式会社", "branch": "", "person": "", "fax": "03-0000-5678"},
         prop={"name": "パークメゾン見本", "room": "503", "address": "東京都○○区見本町4丁目5番6号", "price": "4,280万円"},
-        wishes=["11月7日（土）14時00分頃", "11月8日（日）10時00分頃", "11月8日（日）午後"], promo=PROMO_MIHON),
+        wishes=["11月7日（土）14時00分頃", "11月8日（日）10時00分頃", "11月8日（日）午後"]),
     "mihon_tochi": dict(
         to={"company": "見本ホーム株式会社", "branch": "見本店", "person": "見本", "fax": "03-0000-9012"},
         prop={"name": "○○区見本町 売地", "address": "東京都○○区見本町7丁目8番", "price": "3,580万円",

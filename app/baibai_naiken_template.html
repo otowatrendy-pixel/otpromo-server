@@ -73,21 +73,10 @@
   .card .lic { font-size: 7.5pt; color: var(--sub); line-height: 1.4; margin-top: .3mm; }
 
   .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 7.5pt; font-weight: 500; color: var(--sub); }
-  .foot .via { display: flex; align-items: center; gap: 2mm; text-align: right; }
-  .foot .via svg { width: 15mm; height: 15mm; flex: none; }
-  /* 送り主（利用者の会社）の書類だと分かることを優先し、紙面の8分の1程度に抑えて本文より目立たせない */
-  .promo { margin-top: auto; margin-bottom: 2.5mm; border: 0.35mm dashed var(--line); padding: 2.4mm 4mm; display: flex; align-items: center; gap: 5mm; color: var(--ink); }
-  .promo .ptext { flex: 1; min-width: 0; }
-  .promo .phead { font-size: 9pt; font-weight: 700; }
-  .promo .pbody { font-size: 9pt; margin-top: .4mm; }
-  .promo .poffer { margin-top: 1.4mm; display: flex; align-items: center; gap: 2.5mm; }
-  .promo .tag { font-size: 8.5pt; font-weight: 700; border: 0.35mm solid var(--line); padding: .2mm 1.6mm; }
-  .promo .big { font-size: 12pt; font-weight: 700; }
-  .promo .pcode { margin-top: 1mm; font-size: 9.5pt; }
-  .promo .pcode b { font-size: 11pt; letter-spacing: .08em; }
-  .promo .pnote { margin-top: .6mm; font-size: 7.5pt; }
-  .promo .pqr { flex: none; text-align: center; font-size: 7.5pt; font-weight: 700; }
-  .promo .pqr svg { width: 20mm; height: 20mm; display: block; margin: 0 auto 1mm; }
+  .foot .via { display: flex; flex-direction: column; align-items: flex-end; }
+  .foot .via svg { width: 16mm; height: 16mm; flex: none; display: block; }
+  /* QRの下の一言（読み取ると何が見られるか）。宣伝は控えめに、この一言だけ */
+  .foot .cap { margin-top: .6mm; font-size: 7.5pt; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -176,28 +165,10 @@
       </div>
     </div>
 
-    {% if promo %}
-    <!-- 宣伝枠（受け取った元付業者さま向け）。塗りつぶしなし -->
-    <div class="promo">
-      <div class="ptext">
-        <div class="phead nw">{{ promo.lead or "不動産会社のみなさまへ" }}</div>
-        <div class="pbody nw">{{ promo.body }}</div>
-        <div class="poffer"><span class="tag nw">FAXをご覧の方だけの特典</span><span class="big nw">{{ promo.offer }}</span></div>
-        <div class="pcode nw">{% if promo.code %}クーポンコード <b>{{ promo.code }}</b>　{% endif %}{{ promo.until }}</div>
-        {% if promo.note %}<div class="pnote nw">{{ promo.note }}</div>{% endif %}
-      </div>
-      <div class="pqr">{{ qr_svg }}<div class="nw">LINEで友だち追加</div></div>
-    </div>
     <div class="foot">
       <span class="nw">万一、誤って届いた場合は、お手数ですが破棄のうえご連絡ください。</span>
-      <span class="nw">このFAXは 1分資料（otpromo.com）で送信しました</span>
+      <div class="via">{{ qr_svg }}<div class="cap nw">{{ qr_caption or "このFAXは 1分資料（otpromo.com）で送信しました" }}</div></div>
     </div>
-    {% else %}
-    <div class="foot">
-      <span class="nw">万一、誤って届いた場合は、お手数ですが破棄のうえご連絡ください。</span>
-      <div class="via"><span class="nw">このFAXは 1分資料（otpromo.com）で送信しました</span>{{ qr_svg }}</div>
-    </div>
-    {% endif %}
   </div>
 
 </div>
