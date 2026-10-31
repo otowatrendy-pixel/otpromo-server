@@ -53,6 +53,10 @@ _NAIKEN = re.compile(r"[【\[［(（]内[見见兄觅][】\]］)）]|内[見见�
                      r"(FAX|TEL|電話|电话|連絡|连络|予約|依頼|申込|キー|鍵|键).*内[見见兄觅]")
 
 
+# 売買版：消す言葉のすぐ後ろに続く番号（「レインズ 物件番号：100123456789」の番号の部分）
+_TAIL = re.compile(r"(\s*[:：]?\s*(物件番号|登録番号|番号|No\.?|NO\.?)?\s*[:：]?\s*[0-9A-Za-z\-]{4,})?")
+
+
 def _width(ch: str) -> float:
     """文字の横幅の目安（半角は全角のおよそ半分）。"""
     return 0.55 if ord(ch) < 0x2E80 else 1.0
@@ -92,8 +96,10 @@ def _norm_index(text: str):
     return idx
 
 
-def find(page: Image.Image, facts, texts, band_top: float):
-    """消す枠（ピクセル）と、その理由の一覧を返す。帯より上の行だけを対象にする。"""
+def find(page: Image.Image, facts, texts, band_top: float, extra=None, protect=None):
+    """消す枠（ピクセル）と、その理由の一覧を返す。帯より上の行だけを対象にする。
+    extra：言葉の保険に足す正規表現（売買版の「分かれ」「片手」「レインズ」など）。賃貸版は None。
+    protect：この正規表現に当たる行は、何があっても消さない（売買版の告知事項・再建築不可など）。賃貸版は None。"""
     img = page.convert("RGB")
     scale = 1.0
     if max(img.size) > 2400:
@@ -104,6 +110,7 @@ def find(page: Image.Image, facts, texts, band_top: float):
     pad = max(page.width, page.height) * 0.003
     phones = {d for d in (_digits(facts.元付業者_電話), _digits(facts.元付業者_FAX)) if len(d) >= 9}
     wanted = [_norm(t) for t in texts or [] if len(_norm(t)) >= 2]
+    multi = extra is not None
     boxes, notes, lines = [], [], []
     for box, text, _score in out or []:
         box = [[x / scale, y / scale] for x, y in box]
@@ -112,6 +119,8 @@ def find(page: Image.Image, facts, texts, band_top: float):
         whole = tuple(_span_box(box, text, 0, len(text), pad))
         lines.append(whole)
         nt = _norm(text)
+        if protect is not None and protect.search(unicodedata.normalize("NFKC", text)):
+            continue
         # 1) 元付業者の電話・FAX番号を含む行は、行ごと消す
         d = _digits(text)
         if any(p in d for p in phones):
@@ -145,11 +154,25 @@ def find(page: Image.Image, facts, texts, band_top: float):
                     boxes.append(_span_box(box, text, a, b, pad))
                     notes.append(text[a:b])
                     hit = True
+                    if multi:  # 売買版：1行に業者向けの情報が並ぶことが多いので、ほかの文字も探す
+                        continue
                     break
+        if hit and not multi:
+            continue
+        if multi:
+            # 売買版：言葉そのもの（とすぐ後ろの番号）だけを消す。同じ行のお客様向けの記載は残す
+            t = unicodedata.normalize("NFKC", text)
+            for m in extra.finditer(t):
+                tail = _TAIL.match(t, m.end())
+                a, b = m.start(), tail.end() if tail else m.end()
+                boxes.append(_span_box(box, text, a, b, pad))
+                notes.append(text[a:b])
+                hit = True
         if hit:
             continue
         # 3) 言葉で見つかったものは、その言葉から次の区切りまでを消す
-        m = _KEYWORDS.search(unicodedata.normalize("NFKC", text)) or _NAIKEN.search(unicodedata.normalize("NFKC", text))
+        m = _KEYWORDS.search(unicodedata.normalize("NFKC", text)) or _NAIKEN.search(unicodedata.normalize("NFKC", text)) \
+            or (extra.search(unicodedata.normalize("NFKC", text)) if extra is not None else None)
         if m:
             t = unicodedata.normalize("NFKC", text)
             end = re.search(r"[、,，/／]|\s{2,}", t[m.end():])
@@ -218,12 +241,12 @@ def _erase(arr, x0, y0, x1, y1):
     box[lines] = keep
 
 
-def apply(page: Image.Image, result):
-    """帯の外の業者向け情報を白で消した画像と、消した文字の一覧を返す。"""
+def apply(page: Image.Image, result, extra=None, protect=None):
+    """帯の外の業者向け情報を白で消した画像と、消した文字の一覧を返す。extra・protect は find と同じ（売買版用）。"""
     b = result.帯
     band_top = b.上端 if b.見つかった else 1.0
     try:
-        boxes, notes = find(page, result.事実, result.帯の外の業者向け情報, band_top)
+        boxes, notes = find(page, result.事実, result.帯の外の業者向け情報, band_top, extra, protect)
     except Exception as ex:  # 文字認識が使えないときは消さずに続ける
         return page, [f"文字認識に失敗：{ex}"]
     if not boxes:

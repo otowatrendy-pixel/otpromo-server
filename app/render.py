@@ -96,6 +96,8 @@ def _font(size):
 def draw_band(w: int, h: int, company: dict) -> Image.Image:
     """自社の帯。登録時に帯の画像をもらえればそれを使い、なければ文字で作る。"""
     staff = staff_line(company)
+    if company.get("帯_3行目"):
+        return _draw_band3(w, h, company, staff)
     if company.get("帯画像"):
         img = Image.open(company["帯画像"]).convert("RGB").resize((w, h))
         if not staff:
@@ -127,6 +129,58 @@ def draw_band(w: int, h: int, company: dict) -> Image.Image:
     sub = company["住所"]
     sw = d.textlength(sub, font=small)
     d.text((w - pad - sw, h - pad - small.size), sub, font=small, fill="white")
+    return band
+
+
+def _fit(d, text, size, width):
+    """幅に収まるまで文字を小さくした書体。"""
+    while size > 10 and d.textlength(text, font=_font(size)) > width:
+        size -= 1
+    return _font(size)
+
+
+def _draw_band3(w: int, h: int, company: dict, staff: str) -> Image.Image:
+    """売買版の帯（3行）。1行目 会社名・TEL、2行目 免許番号・所属団体・住所、3行目 取引態様・担当者。
+    宅建業法34条と表示規約で、広告には取引態様（媒介など）の表示が必要なため。賃貸版では使わない。"""
+    third = company["帯_3行目"] + (f"　{staff}" if staff else "")
+    if company.get("帯画像"):
+        # 登録した帯の画像の下に、取引態様と担当者の行を足す
+        img = Image.open(company["帯画像"]).convert("RGB").resize((w, h))
+        sh = max(int(h * 0.28), 14)
+        out = Image.new("RGB", (w, h + sh), "white")
+        out.paste(img, (0, 0))
+        d = ImageDraw.Draw(out)
+        f = _fit(d, third, int(sh * 0.62), w - int(sh * 0.8))
+        d.text((w - int(sh * 0.4) - d.textlength(third, font=f), h + (sh - f.size) // 2), third, font=f,
+               fill=theme(company)["main"])
+        return out
+    band = Image.new("RGB", (w, h), theme(company)["main"])
+    d = ImageDraw.Draw(band)
+    pad = int(h * 0.1)
+    inner = w - pad * 2
+    gap = int(pad * 2)
+    row = (h - pad * 2) / 3
+    # 1行目：会社名（左）とTEL（右）
+    tel = f"TEL {company['電話']}"
+    size = int(row * 0.9)
+    while size > 10 and d.textlength(company["会社名"], font=_font(size)) + d.textlength(tel, font=_font(size)) + gap > inner:
+        size -= 1
+    big = _font(size)
+    y = pad + (row - size) / 2
+    d.text((pad, y), company["会社名"], font=big, fill="white")
+    d.text((w - pad - d.textlength(tel, font=big), y), tel, font=big, fill="white")
+    # 2行目：免許番号・所属団体（左）と住所（右）
+    left, sub = company["免許"], company["住所"]
+    size = int(row * 0.6)
+    while size > 10 and d.textlength(left, font=_font(size)) + d.textlength(sub, font=_font(size)) + gap > inner:
+        size -= 1
+    small = _font(size)
+    y = pad + row + (row - size) / 2
+    d.text((pad, y), left, font=small, fill="white")
+    d.text((w - pad - d.textlength(sub, font=small), y), sub, font=small, fill="white")
+    # 3行目：取引態様と担当者
+    f3 = _fit(d, third, int(row * 0.6), inner)
+    d.text((pad, pad + row * 2 + (row - f3.size) / 2), third, font=f3, fill="white")
     return band
 
 
