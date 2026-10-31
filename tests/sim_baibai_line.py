@@ -39,10 +39,10 @@ import sale_core  # noqa: E402
 import store  # noqa: E402
 from PIL import Image  # noqa: E402
 
-SENT, FILES = [], {}
+SENT, FILES, ALL = [], {}, []  # ALL は消さずにためる（あとでまとめて確かめる用）
 _REAL_REPLY = line.reply  # 言い換えを本物の reply が通すかの確認用
-line.reply = lambda tok, msgs: SENT.append(("reply", line.out(msgs))) or True  # 本物の reply・push と同じ言い換えを通す
-line.push = lambda to, msgs: SENT.append(("push", line.out(msgs))) or True
+line.reply = lambda tok, msgs: SENT.append(("reply", line.out(msgs))) or ALL.append(line.out(msgs)) or True  # 本物の reply・push と同じ言い換えを通す
+line.push = lambda to, msgs: SENT.append(("push", line.out(msgs))) or ALL.append(line.out(msgs)) or True
 line.loading = lambda *a, **k: None
 line.profile = lambda uid: {"displayName": "テスト太郎"}
 line.content = lambda mid: FILES[mid]
@@ -499,6 +499,19 @@ assert abs(sale_bot.calib_factor("東京都練馬区貫井2丁目") - 1.2) < 1e-
 assert sale_bot.calib_factor("東京都杉並区阿佐谷北1丁目") == 1.0
 assert store.quota(u_of(B))["remaining"] == before
 
+# 物件のおすすめポイント（お客様へ送る文章）：転送用の吹き出しを別に送り、スタッフ向けの一言はそのすぐ上の案内に入れる
+found = 0
+for ms in ALL:
+    for i, m in enumerate(ms):
+        if m.get("type") == "text" and "のおすすめポイント\n\n■" in m["text"]:
+            found += 1
+            assert "お客様へ送る前に内容をご確認ください" not in m["text"] and "AI" not in m["text"]
+            assert any("お客様へ送る前に内容をご確認ください" in (x.get("text") or x.get("altText") or "") for x in ms[:i])
+            assert ms[-1].get("quickReply"), "ボタンが最後の吹き出しにない"
+assert found, "おすすめポイントの吹き出しが届いていない"
+# 空のとき（強い言葉などで自動で外れた）は吹き出しを送らず、社内向けPDFを案内
+n_, m_ = sale_bot.osusume_message({"texts": {"osusume": []}, "title": "x"})
+assert m_ is None and "スタッフへの注意" in n_
 # 「販売図面」にそろえる（10/31本人決定）：送った文面に「募集図面」が残っていない。本物の reply も言い換える
 import json as _json
 left = [m for _, ms in SENT for m in ms if "募集図面" in _json.dumps(m, ensure_ascii=False)]

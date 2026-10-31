@@ -9,6 +9,8 @@ import html
 
 import render
 
+OSUSUME_NOTE = "お客様へ送る前に内容をご確認ください"
+
 ALL_SECTIONS = ("obikae", "chui", "osusume", "qa")
 
 
@@ -55,7 +57,8 @@ def build_html(r, obikae_png: bytes, company: dict, sections=ALL_SECTIONS, bw=Fa
 <ul class=chui>{chui}</ul>
 <h2>物件の要点（販売図面より）</h2><table class=kv>{summary_rows(f)}</table>
 <p class=note>{render.NOTE}</p></section>""",
-        "osusume": f"""<section><h1>② 物件のおすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol></section>""",
+        "osusume": f"""<section><h1>② 物件のおすすめポイント<small>{e(name)}</small></h1>
+<p class=send>{e(OSUSUME_NOTE)}（数字や言葉は、販売図面の記載にもとづいています）</p><ol class=pt>{points}</ol></section>""",
         "qa": f"""<section><h1>④ 想定Q&amp;A<small>{e(name)}</small></h1><dl>{qa}</dl>
 <p class=note>{render.NOTE}</p></section>""",
     }
@@ -81,6 +84,7 @@ table.kv th {{ background: var(--light); text-align: left; width: 28%; border: 1
 table.kv td {{ border: 1px solid var(--line); padding: 3px 8px; }}
 dt {{ font-weight: bold; margin-top: 8px; }} dd {{ margin: 2px 0 0 1.2em; }}
 .chk {{ background: var(--light); color: var(--main); font-size: 8pt; padding: 1px 6px; border-radius: 8px; }}
+.send {{ background: var(--pale); border-left: 4px solid var(--main); padding: 4px 8px; font-size: 9.5pt; }}
 .note {{ font-size: 8.5pt; color: #666; margin-top: 12px; }}
 </style>
 {body}</html>"""

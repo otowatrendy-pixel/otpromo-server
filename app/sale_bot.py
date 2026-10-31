@@ -575,6 +575,20 @@ def key_notes(job):
     return "".join(f"\n【ご注意】{x}" for x in chui[:2]) + ("\n" if chui else "")
 
 
+def osusume_message(job):
+    """物件のおすすめポイント（お客様へ送る文章）。(案内の一文, 転送用の吹き出し or None)。
+    スタッフ向けの一言（規約3条2項と同じ「お客様へ送る前に内容をご確認ください」）は、吹き出しのすぐ上の案内に入れ、
+    転送する吹き出しには入れない。強い言葉などで自動で外れて空のときは、吹き出しを送らない。"""
+    t = job.get("texts") or {}
+    pts = [p for p in (t.get("osusume") or []) if (p.get("見出し") or p.get("説明"))]
+    note = t.get("osusume_note") or "お客様へ送る前に内容をご確認ください"
+    if not pts:
+        return "\n▼物件のおすすめポイント\n今回は自動ではお作りしていません。社内向けPDFの「スタッフへの注意」をご覧ください。\n", None
+    body = f"【{job.get('title') or '物件'}】のおすすめポイント\n\n" + "\n\n".join(
+        f"■{p.get('見出し', '')}\n{p.get('説明', '')}".strip() for p in pts)
+    return f"\n▼物件のおすすめポイント（次のメッセージ）\n長押しして「転送」で、お客様に送れます。{note}。\n", line.text(body[:4900])
+
+
 def deliver(c, jid, after=()):
     import bot
     job = store.get_job(jid)
@@ -583,14 +597,26 @@ def deliver(c, jid, after=()):
     url_okyaku, url_shanai = store.pdf_urls(jid, job)
     img = line.image(store.file_url(jid, job, "obikae.jpg"), store.file_url(jid, job, "preview.jpg"))
     drop = () if ((job.get("texts") or {}).get("motozuke") or {}).get("fax") else ("postback bfax=from_last&doc={資料ID}",)
-    common = dict(物件名=job["title"], のこり枚数の案内=bot.remain_note(c.u), 資料ID=jid, 注意の要点=key_notes(job), drop=drop)
+    o_note, o_msg = osusume_message(job)
+    common = dict(物件名=job["title"], のこり枚数の案内=bot.remain_note(c.u), 資料ID=jid, 注意の要点=key_notes(job),
+                  おすすめの案内=o_note, drop=drop)
+    after = ((o_msg,) if o_msg else ()) + tuple(after)
     if d.get("method") == "email" and d.get("email"):
         import delivery
         if delivery.send_mail(d["email"], job["title"], store.pdf_files(jid, job, job["title"]),
                               store.file_url(jid, job, "shiryou.pdf")):
-            return c.send(img, texts.build("sale_deliver_mail", メールアドレス=d["email"], **common), *after)
-    c.send(img, texts.build("sale_deliver_line", お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
-                            有効期限=f"{exp.month}月{exp.day}日", **common), *after)
+            return c.send(img, *_qr_last(texts.build("sale_deliver_mail", メールアドレス=d["email"], **common), after))
+    c.send(img, *_qr_last(texts.build("sale_deliver_line", お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
+                                      有効期限=f"{exp.month}月{exp.day}日", **common), after))
+
+
+def _qr_last(msg, after):
+    """LINEのボタン（クイックリプライ）は最後の吹き出しにしか出ないので、後ろに吹き出しが続くときは最後へ移す。
+    転送してもクイックリプライは付いていかない。"""
+    after = [dict(m) for m in after]
+    if after and msg.get("quickReply") and not after[-1].get("quickReply") and after[-1].get("type") == "text":
+        after[-1]["quickReply"] = msg.pop("quickReply")
+    return [msg, *after]
 
 
 # ---------- 元付へのFAX（振り分け） --------------------------------------------------------
