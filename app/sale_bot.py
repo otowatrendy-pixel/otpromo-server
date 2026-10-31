@@ -5,7 +5,7 @@ SALE_ENABLED=0（初期値・本番）のあいだは、bot.py から呼ばれ�
 - 登録の最初に「賃貸／売買／両方」を聞き、売買・両方なら所属団体と売買の仲介手数料を聞く
 - 賃貸版の読み取りで「賃貸以外」と出た図面を、売買版でもう一度読み、売買の資料を届ける
 - 賃貸だけで登録した方が売買の図面を送ったら、図面を預かって2つだけ聞き、終わったら続けて作る
-- メニューの「元付へFAX」で、賃貸の内見申込書と売買の物件確認・内見依頼書を振り分ける
+- メニューの「元付へFAX」で、賃貸の内見申込書と売買の内見依頼書を振り分ける
 
 文面は messages_sale.json（ID は sale_ で始まる）。
 """
@@ -592,7 +592,7 @@ def deliver(c, jid, after=()):
 # ---------- 元付へのFAX（振り分け） --------------------------------------------------------
 
 def fax_start(c):
-    if SALE_ONLY:  # 売買版のLINE：元付へのFAXは、売買の物件確認・内見依頼書だけ
+    if SALE_ONLY:  # 売買版のLINE：元付へのFAXは、売買の内見依頼書だけ
         return c.send(texts.build("sale_fax_start")) or True
     kinds = {r.get("kind", "rent") for r in (c.u.get("recent_jobs") or [])}
     if kinds == {"sale"}:
@@ -615,7 +615,7 @@ def bfax_postback(c, v):
             return c.send(line.text("最近お作りした売買の物件がありません。売買の募集図面を送ってください。",
                                     quick=[{"type": "action", "action": {"type": "camera", "label": "募集図面を送る"}}]))
         q = [line.qr_postback(naiken_bot.short_label(r["title"]), f"bfax=from_last&doc={r['id']}") for r in rec]
-        return c.send(line.text("どの物件の物件確認・内見依頼書を作りますか？（最近7日の売買の物件）", quick=q))
+        return c.send(line.text("どの物件の内見依頼書を作りますか？（最近7日の売買の物件）", quick=q))
     return c.send(texts.build("sale_fax_start"))
 
 
@@ -838,7 +838,7 @@ def parse_evals(s):
         m = re.search(name + r"\D{0,6}?(\d+(?:\.\d+)?)\s*(万)?", s)
         if m:
             out[key] = int(round(float(m.group(1)) * (10_000 if m.group(2) else 1)))
-    # 固定資産税・都市計画税の年税額（物件確認・内見依頼書のご回答欄で返ってくる値）
+    # 固定資産税・都市計画税の年税額（元付業者から聞いた値を送ってもらう）
     m = re.search(r"(?:年税額?|固都税|税額)\D{0,6}?(\d+(?:\.\d+)?)\s*(万)?", s)
     if m:
         out["annual_property_tax"] = int(round(float(m.group(1)) * (10_000 if m.group(2) else 1)))

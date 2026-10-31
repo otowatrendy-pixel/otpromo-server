@@ -152,6 +152,8 @@ def on_text(c, t):
             d["wishes"] = []
         d = naiken.merge(d, parsed)
         d["wishes"] = (d.get("wishes") or [])[:2]  # 内見の希望日時は第2希望まで
+        if d.get("kind") == "sale":
+            d["guests"] = None  # 売買の内見依頼書には人数を載せない（LINEで聞くのは日時だけ）
         if not parsed.get("to_fax"):
             # AIが番号を拾えなかったときは、電話番号の形をした最後のものをFAX番号とみなす
             nums = re.findall(r"\+?\d[\d\-‐－ー()（） ]{8,16}\d", unicodedata.normalize("NFKC", t))

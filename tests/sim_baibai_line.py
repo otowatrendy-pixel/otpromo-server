@@ -7,7 +7,7 @@ CHROME_PATH=/opt/pw-browsers/chromium python tests/sim_baibai_line.py
 1. APP_MODE=sale：友だち追加は売買版のあいさつ。登録は賃貸の仲介手数料を聞かず、住所の後に所属団体と売買の手数料
 2. 売買の図面 → 売買の資料（kind=sale）が届き、件数を1つ使う。AIは売買版の読み取り1回だけ
 3. 賃貸版に登録済みの方 → 会社情報を引き継いで2問だけ。賃貸の図面が届いたら賃貸版のLINEへご案内（件数に数えない）
-4. メニュー「元付へFAX」は売買の物件確認・内見依頼書、登録内容の変更（売買の設定）
+4. メニュー「元付へFAX」は売買の内見依頼書、登録内容の変更（売買の設定）
 5. APP_MODE=rent（初期値）のときは今の賃貸版と同じ（売買の図面は断る）… 最後に別のプロセスで確認
 """
 import io
@@ -144,7 +144,7 @@ assert "会社名" in out and "賃貸と売買のどちら" not in out, out
 text(A, "サンプル不動産株式会社")
 pb(A, "shop=none")
 out = text(A, "見本 太郎")
-assert "物件確認・内見依頼書" in out and "内見申込書" not in out, out  # 賃貸版と同じIDの文面を売買の言い方に
+assert "内見依頼書" in out and "内見申込書" not in out, out  # 賃貸版と同じIDの文面を売買の言い方に
 text(A, "090-0000-0000")
 out = text(A, "東京都知事(1)第99999号")
 assert "業界団体" not in out  # 所属団体は住所の後
@@ -190,9 +190,9 @@ assert job["kind"] == "sale" and job["status"] == "done"
 assert AI_CALLS == {"rental": 0, "sale": 1}, AI_CALLS  # 賃貸版の読み取りは呼ばない
 print("帯の会社情報:", sale_core.band_company(u_of(A)["company"])["免許"])
 
-# ---- 4) 元付へFAX（売買だけ作った方は、売買の物件確認へ） ----
+# ---- 4) 元付へFAX（売買だけ作った方は、売買の内見依頼書へ） ----
 out = pb(A, "motofax=start")
-assert "物件確認・内見依頼書" in out
+assert "内見依頼書" in out and "物件確認" not in out
 # 登録内容の変更：「仲介手数料」が「売買の設定」に
 out = pb(A, "reg=edit")
 assert "売買の設定" in out, out
@@ -333,7 +333,7 @@ pb(B, "cancel")
 assert not u_of(B).get("sale_edit")
 assert store.quota(u_of(B))["remaining"] == before
 
-# 物件確認・内見依頼書FAX：売買の資料から宛先・物件が入り、文面は売買の言い方。送信・回数は賃貸の内見FAXの仕組み
+# 内見依頼書FAX：売買の資料から宛先・物件が入り、文面は売買の言い方。送信・回数は賃貸の内見FAXの仕組み
 import naiken
 naiken.ai_parse = lambda t, only=None: {"wishes": [{"date": "2026-11-07", "time": "14:00", "note": None}], "guests": 2}
 store.update_user(store.user_by_line(B)[0], {"plan": "light", "company": {**u_of(B)["company"], "名刺済み": True, "FAX": "03-0000-9999"}})
@@ -348,14 +348,14 @@ fid = u_of(B)["nk_fid"]
 fpdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
 import re
 ft = re.sub(r"\s", "", unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(fpdf)).pages)))
-assert "内見依頼書" in ft and "3,980万円" in ft and "評価額" in ft and "見本一郎" not in ft, ft[:600]
+assert "内見依頼書" in ft and "3,980万円" in ft and "評価額" not in ft and "ご回答欄" not in ft and "2名" not in ft and "見本一郎" not in ft, ft[:600]
 assert len(pypdf.PdfReader(io.BytesIO(fpdf)).pages) == 1
 out = pb(B, "naiken=send")
 assert "管理会社" not in out and "内見申込書" not in out, out
-print("物件確認FAXの送信結果:", out[:120])
+print("内見依頼FAXの送信結果:", out[:120])
 # 賃貸の内見申込書は今までどおりの言い方（売買の下書きのあとでも）
 assert naiken.sale_words({"type": "text", "text": "内見申込書を管理会社へ", "quickReply": {"items": [{"action": {"label": "内見申込書を直す", "data": "naiken=edit"}}]}}) == \
-    {"type": "text", "text": "物件確認・内見依頼書を元付業者へ", "quickReply": {"items": [{"action": {"label": "依頼書を直す", "data": "naiken=edit"}}]}}
+    {"type": "text", "text": "内見依頼書を元付業者へ", "quickReply": {"items": [{"action": {"label": "内見依頼書を直す", "data": "naiken=edit"}}]}}
 out = pb(B, "bfax=recent")
 assert "メゾン見本" in out, out
 assert sale_bot.parse_evals("年税額 123,400 土地 1000万") == {"land_eval": 10_000_000, "annual_property_tax": 123400}

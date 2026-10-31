@@ -153,7 +153,7 @@ def from_job(job):
 
 
 def from_sale_job(job):
-    """売買の資料から「物件確認・内見依頼書」の下書きを作る（中身は baibai_naiken.from_sale_facts とそろえる）。"""
+    """売買の資料から「内見依頼書」の下書きを作る（中身は baibai_naiken.from_sale_facts とそろえる）。"""
     import baibai_naiken
     f = (job.get("result") or {}).get("事実") or {}
     d = baibai_naiken.from_sale_facts(f)
@@ -166,8 +166,8 @@ def from_sale_job(job):
 
 
 # 売買の依頼書のときは、賃貸の内見申込書の文面の言い方を売買に合わせる
-SALE_WORDS = [("内見申込書", "物件確認・内見依頼書"), ("内見申込", "物件確認・内見依頼"), ("管理会社", "元付業者")]
-SALE_WORDS_SHORT = [("内見申込書", "依頼書"), ("内見申込", "内見依頼"), ("管理会社", "元付業者")]  # ボタン（20文字まで）
+SALE_WORDS = [("内見申込書", "内見依頼書"), ("内見申込", "内見依頼"), ("管理会社", "元付業者")]
+SALE_WORDS_SHORT = SALE_WORDS  # ボタン（20文字まで）
 
 
 def sale_words(x, short=False):
@@ -240,10 +240,8 @@ def build(d, company):
     prop = d.get("prop") or {}
     if d.get("kind") == "sale":
         import baibai_naiken
-        g = d.get("guests")
         html_text = baibai_naiken.html(to=to, me=me_from_company(company, d.get("guide")), prop=prop,
-                                       wishes=[wish_label(w) for w in d.get("wishes", [])],
-                                       guests=f"{g}名様" if isinstance(g, int) else g, tax=True)
+                                       wishes=[wish_label(w) for w in d.get("wishes", [])])
         return _pdf_png(html_text)
     r = Result(事実=Facts(取引="賃貸"))
     html_text = render.naiken_html(r, company, wishes=[wish_label(w) for w in d.get("wishes", [])],
