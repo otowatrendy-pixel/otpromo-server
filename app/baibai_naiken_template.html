@@ -235,6 +235,12 @@
         <th>鍵・立会い</th>
         <td><span class="opt nw">□ 現地で立会い</span><span class="opt nw">□ キーボックス（番号は別途連絡）</span><span class="nw">□ 御社でお渡し</span></td>
       </tr>
+      {% if show_tax %}
+      <tr>
+        <th>税・評価額<br><span class="nw" style="font-weight:400;font-size:8pt">わかる範囲で</span></th>
+        <td style="line-height:2.1"><div class="nw">固定資産税・都市計画税（年額）<span class="blank" style="width:34mm"></span>円</div><div class="nw">固定資産税評価額　土地<span class="blank" style="width:30mm"></span>円　建物<span class="blank" style="width:30mm"></span>円</div></td>
+      </tr>
+      {% endif %}
       {% if show_ad %}
       <tr>
         <th>広告掲載</th>

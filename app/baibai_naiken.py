@@ -33,6 +33,7 @@ ASKS = [
     ("visit", "ご内見の可否と日時", True),
     ("key", "鍵の手配と立会いの要否", True),
     ("now", "現況（空室・居住中・賃貸中）", True),
+    ("tax", "固定資産税等の年税額と評価額（わかる範囲で）", True),
     ("ad", "広告掲載の可否", False),
 ]
 
@@ -75,7 +76,7 @@ def from_sale_facts(facts):
     }
 
 
-def html(to, me, prop, wishes=None, guests=None, note=None, ad=False, now=None, qr_svg=None):
+def html(to, me, prop, wishes=None, guests=None, note=None, ad=False, tax=True, now=None, qr_svg=None):
     """依頼書のHTMLを作る。
 
     to   : {"company", "branch", "person", "fax"}（元付業者）
@@ -83,6 +84,8 @@ def html(to, me, prop, wishes=None, guests=None, note=None, ad=False, now=None, 
     prop : {"kind", "name", "room", "address", "price", "number"}
     wishes: 希望日時の文字列の並び（最大3つ）。空文字は手書き用の空欄。None なら空欄2行
     ad   : True なら「広告掲載の可否」も確認し、回答欄にも出す
+    tax  : True なら固定資産税・都市計画税の年税額と評価額（土地・建物）を手書きで答えてもらう欄を出す。
+           返ってきた値は購入諸費用の概算書（costs_sale.with_evals の land_eval・bldg_eval・annual_property_tax）に使う
     """
     from jinja2 import Template
     from markupsafe import Markup
@@ -92,14 +95,15 @@ def html(to, me, prop, wishes=None, guests=None, note=None, ad=False, now=None, 
     k = prop.get("kind") or ""
     prop["kind"] = k if k in KINDS + EXTRA_KINDS else kind_of(k)
     kinds = KINDS + ([prop["kind"]] if prop["kind"] in EXTRA_KINDS else [])
-    asks = [{"text": t, "on": (ad if k == "ad" else on)} for k, t, on in ASKS if k != "ad" or ad]
+    use = {"ad": ad, "tax": tax}
+    asks = [{"text": t, "on": use.get(k, on)} for k, t, on in ASKS if use.get(k, True)]
     if qr_svg is None:
         qr = HERE / "static" / "naiken-qr.svg"  # 賃貸版と同じ「内見FAX」経路のQR。売買版のLINEが決まったら差し替える
         qr_svg = Markup(qr.read_text(encoding="utf-8")) if qr.exists() else ""
     data = {
         "sent_date": sent_date(now), "to": to or {}, "me": me or {}, "prop": prop, "kinds": kinds,
         "wishes": [w or BLANK_WISH for w in (wishes or [])][:3] or [BLANK_WISH, BLANK_WISH],
-        "guests": guests, "note": note, "asks": asks, "show_ad": ad, "qr_svg": qr_svg,
+        "guests": guests, "note": note, "asks": asks, "show_ad": ad, "show_tax": tax, "qr_svg": qr_svg,
     }
     tpl = TEMPLATE.read_text(encoding="utf-8")
     # 書体はネットから読まず、同梱のものを使う（賃貸版と同じ）
