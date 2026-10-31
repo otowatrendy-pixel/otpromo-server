@@ -95,6 +95,10 @@ class SaleFacts(BaseModel):
     契約不適合責任: Optional[str] = Field(None, description="『契約不適合責任免責』『引渡しから2年』など記載そのまま（旧来の『瑕疵担保』の表記もここ）")
     固定資産税_都市計画税: Optional[str] = Field(None, description="年額の記載があればそのまま")
     固定資産税評価額: Optional[str] = Field(None, description="土地・建物の評価額の記載があればそのまま（まれ）")
+    評価額_土地: Money = Field(default_factory=Money, description="土地の固定資産税評価額（円）。『固定資産税評価額：土地 90,206,550円』→ 金額円 90206550")
+    評価額_建物: Money = Field(default_factory=Money, description="建物の固定資産税評価額（円）")
+    評価額_年度: Optional[str] = Field(None, description="評価額の年度の記載そのまま（例：2025年、令和7年度）")
+    評価額_土地は持分: Optional[bool] = Field(None, description="区分マンションの土地の評価額が、この部屋の持分の額と書いてあれば true、敷地全体の額と書いてあれば false、わからなければ null")
     # 収益物件
     満室想定年収: Money = Field(default_factory=Money)
     現況年収: Money = Field(default_factory=Money)
