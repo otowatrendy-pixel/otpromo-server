@@ -4,6 +4,7 @@
 FAXIMO_ID・FAXIMO_PASSWORD（管理画面のログインID・パスワード）が登録されていれば送る。結果は問い合わせ方式。
 """
 import base64
+import json
 import logging
 from datetime import timedelta
 
@@ -143,13 +144,15 @@ def _fax_api_send(number, pdf, sender):
     body = {"sendto": [{"faxno": faxno}],
             "userkey": "otp" + secrets.token_hex(8),
             "headerinfo": fax_header(sender),
-            "retrynum": max(0, min(3, FAXIMO_RETRY)),
+            "retrynum": str(max(0, min(3, FAXIMO_RETRY))),  # 仕様書の例どおり文字で渡す
             "subject": ("1分資料 " + (sender or ""))[:50],
             "Attachment": [{"attachmentname": "1pun-shiryo.pdf",
                             "attachmentdata": base64.b64encode(pdf).decode()}]}
     for attempt in (1, 2):
         try:
-            r = requests.post(f"{FAXIMO_URL}/request.json", json=body, headers=_faximo_headers(), timeout=60)
+            # 日本語を \\uXXXX にせず UTF-8 のまま送る
+            r = requests.post(f"{FAXIMO_URL}/request.json", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                              headers=_faximo_headers(), timeout=60)
             j = r.json() if r.status_code == 200 else {}
         except Exception:
             log.exception("faximo 送信依頼で通信エラー to=%s", faxno)

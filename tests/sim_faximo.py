@@ -22,8 +22,9 @@ class R:
 
 calls = []
 queue = []
-def fake_post(url, json=None, headers=None, timeout=None):
-    calls.append(("POST", url, json, headers))
+def fake_post(url, data=None, headers=None, timeout=None):
+    assert "\\u" not in data.decode()
+    calls.append(("POST", url, json.loads(data), headers))
     return queue.pop(0)
 def fake_get(url, params=None, headers=None, timeout=None):
     calls.append(("GET", url, params, headers))
@@ -36,7 +37,7 @@ pid = delivery._fax_api_send("03-3577-5600", b"%PDF-1.4 test", delivery.fax_send
 m, url, body, h = calls[-1]
 print(pid, url, body["headerinfo"], body["subject"])
 assert pid == "0000036273813" and url == "https://rest.faximo.jp/snd/v2/request.json"
-assert body["sendto"] == [{"faxno": "0335775600"}] and body["retrynum"] == 2
+assert body["sendto"] == [{"faxno": "0335775600"}] and body["retrynum"] == "2"
 assert body["userkey"].isalnum() and len(body["subject"]) <= 50
 assert base64.b64decode(body["Attachment"][0]["attachmentdata"]) == b"%PDF-1.4 test"
 assert base64.b64decode(h["X-Auth"]).decode() == "otowa-test:pw-test" and len(h["X-Processkey"]) <= 20
