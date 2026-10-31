@@ -1,6 +1,7 @@
 """メール・FAXでのお届け。
 
-メールは Resend（RESEND_API_KEY があれば送る）。FAXは faximo（送信APIは仕様書が届いてからつなぐ、結果は問い合わせ方式）。
+メールは Resend（RESEND_API_KEY があれば送る）。FAXは faximoSilver の Web-API（REST V2、仕様書 第1.3版）。
+FAXIMO_ID・FAXIMO_PASSWORD（管理画面のログインID・パスワード）が登録されていれば送る。結果は問い合わせ方式。
 """
 import base64
 import logging
@@ -14,7 +15,11 @@ log = logging.getLogger("delivery")
 MAIL_FROM = config.env("MAIL_FROM", "1分資料 <shiryou@otpromo.com>")
 MAIL_REPLY_TO = config.env("MAIL_REPLY_TO", "m-aij@otpromo.com")
 RESEND_API_KEY = config.env("RESEND_API_KEY")
-FAX_ENABLED = bool(config.env("FAX_API_KEY"))
+FAXIMO_ID = config.env("FAXIMO_ID")
+FAXIMO_PASSWORD = config.env("FAXIMO_PASSWORD")
+FAXIMO_URL = config.env("FAXIMO_URL", "https://rest.faximo.jp/snd/v2")
+FAXIMO_RETRY = int(config.env("FAXIMO_RETRY", "2") or 2)  # 話し中などの再送回数（0〜3、再送は無料）
+FAX_ENABLED = bool(FAXIMO_ID and FAXIMO_PASSWORD)
 
 
 def mail_ready():
@@ -107,15 +112,107 @@ def send_fax(number, pdf: bytes, sender: str = "", kind: str = "", ref: str = ""
     return pid
 
 
+def _faximo_headers():
+    import secrets
+    auth = base64.b64encode(f"{FAXIMO_ID}:{FAXIMO_PASSWORD}".encode()).decode()
+    return {"Content-Type": "application/json", "X-Auth": auth, "X-Processkey": secrets.token_hex(10)}
+
+
+# 日本語のヘッダーが通らなかったとき（フォーマット不正・桁数オーバー）に使う半角だけのヘッダー
+FAX_HEADER_ASCII = "1pun-shiryo @d@ @t@ P.@p@"
+_HEADER_NG = ("001100", "021007")
+
+
+def fax_header(sender):
+    """相手のFAXの上に出る1行。「会社名（1分資料経由） 日付 時刻 P.ページ」で、変換後80文字に収める。"""
+    tail = " @d@ @t@ P.@p@"            # 変換後は「 2026/11/05 11:00:00 P.01」の25文字前後
+    room = 80 - 26
+    return (sender or "1分資料")[:room] + tail
+
+
 def _fax_api_send(number, pdf, sender):
-    """faximo の送信API。仕様書（トライアル開始時に入手）が届いたらここをつなぐ。戻り値は受付番号。"""
-    log.info("FAX未設定のため送らない to=%s sender=%s", number, sender)
+    """faximo の送信依頼（POST request.json）。戻り値は明細番号 idxcnt（受け付けられなければ None）。"""
+    import secrets
+    if not FAX_ENABLED:
+        log.info("FAX未設定のため送らない to=%s sender=%s", number, sender)
+        return None
+    faxno = "".join(ch for ch in str(number or "") if ch.isdigit())
+    if not faxno:
+        log.warning("FAX番号が空のため送らない %r", number)
+        return None
+    body = {"sendto": [{"faxno": faxno}],
+            "userkey": "otp" + secrets.token_hex(8),
+            "headerinfo": fax_header(sender),
+            "retrynum": max(0, min(3, FAXIMO_RETRY)),
+            "subject": ("1分資料 " + (sender or ""))[:50],
+            "Attachment": [{"attachmentname": "1pun-shiryo.pdf",
+                            "attachmentdata": base64.b64encode(pdf).decode()}]}
+    for attempt in (1, 2):
+        try:
+            r = requests.post(f"{FAXIMO_URL}/request.json", json=body, headers=_faximo_headers(), timeout=60)
+            j = r.json() if r.status_code == 200 else {}
+        except Exception:
+            log.exception("faximo 送信依頼で通信エラー to=%s", faxno)
+            return None
+        code = str(j.get("result", "")) if j else f"HTTP{r.status_code}"
+        if code == "000000" and j.get("idxcnt"):
+            return str(j["idxcnt"])
+        if attempt == 1 and code in _HEADER_NG:
+            log.warning("faximo がヘッダーを受け付けないため半角のヘッダーで送り直す（%s）", code)
+            body["headerinfo"] = FAX_HEADER_ASCII
+            body["subject"] = "1pun-shiryo"
+            continue
+        break
+    log.warning("faximo 送信依頼が受け付けられない to=%s result=%s", faxno, code)
+    import usage
+    usage.notify_admin("FAXの送信依頼が受け付けられません",
+                       f"faximo の結果コード：{code}\n送り先：{faxno}\n"
+                       "001001 ならログインID・パスワード、そのほかは仕様書の結果コード一覧を確認してください。")
     return None
 
 
+# 送信結果 status → (この仕組みでの状態, 理由)。理由 busy・invalid は naiken.FAIL_REASONS で文章になる
+_FAILED = {"9204": "送れない形式のファイルでした", "9205": "送信先の設定（ホワイトリスト）で止められました",
+           "9206": "送信先の設定（ブラックリスト）で止められました", "9207": "1回で送れる枚数を超えました",
+           "9209": "今月送れる枚数の上限を超えました", "9212": "送信先がありませんでした",
+           "9220": "送信がキャンセルされました"}
+
+
+def _once_a_day(key):
+    import store
+    return store.db().create("meta", f"{key}_{store.now().strftime('%Y%m%d')}", {"at": store.now()})
+
+
 def _fax_api_status(pid):
-    """faximo の送信結果API。戻り値は ("sending"|"retrying"|"sent"|"failed", 理由)。仕様書が届いたらつなぐ。"""
-    return "sending", ""
+    """faximo の送信履歴（GET record_query.json?idxcnt=）。戻り値は ("sending"|"sent"|"failed", 理由)。
+    faximo には「再送中」を表す状態がない（再送中も 0＝処理中）ので retrying は返さない。"""
+    if not FAX_ENABLED:
+        return "sending", ""
+    r = requests.get(f"{FAXIMO_URL}/record_query.json", params={"idxcnt": pid},
+                     headers=_faximo_headers(), timeout=30)
+    if r.status_code != 200:
+        log.warning("faximo 送信履歴 HTTP%s %s", r.status_code, pid)
+        return "sending", ""
+    j = r.json()
+    rows = j.get("SendResultList") or []
+    if str(j.get("result")) != "000000" or not rows:
+        return "sending", ""   # まだ履歴に載っていない。12時間たっても分からなければ poll_faxes が運営に知らせる
+    row = rows[0]
+    st, detail = str(row.get("status", "")), str(row.get("statusdetail") or "")
+    if st == "0":
+        return "sending", ""
+    if st in ("5", "9208"):
+        if st == "9208" and _once_a_day("faximo_9208"):
+            import usage
+            usage.notify_admin("faximo：今月の送信枚数が上限に近づいています",
+                               "送信は届いています。faximo の契約枚数を確認してください。", urgent=False)
+        return "sent", ""
+    if st == "9202":
+        return "failed", {"30012": "busy", "40014": "invalid"}.get(detail, "")
+    import usage
+    usage.notify_admin("FAXが送れませんでした（faximo側の理由）",
+                       f"明細番号：{pid}\n結果コード：{st} {_FAILED.get(st, '')}\n管理画面で確認してください。")
+    return "failed", ""
 
 
 def poll_faxes():
