@@ -130,9 +130,13 @@ def analyze(data: bytes) -> dict:
     tidy(result)
     # 二重の点検：図面の文字（PDFの文字データ＋文字認識）から大切な言葉を探し、AIの結果になければ注意を出す
     try:
-        double_check(result, text_job.result(timeout=60))
+        page_words = text_job.result(timeout=60)
+        double_check(result, page_words)
     except Exception as ex:  # 点検ができなくても資料は作る
+        page_words = ""
         result.スタッフへの注意.append(f"大切な記載の自動点検ができませんでした（{ex.__class__.__name__}）。告知事項・再建築・借地などは原本で確認してください。")
+    # おすすめポイントはお客様に送る文章なので、強い言葉と図面にない数字を点検する（10/31本人）
+    check_points(result, page_words)
     if pages > 1:
         # 図面の束（Excelで何件分もまとめたPDFなど）。1ページ目だけで作る
         result.スタッフへの注意.insert(0, f"PDFが{pages}ページありました。1ページ目の物件で資料を作りました。ほかのページの物件は、1件ずつ送ってください。")
@@ -431,6 +435,67 @@ def double_check(result: SaleResult, text: str) -> list:
     return missed
 
 
+# ---- おすすめポイントの点検（お客様に送る文章） ------------------------------------------
+OSUSUME_NOTE = "お客様へ送る前に内容をご確認ください"  # sale_render と同じ文言
+# 不動産の表示に関する公正競争規約（18条など）で、根拠なく使えない言葉・断定する言葉
+# 「最上階」「最寄り」「完全分離型（二世帯）」のような、事実を表す言い方は除く
+BANNED = re.compile(
+    r"最高|最上(?!階|部)|最適|最安|格安|破格|激安|掘り?出し?物|特選|厳選|完全(?!分離)|完璧|万全|"
+    r"日本一|業界一|地域一|抜群|当社だけ|当社限り|一流|特級|お買い?得|お値打ち|絶対|必ず|"
+    r"ナンバーワン|No\.?1|NO\.?1|№1|資産価値が上が|値上がり")
+_NUM = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _nums(text: str) -> set:
+    t = unicodedata.normalize("NFKC", text or "").replace(",", "")
+    out = {float(x) for x in _NUM.findall(t)}
+    # 和暦の年は西暦でも書けるようにする（図面「令和元年築」→ポイント「2019年築」）
+    for m in _YEAR.finditer(t):
+        if m.group(1):
+            y = built_year(m.group(0))
+            if y:
+                out.add(float(y))
+    return out
+
+
+def point_problems(p, f, allowed: set) -> list:
+    """1つのポイントの問題を返す（なければ空）。"""
+    text = f"{p.見出し} {p.説明}"
+    bad = []
+    words = sorted({m.group(0) for m in BANNED.finditer(unicodedata.normalize("NFKC", text))})
+    if not f.新築 and re.search(r"新築(?!時|当初|分譲時)", text):
+        words.append("新築")
+    if words:
+        bad.append("使えない言葉「" + "」「".join(words) + "」")
+    extra = sorted(n for n in _nums(text) if n not in allowed)
+    if extra:
+        bad.append("販売図面にない数字「" + "」「".join(f"{n:g}" for n in extra) + "」")
+    return bad
+
+
+def check_points(result: SaleResult, page_words: str) -> list:
+    """おすすめポイントから、強い言葉や販売図面にない数字を含むものを外し、スタッフへの注意に残す。外した見出しの一覧を返す。
+
+    数字は、図面の文字（文字データ＋文字認識）とAIが読み取った事実の両方にあれば使ってよい。
+    図面の文字が取れなかったときは、AIが書いた根拠の文も手がかりに含める。
+    """
+    f = result.事実
+    allowed = _nums(page_words) | _nums(f.model_dump_json())
+    keep, dropped = [], []
+    for p in result.おすすめポイント:
+        ok_nums = allowed if page_words else allowed | _nums(p.根拠)
+        bad = point_problems(p, f, ok_nums)
+        if bad:
+            dropped.append(p.見出し)
+            result.スタッフへの注意.append(f"おすすめポイント「{p.見出し}」は、{'・'.join(bad)}があったため外しました。")
+        else:
+            keep.append(p)
+    result.おすすめポイント = keep
+    if dropped and not keep:
+        result.スタッフへの注意.append("おすすめポイントが残りませんでした。販売図面を見て、お客様向けのポイントを手で書いてください。")
+    return dropped
+
+
 # ---- 判定 -------------------------------------------------------------------------------
 def verdict(result: SaleResult) -> str:
     """作ってよい資料か。ok / blurry / not_maisoku / rental / unsupported"""
@@ -482,6 +547,7 @@ def render_documents(company: dict, img: Image.Image, result: SaleResult, pages:
     title = " ".join(x for x in (f.物件名, f.号室 and f"{f.号室}号室") if x) or f.所在地 or "物件"
     texts = {
         "osusume": [p.model_dump() for p in result.おすすめポイント],
+        "osusume_note": OSUSUME_NOTE,  # お届けのときに必ず一言添える（規約3条2項と同じ内容）
         "qa": [q.model_dump() for q in result.想定QA],
         "chui": list(result.スタッフへの注意),
         "shaky": list(f.読み取りに自信がない項目),

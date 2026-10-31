@@ -65,6 +65,20 @@ assert sale_core.walk_min(["A線 B駅 徒歩12分", "C線 D駅 バス10分 停�
 assert sale_core.first_youto("第一種低層住居専用地域・第一種中高層住居専用地域") == "第一種低層住居専用地域" and ci["youto"] is None
 assert sale_core._yen("年額 12.5万円") == 125000 and sale_core._yen("98,000円") == 98000
 
+# おすすめポイント：お客様に送る文章。強い言葉・図面にない数字のポイントは外す（10/31本人）
+assert len(r.おすすめポイント) == 3, [p.見出し for p in r.おすすめポイント]  # 見本のポイントは全部残る
+from schema import Point
+r5 = r.model_copy(deep=True)
+r5.おすすめポイント += [Point(見出し="格安の掘出し物", 説明="ぜひご検討ください。", 根拠="価格"),
+                      Point(見出し="最上階の角部屋", 説明="完全分離型ではありませんが明るいお部屋です。", 根拠="所在階"),
+                      Point(見出し="駅から近い", 説明="駅まで約480mです。", 根拠="交通"),
+                      Point(見出し="築46年", 説明="2019年にリフォーム済みです。", 根拠="築年月"),
+                      Point(見出し="新築同様", 説明="きれいなお部屋です。", 根拠="リフォーム")]
+dropped = sale_core.check_points(r5, "見本線 見本駅 徒歩6分 3LDK 65.12㎡ 1980年4月 8階建の3階 39,800,000円")
+assert dropped == ["格安の掘出し物", "駅から近い", "築46年", "新築同様"], dropped
+assert any("「格安」" in t and "外しました" in t for t in r5.スタッフへの注意)
+assert sale_core.OSUSUME_NOTE == "お客様へ送る前に内容をご確認ください"
+
 out = sale_core.render_documents(company, a["img"], r, a["pages"], a["log"])
 hidden = out["log"]["白で消した文字"]; print("白で消した：", hidden)
 joined = "".join(hidden)
@@ -76,5 +90,6 @@ for w in ("分かれ", "広告転載不可", "レインズ", "内見", "専任�
 assert "告知" not in joined
 (OUT / "obikae.jpg").write_bytes(out["obikae_jpg"])
 (OUT / "okyaku.pdf").write_bytes(out["pdf_okyaku"]); (OUT / "shanai.pdf").write_bytes(out["pdf_shanai"])
+assert out["texts"]["osusume_note"] == "お客様へ送る前に内容をご確認ください"
 sale_schema.SaleResult.model_validate(out["result"])  # 保存の形から戻せる
 print("OK", out["log"]["秒_合計"], "秒", OUT)
