@@ -425,6 +425,8 @@ def on_postback(c, data):
         if not c.u.get("company", {}).get("会社名"):
             return start_steps(c, list(REG_STEPS), "new")
         store.update_user(c.uid, {"registered": True, "reg_queue": [], "reg_mode": None, "registered_at": store.now()})
+        if sale_bot.SALE_ONLY:
+            store.launch_trial(c.uid)  # 売買版の公開記念（期間中の登録はお試し10件・30日以内）
         growth.on_registered(c.uid)
         link_menu(c.line_uid, True)
         if sale_bot.on() and c.u.get("use_kind") in ("sale", "both"):

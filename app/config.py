@@ -65,7 +65,12 @@ REVIEW_EMAILS = [e.strip().lower() for e in env("REVIEW_EMAILS", "ippunshiryo.re
 # 料金と枚数
 FREE_SHEETS = int(env("FREE_SHEETS", "5"))       # 最初の無料枚数（通算）
 LIGHT_SHEETS = int(env("LIGHT_SHEETS", "30" if APP_MODE == "sale" else "50"))    # ライトの月の枚数（繰り越しなし）。売買版は30件（10/31本人決定）
-# 売買版のMAX（内部の名前は unlimited）の月の件数。決定待ちのため仮に100件（10/31料金スレッド）。0なら上限なし。賃貸版の使い放題は上限なし
+# 売買版の公開記念（10/31本人OK）：この期間（日本時間）に登録した方は、お試しを登録から30日以内に使える10件に。1契約（LINEのID）1回
+LAUNCH_TRIAL_START = env("LAUNCH_TRIAL_START", "2026-12-03T00:00:00+09:00" if APP_MODE == "sale" else "")
+LAUNCH_TRIAL_END = env("LAUNCH_TRIAL_END", "2027-01-31T23:59:59+09:00" if APP_MODE == "sale" else "")
+LAUNCH_TRIAL_SHEETS = int(env("LAUNCH_TRIAL_SHEETS", "10"))
+LAUNCH_TRIAL_DAYS = int(env("LAUNCH_TRIAL_DAYS", "30"))
+# 売買版のMAX（内部の名前は unlimited）の月の件数。100件（10/31本人決定）。0なら上限なし。賃貸版の使い放題は上限なし
 MAX_SHEETS = int(env("MAX_SHEETS", "100" if APP_MODE == "sale" else "0"))
 FILE_DAYS = int(env("FILE_DAYS", "7"))           # PDFのリンクの有効日数
 

@@ -511,7 +511,30 @@ _REAL_REPLY("tok", [line.text("募集図面を送ってください", quick=[lin
 _rq.post = _post
 assert _sent["messages"][0]["text"] == "販売図面を送ってください", _sent
 assert "x=募集図面" in _json.dumps(_sent, ensure_ascii=False)  # postback の data は変えない
+import texts as texts_mod
+from datetime import timedelta as _td
 check_stripe_split("sale")
+# 公開記念（2026/12/3〜2027/1/31 の登録はお試し10件・30日以内、1契約1回。期間外は5件）
+from datetime import datetime as _dt
+J = store.JST
+for name, at, want in (("Ucamp", _dt(2026, 12, 3, 0, 0, tzinfo=J), "launch"), ("Ucamp2", _dt(2027, 1, 31, 23, 59, tzinfo=J), "launch"),
+                       ("Upre", _dt(2026, 12, 2, 23, 59, tzinfo=J), "normal"), ("Upost", _dt(2027, 2, 1, 0, 0, tzinfo=J), "normal")):
+    store.db().set("users", name, {"free_limit": 5, "free_used": 0, "plan": "free", "month_used": 0})
+    assert store.launch_trial(name, at=at) == want, name
+    assert store.launch_trial(name, at=at) is None  # 1契約1回
+    u = store.get_user(name)
+    if want == "launch":
+        assert u["free_limit"] == 10 and u["free_expires"] == at + _td(days=30)
+    else:
+        assert u["free_limit"] == 5 and not u.get("free_expires")
+# 30日を過ぎたら残りは失効
+store.update_user("Ucamp", {"free_expires": store.now() - _td(seconds=1)})
+assert store.quota(store.get_user("Ucamp"))["remaining"] == 0
+store.update_user("Ucamp2", {"free_expires": store.now() + _td(days=1), "free_used": 3})
+assert store.quota(store.get_user("Ucamp2"))["remaining"] == 7
+# あいさつの一文は期間中だけ
+assert texts_mod.launch_note(_dt(2026, 12, 10, tzinfo=J)) == "2027年1月31日までにご登録の方は、公開記念として、登録から30日以内に使える10件にしています。"
+assert texts_mod.launch_note(_dt(2026, 11, 20, tzinfo=J)) == "" and texts_mod.launch_note(_dt(2027, 2, 1, tzinfo=J)) == ""
 # 日報の「1件あたりのAI原価」：平均・最大を出し、20円を超えたら【至急】で知らせる
 import usage
 from datetime import timedelta as _td

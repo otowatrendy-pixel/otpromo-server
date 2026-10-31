@@ -50,8 +50,22 @@ def _defaults():
     if config.APP_MODE != "sale":
         return {}
     import naiken
+    import store
     return {"ライトの件数": config.LIGHT_SHEETS, "MAXの件数": config.MAX_SHEETS,
-            "ライトのFAX": naiken.LIMITS["light"][0], "MAXのFAX": naiken.LIMITS["unlimited"][0]}
+            "ライトのFAX": naiken.LIMITS["light"][0], "MAXのFAX": naiken.LIMITS["unlimited"][0],
+            "お試しの件数": config.FREE_SHEETS, "公開記念の案内": launch_note(store.now())}
+
+
+def launch_note(t):
+    """公開記念の期間中だけ出す一文（集客スレッドとそろえた言い方）。期間外は空。"""
+    import config
+    from datetime import datetime
+    st, en = config.LAUNCH_TRIAL_START, config.LAUNCH_TRIAL_END
+    if not (st and en) or not (datetime.fromisoformat(st) <= t <= datetime.fromisoformat(en)):
+        return ""
+    e = datetime.fromisoformat(en)
+    return (f"{e.year}年{e.month}月{e.day}日までにご登録の方は、公開記念として、"
+            f"登録から{config.LAUNCH_TRIAL_DAYS}日以内に使える{config.LAUNCH_TRIAL_SHEETS}件にしています。")
 
 
 def fill(t, **kw):
