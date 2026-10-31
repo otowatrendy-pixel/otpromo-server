@@ -1,6 +1,6 @@
 """売買版 1分資料：購入諸費用の概算（costs_sale）
 
-賃貸版 costs.py とは別物。募集図面から読み取った事実（SaleFacts）と
+賃貸版 costs.py とは別物。販売図面から読み取った事実（SaleFacts）と
 会社ごとの設定（CompanySaleSettings）を受け取り、概算書に載せる行を返す。
 
 方針
@@ -187,7 +187,7 @@ Structure = Literal["wood", "light_steel", "steel", "rc", "src"]
 
 @dataclass
 class SaleFacts:
-    """募集図面から読み取った事実。書いていないものは None のまま。"""
+    """販売図面から読み取った事実。書いていないものは None のまま。"""
     property_type: PropertyType
     price: int                                  # 価格（税込の表示額）
     price_tax: Optional[int] = None             # 「うち消費税」の額（書いてあれば）
@@ -238,10 +238,10 @@ class CompanySaleSettings:
     fee_rate: Optional[float] = None             # 割合（税抜の物件価格に対する率。2%なら0.02）。消費税を足し、上限額を超えない
     teiren_tokurei: bool = False                 # 800万円以下の物件で低廉な空家等の特例（上限33万円）を使う
     estimate_eval: bool = True                   # 評価額が分からないとき、価格から推計する（False なら要確認）
-    shihoshoshi_transfer: int = 66_000           # 司法書士報酬の目安（税込）：所有権移転
+    shihoshoshi_transfer: int = 77_000           # 司法書士報酬の目安（税込）：所有権移転（立会い・登記原因証明情報込み）。日司連2024アンケート平均＋立会料（本人回答「ネット相場で仮」10/31）
     shihoshoshi_preserve: int = 33_000           # 所有権保存（新築）
-    shihoshoshi_mortgage: int = 44_000           # 抵当権設定
-    touki_jippi: int = 8_000                     # 登記事項証明・郵送などの実費の目安
+    shihoshoshi_mortgage: int = 49_500           # 抵当権設定
+    touki_jippi: int = 11_000                    # 登記事項証明・郵送などの実費の目安
     # 火災保険・地震保険（5年一括の目安）。fire_mode="auto" は面積・構造から計算、"fixed" は fire_insurance の固定額
     fire_mode: Literal["auto", "fixed"] = "auto"
     fire_insurance: dict = field(default_factory=lambda: {"mansion": 100_000, "house": 300_000, "land": 0})  # fixed 用・面積不明時
@@ -597,9 +597,9 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
                               f"月額{monthly:,}円の、引渡月の日割分（{days}日分）と翌月分"))
             notes.append("管理費等は、引渡月の日割分と翌月分を計上しています。管理会社の引き落としの時期によっては、翌々月分の前払いが必要な場合があります。")
         if f.shuzen_kikin:
-            lines.append(Line("must", "修繕積立基金", f.shuzen_kikin, "exact", "図面記載の額"))
+            lines.append(Line("must", "修繕積立基金", f.shuzen_kikin, "exact", "販売図面記載の額"))
         if f.kanri_junbikin:
-            lines.append(Line("must", "管理準備金", f.kanri_junbikin, "exact", "図面記載の額"))
+            lines.append(Line("must", "管理準備金", f.kanri_junbikin, "exact", "販売図面記載の額"))
 
     # 6. 住宅ローン関連
     # 土地はローン関連を出さない（建築と合わせたお借入れが多く、つなぎ融資・分割実行・抵当権の付け方が

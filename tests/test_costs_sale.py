@@ -46,7 +46,7 @@ m2 = with_evals(m, land_eval=10_000_000, bldg_eval=6_000_000, annual_property_ta
 r_real = compute(m2, s, None, D(2026,11,20), D(2027,1,15)); show("mansion real evals", r_real)
 assert not r_real.evals_used["estimated"] and not any("推計" in n for n in r_real.notes + r_real.staff_notes)
 reg = [l for l in r_real.lines if l.name=="登記費用（所有権）"][0]
-assert reg.amount == ceil_k(reg_tax(10_000_000,0.015)+reg_tax(6_000_000,0.003)+66_000+8_000)
+assert reg.amount == ceil_k(reg_tax(10_000_000,0.015)+reg_tax(6_000_000,0.003)+77_000+11_000)
 print("ALL OK")
 
 # ---- 地価公示・路線価からの推計（架空の見本町データ） ----

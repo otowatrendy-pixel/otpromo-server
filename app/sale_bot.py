@@ -16,6 +16,7 @@ import re
 import unicodedata
 from datetime import date, timedelta
 
+import costs_sale
 import config
 import line
 import store
@@ -32,8 +33,9 @@ ALLOW = {x.strip() for x in config.env("SALE_ALLOW_UIDS").split(",") if x.strip(
 
 # 売買の設定の初期値（costs_sale.CompanySaleSettings と同じ名前）。会社ごとに company["売買設定"] で上書き
 DEFAULT_SETTINGS = {"fee_mode": "max", "fee_custom": None, "fee_rate": None, "teiren_tokurei": False, "estimate_eval": True,
-                    "shihoshoshi_transfer": 66_000, "shihoshoshi_preserve": 33_000,
-                    "shihoshoshi_mortgage": 44_000, "touki_jippi": 8_000}
+                    # 司法書士報酬・実費の初期値は概算書の計算側（costs_sale.CompanySaleSettings）を唯一の元にする
+                    **{k: getattr(costs_sale.CompanySaleSettings(), k) for k in
+                       ("shihoshoshi_transfer", "shihoshoshi_preserve", "shihoshoshi_mortgage", "touki_jippi")}}
 # 月々の返済の目安（概算書に小さく入れる）。金利は仮置き（本人確認待ち）
 # 住宅ローンシミュレーション（概算書に付ける）。金利は仮置き（本人確認待ち）。項目名は概算書スレッドとそろえる
 LOAN_TYPES = {"hendo": "変動金利", "kotei_kikan": "固定期間選択", "zenki_kotei": "全期間固定"}
@@ -347,7 +349,7 @@ def resume_after_setup(c):
     c.refresh()
     job = store.get_job(jid) if jid else None
     if not job or job.get("status") != "analyzed" or (at and at < store.now() - timedelta(hours=24)):
-        return c.send(line.text("売買の設定ができました。お預かりしていた募集図面の期限が切れたため、もう一度送ってください。"))
+        return c.send(line.text("売買の設定ができました。お預かりしていた販売図面の期限が切れたため、もう一度送ってください。"))
     a = _load_analyzed(jid, job)
     if ask_loan(c, jid, a, job.get("宛名") or "", saved=True):
         return
@@ -494,7 +496,7 @@ def lq_postback(c, k, v):
     jid, job = _lq_job(c)
     if not jid:
         store.update_user(c.uid, {"sale_lq": None})
-        return c.send(line.text("お預かりしていた募集図面が見つかりませんでした。お手数ですが、もう一度送ってください。"))
+        return c.send(line.text("お預かりしていた販売図面が見つかりませんでした。お手数ですが、もう一度送ってください。"))
     if k == "lq":
         if v == "no":
             return _lq_finish(c, jid, job, {"use": False})
@@ -612,8 +614,8 @@ def bfax_postback(c, v):
         since = store.now() - timedelta(days=7)
         rec = [r for r in (c.u.get("recent_jobs") or []) if r.get("kind") == "sale" and (not r.get("at") or r["at"] >= since)][:12]
         if not rec:
-            return c.send(line.text("最近お作りした売買の物件がありません。売買の募集図面を送ってください。",
-                                    quick=[{"type": "action", "action": {"type": "camera", "label": "募集図面を送る"}}]))
+            return c.send(line.text("最近お作りした売買の物件がありません。売買の販売図面を送ってください。",
+                                    quick=[{"type": "action", "action": {"type": "camera", "label": "販売図面を送る"}}]))
         q = [line.qr_postback(naiken_bot.short_label(r["title"]), f"bfax=from_last&doc={r['id']}") for r in rec]
         return c.send(line.text("どの物件の内見依頼書を作りますか？（最近7日の売買の物件）", quick=q))
     return c.send(texts.build("sale_fax_start"))
@@ -885,7 +887,7 @@ def eval_text(c, s):
     store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
     url = rerender(c, jid, evals=ev)
     if not url:
-        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
+        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、販売図面から送ってください。"))
         return True
     c.send(texts.build("sale_eval_done", お客様向けリンク=url))
     return True
@@ -911,7 +913,7 @@ def lsim_text(c, s):
     store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
     url = rerender(c, jid, loan_override=lo)
     if not url:
-        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
+        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、販売図面から送ってください。"))
         return True
     c.send(texts.build("sale_lsim_done", お客様向けリンク=url))
     return True
@@ -986,7 +988,7 @@ def _hand_rerender(c, iso, label):
     store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
     url = rerender(c, jid, handover=iso)
     if not url:
-        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
+        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、販売図面から送ってください。"))
         return True
     c.send(texts.build("sale_hand_done", 決済日=label, お客様向けリンク=url))
     return True

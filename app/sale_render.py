@@ -53,7 +53,7 @@ def build_html(r, obikae_png: bytes, company: dict, sections=ALL_SECTIONS, bw=Fa
 <img src="data:image/png;base64,{img64}"></section>""",
         "chui": f"""<section class=keep><h1>スタッフへの注意<small>{e(name)}</small></h1>
 <ul class=chui>{chui}</ul>
-<h2>物件の要点（募集図面より）</h2><table class=kv>{summary_rows(f)}</table>
+<h2>物件の要点（販売図面より）</h2><table class=kv>{summary_rows(f)}</table>
 <p class=note>{render.NOTE}</p></section>""",
         "osusume": f"""<section><h1>② 物件のおすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol></section>""",
         "qa": f"""<section><h1>④ 想定Q&amp;A<small>{e(name)}</small></h1><dl>{qa}</dl>

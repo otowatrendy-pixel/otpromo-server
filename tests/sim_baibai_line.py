@@ -40,8 +40,9 @@ import store  # noqa: E402
 from PIL import Image  # noqa: E402
 
 SENT, FILES = [], {}
-line.reply = lambda tok, msgs: SENT.append(("reply", msgs)) or True
-line.push = lambda to, msgs: SENT.append(("push", msgs)) or True
+_REAL_REPLY = line.reply  # 言い換えを本物の reply が通すかの確認用
+line.reply = lambda tok, msgs: SENT.append(("reply", line.out(msgs))) or True  # 本物の reply・push と同じ言い換えを通す
+line.push = lambda to, msgs: SENT.append(("push", line.out(msgs))) or True
 line.loading = lambda *a, **k: None
 line.profile = lambda uid: {"displayName": "テスト太郎"}
 line.content = lambda mid: FILES[mid]
@@ -113,7 +114,7 @@ def image(uid):
     global n
     mid = f"m{n + 1}"
     FILES[mid] = (ROOT / "tests" / "fixtures" / "mihon-baibai.png").read_bytes()
-    print("\n>>> (売買の募集図面)")
+    print("\n>>> (売買の販売図面)")
     return ev(uid, "message", message={"type": "image", "id": mid})
 
 
@@ -414,6 +415,18 @@ assert abs(sale_bot.calib_factor("東京都練馬区貫井2丁目") - 1.2) < 1e-
 assert sale_bot.calib_factor("東京都杉並区阿佐谷北1丁目") == 1.0
 assert store.quota(u_of(B))["remaining"] == before
 
+# 「販売図面」にそろえる（10/31本人決定）：送った文面に「募集図面」が残っていない。本物の reply も言い換える
+import json as _json
+left = [m for _, ms in SENT for m in ms if "募集図面" in _json.dumps(m, ensure_ascii=False)]
+assert not left, left[:2]
+_sent = {}
+import requests as _rq
+_post = _rq.post
+_rq.post = lambda url, **kw: _sent.update(kw["json"]) or SimpleNamespace(status_code=200, text="")
+_REAL_REPLY("tok", [line.text("募集図面を送ってください", quick=[line.qr_postback("募集図面", "x=募集図面")])])
+_rq.post = _post
+assert _sent["messages"][0]["text"] == "販売図面を送ってください", _sent
+assert "x=募集図面" in _json.dumps(_sent, ensure_ascii=False)  # postback の data は変えない
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})
 assert r.returncode == 0

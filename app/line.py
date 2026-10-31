@@ -27,7 +27,28 @@ def verify(body: bytes, signature: str) -> bool:
     return hmac.compare_digest(base64.b64encode(mac).decode(), signature or "")
 
 
+# 売買版（APP_MODE=sale）では、賃貸版と共通の文面も含めて「募集図面」を「販売図面」と言い換えて送る（10/31本人決定）
+SALE_TERMS = [("募集図面", "販売図面")]
+
+
+def out(x):
+    """送る直前の言い換え。賃貸版ではそのまま返す。data・uri など文面でないところは触らない。"""
+    if config.APP_MODE != "sale":
+        return x
+    if isinstance(x, str):
+        for a, b in SALE_TERMS:
+            x = x.replace(a, b)
+        return x
+    if isinstance(x, list):
+        return [out(v) for v in x]
+    if isinstance(x, dict):
+        return {k: (v if k in ("data", "uri", "type", "url", "originalContentUrl", "previewImageUrl") else out(v))
+                for k, v in x.items()}
+    return x
+
+
 def reply(token, messages) -> bool:
+    messages = out(messages)
     r = requests.post(f"{API}/message/reply", headers=_h(), json={"replyToken": token, "messages": messages[:5]},
                       timeout=20)
     if r.status_code != 200:
@@ -40,6 +61,7 @@ on_push = None
 
 
 def push(to, messages) -> bool:
+    messages = out(messages)
     r = requests.post(f"{API}/message/push", headers=_h(), json={"to": to, "messages": messages[:5]}, timeout=20)
     if r.status_code != 200:
         log.warning("push失敗 %s %s", r.status_code, r.text[:300])
