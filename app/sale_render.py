@@ -26,7 +26,6 @@ def summary_rows(f) -> str:
         ("現況／引渡し", "／".join(x for x in (f.現況, f.引渡し) if x)),
         ("取引態様（元付）", f.取引態様 or "記載なし"),
         ("売主", f.売主 or ""),
-        ("広告の可否", f.広告転載 or "記載なし（要確認）"),
         ("元付業者", " ".join(x for x in (f.元付業者, f.元付業者_電話 and f"TEL {f.元付業者_電話}",
                                        f.元付業者_FAX and f"FAX {f.元付業者_FAX}") if x)),
     ]

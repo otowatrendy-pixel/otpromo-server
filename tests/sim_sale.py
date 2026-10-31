@@ -24,8 +24,10 @@ assert sale_core.verdict(r) == "ok"
 assert not any("告知" in t for t in r.帯の外の業者向け情報), r.帯の外の業者向け情報
 # 3) スタッフへの注意：物件確認・広告不可・告知事項・旧耐震・消費税不明
 chui = "\n".join(r.スタッフへの注意); print(chui)
-for w in ("物件確認", "広告転載不可", "告知事項", "1981年", "消費税"):
+for w in ("告知事項", "1981年", "消費税"):
     assert w in chui, w
+for w in ("物件確認", "広告", "おとり"):  # 案内用の図面なので、広告の注意書きは出さない
+    assert w not in chui, w
 # 4) 管理費の消費税のQ&Aは直す
 assert r.想定QA[0].要確認 is False and "かかりません" in r.想定QA[0].参考回答
 # 5) 帯に取引態様・所属団体
