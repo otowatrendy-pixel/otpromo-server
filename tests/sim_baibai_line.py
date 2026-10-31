@@ -159,7 +159,7 @@ pb(A, "color=青")
 pb(A, "font=ゴシック")
 pb(A, "obi=auto")
 out = pb(A, "recv=line")
-assert "所属団体" in out and "定額 550,000円" in out and "取引態様：媒介" in out, out
+assert "所属団体" in out and "一律 550,000円" in out and "取引態様：媒介" in out, out
 out = pb(A, "reg=done")
 assert "賃貸か売買かは自動で見分けます" in out
 # 住所より先に団体を聞いたので、表記を住所に合わせて直す（変更から）
@@ -244,6 +244,10 @@ assert "宛名" in out
 out = text(B, "見本 一郎")
 assert "はじめての1回だけ" in out and "業界団体" in out, out
 assert AI_CALLS == {"rental": 1, "sale": 1}
+out = pb(B, "assoc=takken")
+assert "団体を選び直す" in out and "書き直す" not in out, out
+out = pb(B, "assoc=again")  # 打ち込まずに団体の一覧に戻る
+assert "全日（ウサギマーク）" in out, out
 pb(B, "assoc=zennichi")
 out = pb(B, "assoc=ok")
 assert "売買の仲介手数料" in out
@@ -318,6 +322,33 @@ pb(B, f"hand=ask&doc={jidB}")
 pb(B, "cancel")
 assert not u_of(B).get("sale_edit")
 assert store.quota(u_of(B))["remaining"] == before
+
+# 物件確認・内見依頼書FAX：売買の資料から宛先・物件が入り、文面は売買の言い方。送信・回数は賃貸の内見FAXの仕組み
+import naiken
+naiken.ai_parse = lambda t, only=None: {"wishes": [{"date": "2026-11-07", "time": "14:00", "note": None}], "guests": 2}
+store.update_user(store.user_by_line(B)[0], {"plan": "light", "company": {**u_of(B)["company"], "名刺済み": True, "FAX": "03-0000-9999"}})
+before = store.quota(u_of(B))["remaining"]  # ライトに切り替えたので数え直す
+out = pb(B, f"bfax=from_last&doc={jidB}")
+assert "メゾン見本" in out and "見本エステート株式会社" in out and "管理会社" not in out and "内見申込書" not in out, out
+assert u_of(B)["nk"]["kind"] == "sale" and u_of(B)["nk"]["prop"]["price"] == "3,980万円"
+out = text(B, "11/7 14時 2名")
+assert "見本エステート株式会社 御中" in out, out
+assert "管理会社" not in out and "内見申込書" not in out, out
+fid = u_of(B)["nk_fid"]
+fpdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
+import re
+ft = re.sub(r"\s", "", unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(fpdf)).pages)))
+assert "内見依頼書" in ft and "3,980万円" in ft and "評価額" in ft and "見本一郎" not in ft, ft[:600]
+assert len(pypdf.PdfReader(io.BytesIO(fpdf)).pages) == 1
+out = pb(B, "naiken=send")
+assert "管理会社" not in out and "内見申込書" not in out, out
+print("物件確認FAXの送信結果:", out[:120])
+# 賃貸の内見申込書は今までどおりの言い方（売買の下書きのあとでも）
+assert naiken.sale_words({"type": "text", "text": "内見申込書を管理会社へ", "quickReply": {"items": [{"action": {"label": "内見申込書を直す", "data": "naiken=edit"}}]}}) == \
+    {"type": "text", "text": "物件確認・内見依頼書を元付業者へ", "quickReply": {"items": [{"action": {"label": "依頼書を直す", "data": "naiken=edit"}}]}}
+out = pb(B, "bfax=recent")
+assert "メゾン見本" in out, out
+assert sale_bot.parse_evals("年税額 123,400 土地 1000万") == {"land_eval": 10_000_000, "annual_property_tax": 123400}
 
 # 実際の評価額を送ると、補正の記録が1件残る（土地面積が分かるときだけ）。係数は3件たまるまで1.0
 import calibration

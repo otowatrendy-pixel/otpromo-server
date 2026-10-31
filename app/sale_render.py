@@ -56,7 +56,7 @@ def build_html(r, obikae_png: bytes, company: dict, sections=ALL_SECTIONS, bw=Fa
 <ul class=chui>{chui}</ul>
 <h2>物件の要点（募集図面より）</h2><table class=kv>{summary_rows(f)}</table>
 <p class=note>{render.NOTE}</p></section>""",
-        "osusume": f"""<section><h1>② おすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol></section>""",
+        "osusume": f"""<section><h1>② 物件のおすすめポイント<small>{e(name)}</small></h1><ol class=pt>{points}</ol></section>""",
         "qa": f"""<section><h1>④ 想定Q&amp;A<small>{e(name)}</small></h1><dl>{qa}</dl>
 <p class=note>{render.NOTE}</p></section>""",
     }

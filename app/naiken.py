@@ -135,6 +135,8 @@ def merge(draft, parsed):
 
 def from_job(job):
     """直前のマイソクから下書きを作る。"""
+    if job.get("kind") == "sale":
+        return from_sale_job(job)
     r = Result.model_validate(job["result"]) if job.get("result") else None
     f = r.事実 if r else Facts(取引="賃貸")
     name, room = split_room(f.物件名 or job.get("title") or "")
@@ -148,6 +150,38 @@ def from_job(job):
             "to": {"company": f.元付業者 or "", "branch": "", "fax": f.元付業者_FAX or "",
                    "from_maisoku": bool(f.元付業者_FAX), "check": check},
             "wishes": [], "guests": None, "guide": None}
+
+
+def from_sale_job(job):
+    """売買の資料から「物件確認・内見依頼書」の下書きを作る（中身は baibai_naiken.from_sale_facts とそろえる）。"""
+    import baibai_naiken
+    f = (job.get("result") or {}).get("事実") or {}
+    d = baibai_naiken.from_sale_facts(f)
+    p = d["prop"]
+    if not p.get("name"):  # 土地などで物件名がないときは所在地で呼ぶ
+        p["name"] = p.get("address") or job.get("title") or ""
+    return {"kind": "sale", "job_id": job.get("_id"), "prop": p,
+            "to": {**d["to"], "from_maisoku": bool(d["to"].get("fax"))},
+            "wishes": [], "guests": None, "guide": None}
+
+
+# 売買の依頼書のときは、賃貸の内見申込書の文面の言い方を売買に合わせる
+SALE_WORDS = [("内見申込書", "物件確認・内見依頼書"), ("内見申込", "物件確認・内見依頼"), ("管理会社", "元付業者")]
+SALE_WORDS_SHORT = [("内見申込書", "依頼書"), ("内見申込", "内見依頼"), ("管理会社", "元付業者")]  # ボタン（20文字まで）
+
+
+def sale_words(x, short=False):
+    """文面（LINEのメッセージの dict・文字列）の言い方を売買用に置き換える。"""
+    if isinstance(x, str):
+        for a, b in (SALE_WORDS_SHORT if short else SALE_WORDS):
+            x = x.replace(a, b)
+        return x
+    if isinstance(x, list):
+        return [sale_words(v, short) for v in x]
+    if isinstance(x, dict):
+        return {k: (sale_words(v, short or k in ("label", "displayText")) if k not in ("data", "uri", "type") else v)
+                for k, v in x.items()}
+    return x
 
 
 def split_room(name):
@@ -204,11 +238,22 @@ def build(d, company):
     to["fax"] = fax_display(to.get("fax", ""))
     to.setdefault("person", "")
     prop = d.get("prop") or {}
+    if d.get("kind") == "sale":
+        import baibai_naiken
+        g = d.get("guests")
+        html_text = baibai_naiken.html(to=to, me=me_from_company(company, d.get("guide")), prop=prop,
+                                       wishes=[wish_label(w) for w in d.get("wishes", [])],
+                                       guests=f"{g}名様" if isinstance(g, int) else g, tax=True)
+        return _pdf_png(html_text)
     r = Result(事実=Facts(取引="賃貸"))
     html_text = render.naiken_html(r, company, wishes=[wish_label(w) for w in d.get("wishes", [])],
                                    to=to, me=me_from_company(company, d.get("guide")), guests=d.get("guests"),
                                    prop={"name": prop.get("name", ""), "room": prop.get("room"),
                                          "address": prop.get("address", "")})
+    return _pdf_png(html_text)
+
+
+def _pdf_png(html_text):
     with tempfile.TemporaryDirectory() as tmp:
         pdf = Path(tmp) / "naiken.pdf"
         render.to_pdf(html_text, pdf)
@@ -553,7 +598,7 @@ def run_reserved():
                 store.db().set("faxes", fid, {"status": "optout"}, merge=True)
                 count(uid, -1, source=source)
                 _push(u, "予約していた内見申込書のFAXは、送り先の管理会社さまからFAXを止めるご依頼をいただいているため、"
-                         f"お送りしませんでした（{base['管理会社']}）。お電話など直接ご連絡をお願いいたします。今回の分は、回数に数えていません。")
+                         f"お送りしませんでした（{base['管理会社']}）。お電話など直接ご連絡をお願いいたします。今回の分は、回数に数えていません。", sale=rec["draft"].get("kind") == "sale")
                 continue
             status = _dispatch(uid, fid, rec, u, source)
         except Exception:
@@ -565,16 +610,18 @@ def run_reserved():
             n += 1  # 届いた・失敗は delivery.poll_faxes → on_fax_result でお知らせする
         elif status == "failed":
             store.update_user(uid, {"nk_fid": fid, "nk": rec["draft"]})
-            bot.notify(uid, "naiken_failed", {**base, "理由": "予約の時刻にFAXを送り出せませんでした"})
+            bot.notify(uid, "naiken_failed", {**base, "理由": "予約の時刻にFAXを送り出せませんでした",
+                                               **({"_sale": True} if rec["draft"].get("kind") == "sale" else {})})
         elif status == "not_ready":
-            _push(u, "予約していた内見申込書のFAXは、ただいまFAX送信の準備中のため、お送りしていません（テスト版）。")
+            _push(u, "予約していた内見申込書のFAXは、ただいまFAX送信の準備中のため、お送りしていません（テスト版）。",
+                  sale=rec["draft"].get("kind") == "sale")
     return n
 
 
-def _push(u, text):
+def _push(u, text, sale=False):
     import line
     if u.get("line_uid"):
-        line.push(u["line_uid"], [line.text(text)])
+        line.push(u["line_uid"], [line.text(sale_words(text) if sale else text)])
 
 
 FAIL_REASONS = {"busy": "相手のFAXが話し中、または応答がありませんでした", "invalid": "FAX番号がつながりませんでした"}
@@ -589,6 +636,8 @@ def on_fax_result(fid, st, reason=""):
     uid, d = rec["user_id"], rec["draft"]
     to = d.get("to") or {}
     base = {"管理会社": " ".join(x for x in (to.get("company"), to.get("branch")) if x), "FAX番号": to.get("fax", "")}
+    if d.get("kind") == "sale":
+        base["_sale"] = True  # 知らせる文面を売買の言い方に（bot.notify で置き換える）
     if st == "sent":
         store.db().set("faxes", fid, {"status": "sent", "done_at": store.now()}, merge=True)
         u = store.get_user(uid) or {}
@@ -603,7 +652,7 @@ def on_fax_result(fid, st, reason=""):
     elif st == "retrying":
         if not rec.get("retry_told"):
             store.db().set("faxes", fid, {"retry_told": True}, merge=True)
-            bot.notify(uid, "naiken_retrying", {})
+            bot.notify(uid, "naiken_retrying", {"_sale": True} if d.get("kind") == "sale" else {})
     elif st == "failed":
         store.db().set("faxes", fid, {"status": "failed", "done_at": store.now()}, merge=True)
         count(uid, -1, source=rec.get("from"))  # 届かなかった分は回数に数えない

@@ -40,7 +40,7 @@ try:
 except ImportError:  # 概算書のモジュールが無い環境（テスト用の最小構成など）
     DEFAULT_LOAN = {"use": True, "show": True, "type": "hendo", "rates": {"hendo": 1.2, "kotei_kikan": 3.7, "zenki_kotei": 3.6},
                     "kotei_years": 10, "years": 35, "amount_mode": "ratio", "ratio": 0.9, "amount": None, "compare": False}
-FEE_NAMES = {"max": "上限どおり（価格×3%＋6万円・税別）", "half": "上限の半額", "free": "無料", "custom": "定額"}
+FEE_NAMES = {"max": "上限どおり（価格×3%＋6万円・税別）", "half": "上限の半額", "free": "無料", "custom": "一律の金額"}
 
 
 def on(c=None):
@@ -130,7 +130,7 @@ def fee_label(co):
     if s["fee_mode"] == "rate" and s.get("fee_rate"):
         return f"価格（税抜）の{s['fee_rate'] * 100:g}%＋消費税（上限まで）"
     if s["fee_mode"] == "custom" and s.get("fee_custom"):
-        return f"定額 {s['fee_custom']:,}円（税込）"
+        return f"一律 {s['fee_custom']:,}円（税込）"
     return FEE_NAMES.get(s["fee_mode"], FEE_NAMES["max"])
 
 
@@ -179,6 +179,8 @@ def reg_postback(c, step, k, v):
     if k == "assoc" and step in ("assoc", "assoc_check"):
         if v == "other":
             return ("next", "assoc_other")
+        if v == "again":  # 表記を見て「団体を選び直す」→ 団体の一覧に戻る（打ち込まずに済むように）
+            return ("ask", "assoc")
         if v == "ok":
             return ("next", None)
         if v not in ASSOC and v != "none":
@@ -449,7 +451,7 @@ def finish(c, jid, a, atena="", after=()):
         c.send(texts.build("err_system"), *after)
 
 
-KEY_NOTES = re.compile(r"広告転載不可|広告不可|告知事項|物件確認|再建築")
+KEY_NOTES = re.compile(r"告知事項|物件確認|再建築")  # 案内用の資料なので、広告の可否は要点に出さない
 
 
 def key_notes(job):
@@ -485,6 +487,23 @@ def fax_start(c):
     if "sale" in kinds:
         return c.send(texts.build("sale_fax_choose"))
     return None  # 賃貸だけ → 今までどおり内見申込書へ
+
+
+def bfax_postback(c, v):
+    """bfax=start（案内）／bfax=recent（最近の売買の物件から選ぶ）／bfax=from_last&doc=資料ID（その物件で作る）。"""
+    import naiken_bot
+    if v.startswith("from_last"):
+        jid = v.partition("doc=")[2] or c.u.get("last_job")
+        return naiken_bot.start_from_job(c, jid)
+    if v == "recent":
+        since = store.now() - timedelta(days=7)
+        rec = [r for r in (c.u.get("recent_jobs") or []) if r.get("kind") == "sale" and (not r.get("at") or r["at"] >= since)][:12]
+        if not rec:
+            return c.send(line.text("最近お作りした売買の物件がありません。売買の募集図面を送ってください。",
+                                    quick=[{"type": "action", "action": {"type": "camera", "label": "募集図面を送る"}}]))
+        q = [line.qr_postback(naiken_bot.short_label(r["title"]), f"bfax=from_last&doc={r['id']}") for r in rec]
+        return c.send(line.text("どの物件の物件確認・内見依頼書を作りますか？（最近7日の売買の物件）", quick=q))
+    return c.send(texts.build("sale_fax_start"))
 
 
 # ---------- 登録内容の変更（売買の設定） ----------------------------------------------------
@@ -678,6 +697,10 @@ def parse_evals(s):
         m = re.search(name + r"\D{0,6}?(\d+(?:\.\d+)?)\s*(万)?", s)
         if m:
             out[key] = int(round(float(m.group(1)) * (10_000 if m.group(2) else 1)))
+    # 固定資産税・都市計画税の年税額（物件確認・内見依頼書のご回答欄で返ってくる値）
+    m = re.search(r"(?:年税額?|固都税|税額)\D{0,6}?(\d+(?:\.\d+)?)\s*(万)?", s)
+    if m:
+        out["annual_property_tax"] = int(round(float(m.group(1)) * (10_000 if m.group(2) else 1)))
     return out
 
 

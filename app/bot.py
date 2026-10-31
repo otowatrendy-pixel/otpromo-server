@@ -477,8 +477,8 @@ def on_postback(c, data):
             return naiken_bot.on_postback(c, "start")
         return
     if k == "bfax" and sale_bot.on(c):
-        # 売買の物件確認・内見依頼書（中身は claude/baibai-naiken-fax ブランチ。つなぐまでは案内だけ）
-        return c.send(texts.build("sale_fax_start"))
+        # 売買の物件確認・内見依頼書（baibai_naiken.py）。宛先・希望日時・送信・予約・回数は賃貸の内見FAXの流れを使う
+        return sale_bot.bfax_postback(c, v)
     if k == "lsim" and sale_bot.on(c):  # この資料だけ、住宅ローンの条件を変えて作り直す
         return sale_bot.lsim_ask(c, v.partition("doc=")[2] or c.u.get("last_job"))
     if k == "hand" and sale_bot.on(c):  # この資料だけ、決済日（引渡日）を変えて作り直す
@@ -1260,6 +1260,14 @@ def send_fax_done(uid, number, n):
 # ---------- Stripe からの通知を LINE で知らせる ----------
 
 def notify(uid, mid, kw):
+    if kw and kw.get("_sale"):  # 売買の物件確認・内見依頼書FAXのお知らせ：言い方だけ売買用に
+        import naiken
+        kw = {k: v for k, v in kw.items() if k != "_sale"}
+        return _notify(uid, mid, kw, wrap=naiken.sale_words)
+    return _notify(uid, mid, kw)
+
+
+def _notify(uid, mid, kw, wrap=None):
     u = store.get_user(uid)
     if u and mid == "plan_canceled":
         store.update_user(uid, {"ask_cancel_reason": True})  # アプリは /v1/me でこれを見て1回聞く
@@ -1288,6 +1296,8 @@ def notify(uid, mid, kw):
         kw["urls"] = {"変更・解約": billing.portal_url(uid), "Stripeのお客様ページ": billing.portal_url(uid)}
     urls = kw.pop("urls", None)
     msgs = [texts.build(mid, urls=urls, **kw)]
+    if wrap:
+        msgs = [wrap(m) for m in msgs]
     if mid == "plan_canceled":
         msgs.append(growth.cancel_question())  # 同じ push なので通数は増えない
     if not line.push(u["line_uid"], msgs):

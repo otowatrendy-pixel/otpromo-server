@@ -14,6 +14,34 @@ import texts
 
 log = logging.getLogger("naiken_bot")
 
+
+class _Words:
+    """売買の依頼書（下書きの kind が sale）を扱っている間は、送る文面の言い方を売買用にする。
+    賃貸の内見申込書の会話はそのまま。送る瞬間の下書きで決めるので、途中で賃貸・売買が入れ替わっても正しく出る。"""
+
+    def __init__(self, c):
+        self.__dict__["_c"] = c
+
+    def __getattr__(self, k):
+        return getattr(self._c, k)
+
+    def __setattr__(self, k, v):
+        setattr(self._c, k, v)
+
+    def send(self, *messages):
+        if ((self._c.u or {}).get("nk") or {}).get("kind") == "sale":
+            messages = [naiken.sale_words(m) for m in messages]
+        return self._c.send(*messages)
+
+
+def _words(fn):
+    import functools
+
+    @functools.wraps(fn)
+    def run(c, *a, **kw):
+        return fn(c if isinstance(c, _Words) else _Words(c), *a, **kw)
+    return run
+
 ASK_ONLY = {"prop": "物件名・号室・所在地", "dates": "内見の希望日時", "to": "管理会社の名前とFAX番号",
             "fax_invalid": "管理会社の名前とFAX番号", "edit_to": "管理会社の名前とFAX番号",
             "edit_fax": "管理会社のFAX番号", "edit_prop": "物件名・号室・所在地", "edit_dates": "内見の希望日時"}
@@ -40,6 +68,7 @@ def start(c):
     c.send(texts.build("naiken_start"))
 
 
+@_words
 def start_from_job(c, jid):
     if naiken.is_trial(c.u):
         return c.send(trial_message(c))
@@ -98,6 +127,7 @@ def to_text(to):
     return " ".join(x for x in (to.get("company"), to.get("branch")) if x)
 
 
+@_words
 def on_text(c, t):
     """内見FAXの流れの中で文字が届いたとき。"""
     step = c.u.get("nk_step") or "free"
@@ -251,6 +281,7 @@ def reserve(c, when):
     return answer(c, fid, status, rec)
 
 
+@_words
 def show_reserved(c):
     rows = naiken.reserved(c.uid)
     if not rows:
@@ -334,6 +365,7 @@ def card_text(c, step, t, co):
     card_next(c, step)
 
 
+@_words
 def card_postback(c, k):
     co = dict(c.u.get("company") or {})
     field = {"card_roman": "ローマ字", "card_role": "役職", "card_contact": None}[k]
@@ -372,6 +404,7 @@ EDIT_ASK = {"edit_to": "naiken_ask_to", "edit_fax": "naiken_ask_to", "edit_prop"
             "edit_dates": "naiken_ask_dates"}
 
 
+@_words
 def on_postback(c, v):
     if v == "start":
         return start(c)
@@ -467,12 +500,14 @@ def answer_rest(c, v):
         return c.send(texts.build("naiken_ask_dates"))
 
 
+@_words
 def edit_card(c):
     first = "card_roman" if (c.u.get("company") or {}).get("担当者名") else "card_name"
     _set(c, nk={"card_only": True}, nk_step=first)
     c.send(ask_card(first))
 
 
+@_words
 def cancel(c):
     _set(c, nk={}, nk_step=None, nk_fid=None)
     c.send(texts.build("naiken_canceled"))
