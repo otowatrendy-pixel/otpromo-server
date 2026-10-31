@@ -45,6 +45,10 @@ sale_core.tidy(r4); c4 = sale_core.cost_inputs(r4.事実)
 assert c4["land_eval"] is None and c4["bldg_eval"] == 5000000 and c4["annual_property_tax"] == 372897
 assert any("持分" in t for t in r4.スタッフへの注意) and any("2025年" in t for t in r4.スタッフへの注意)
 r4.事実.評価額_土地は持分 = True; assert sale_core.cost_inputs(r4.事実)["land_eval"] == 90206550
+# 6d) 二重の点検：図面に「再建築不可」「私道負担 約12㎡」があるのに欄が空なら注意。「セットバック：無」は注意しない
+r5 = r.model_copy(deep=True); r5.スタッフへの注意 = []
+missed = sale_core.double_check(r5, "備考 再建築不可\n私道負担 約12㎡\nセットバック：無\n告知事項あり")
+assert missed == ["再建築不可", "私道負担"], missed  # 告知事項は欄に入っているので注意しない
 # 7) 賃貸図面・種別
 r2 = r.model_copy(deep=True); r2.事実.取引 = "賃貸"; assert sale_core.verdict(r2) == "rental"
 r2.事実.取引 = "売買"; r2.事実.物件種別 = "収益一棟"; assert sale_core.verdict(r2) == "unsupported"  # 収益・事業用は第2弾

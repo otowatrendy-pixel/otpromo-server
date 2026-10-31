@@ -114,6 +114,11 @@ def analyze(data: bytes) -> dict:
         except ValueError:  # JSONの形が崩れたときは1回だけやり直す
             result, usage = call_claude(jpeg)
     tidy(result)
+    # 二重の点検：図面の文字（PDFの文字データ＋文字認識）から大切な言葉を探し、AIの結果になければ注意を出す
+    try:
+        double_check(result, page_text(data, img, pages))
+    except Exception as ex:  # 点検ができなくても資料は作る
+        result.スタッフへの注意.append(f"大切な記載の自動点検ができませんでした（{ex.__class__.__name__}）。告知事項・再建築・借地などは原本で確認してください。")
     if pages > 1:
         # 図面の束（Excelで何件分もまとめたPDFなど）。1ページ目だけで作る
         result.スタッフへの注意.insert(0, f"PDFが{pages}ページありました。1ページ目の物件で資料を作りました。ほかのページの物件は、1件ずつ送ってください。")
@@ -344,6 +349,65 @@ def _percent(text):
     敷地持分の仮置きに使うため、建てられる容積に近い方を取る。読めなければ None。"""
     nums = [int(n) for n in re.findall(r"([0-9]{2,4})\s*%", unicodedata.normalize("NFKC", text or ""))]
     return min(nums) if nums else None
+
+
+# ---- 二重の点検（告知事項・再建築不可などの見落としを防ぐ） ----------------------------------
+# (言葉, 事実の欄, 名前, 「無し」を表す書き方なら注意しない)
+CHECKS = [
+    (r"告知事項|心理的瑕疵|事故物件", "告知事項", "告知事項", False),
+    (r"再建築不可|再建築できません", "再建築", "再建築不可", False),
+    (r"借地権|借地|地上権|定期借地|旧法借地", "土地権利", "借地", False),
+    (r"私道負担|私道", "私道負担", "私道負担", True),
+    (r"セットバック|SB要|道路後退", "セットバック", "セットバック", True),
+    (r"市街化調整区域|調整区域", "都市計画", "市街化調整区域", False),
+    (r"建築条件付|建築条件有|建築条件あり", "建築条件", "建築条件付き", False),
+    (r"契約不適合|瑕疵担保|免責", "契約不適合責任", "契約不適合責任（免責など）", False),
+]
+_NONE_AFTER = re.compile(r"^[\s:：・]*(無|なし|無し|ナシ|不要|-|－|ー)")
+
+
+def page_text(data: bytes, img, pages: int) -> str:
+    """図面の文字。PDFの文字データ（1ページ目）と、画像の文字認識を合わせたもの。"""
+    import subprocess
+    import numpy as np
+    parts = []
+    if pages:
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "in.pdf"
+            src.write_bytes(data)
+            r = subprocess.run(["pdftotext", "-l", "1", "-layout", str(src), "-"], capture_output=True, timeout=30)
+            parts.append(r.stdout.decode("utf-8", "ignore"))
+        # 文字データが十分にあるPDFは、文字認識を省く（数秒かかるため）
+        if len(re.sub(r"\s", "", parts[0])) >= 300:
+            return unicodedata.normalize("NFKC", parts[0])
+    im = img.convert("RGB")
+    if max(im.size) > 2400:
+        sc = 2400 / max(im.size)
+        im = im.resize((round(im.width * sc), round(im.height * sc)))
+    out, _ = hide._engine()(np.asarray(im))
+    parts.append("\n".join(t for _, t, _ in out or []))
+    return unicodedata.normalize("NFKC", "\n".join(parts))
+
+
+def double_check(result: SaleResult, text: str) -> list:
+    """大切な言葉が図面にあるのに、AIの結果の欄が空なら、スタッフへの注意に「原本で確認を」と出す。見つけた名前の一覧を返す。"""
+    f = result.事実
+    flat = re.sub(r"\s+", "", text)
+    missed = []
+    for pat, key, label, none_ok in CHECKS:
+        hits = list(re.finditer(pat, flat))
+        if not hits or (getattr(f, key) or "").strip():
+            continue
+        # 「私道負担：無」「セットバック なし」だけなら注意しない
+        if none_ok and all(_NONE_AFTER.match(flat[m.end():m.end() + 4]) for m in hits):
+            continue
+        # 契約不適合責任の「免責」は、ほかの欄（条件・備考）に書いてあれば読めている
+        if any(label.split("（")[0] in x or m.group(0) in x for x in f.条件_備考 for m in hits):
+            continue
+        missed.append(label)
+        result.スタッフへの注意.append(
+            f"販売図面に「{hits[0].group(0)}」の文字がありますが、AIの読み取り結果に入っていません。原本で確認してください。")
+    return missed
 
 
 # ---- 判定 -------------------------------------------------------------------------------
