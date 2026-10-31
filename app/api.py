@@ -71,6 +71,9 @@ def me(authorization: str = Header("")):
             # 解約済みでまだ理由を受け取っていないとき true。アプリはこのときだけ1回聞く
             "ask_cancel_reason": bool(u.get("ask_cancel_reason")),
             "company": u.get("company") or {}, "delivery": u.get("delivery") or {},
+            # 売買版：アプリは sale_enabled が true のときだけ売買の画面・設定を出す
+            "sale_enabled": _sale_on(uid), "use_kind": u.get("use_kind"),
+            "sale_needs_setup": _sale_on(uid) and __import__("sale_bot").needs_setup(u),
             # 受け取り用FAX（回数券 10回1,000円・購入から3か月）。next_expiry は一番近い期限
             # 番号が未登録なら null
             # お試し中の受け取り用FAXの無料のこり（最初の3件まで。有料プランでは null）
@@ -184,6 +187,13 @@ class CompanyIn(BaseModel):
     メール: str = ""
     FAX送り先: str = ""
     宛名を聞く: bool = True  # false なら初期費用概算書の宛名を聞かない（空欄で作る）
+    # 売買版（SALE_ENABLED=1 のときだけ使う。送られなければ今の値のまま）
+    使い方: str | None = None          # rent / sale / both
+    所属団体_種類: str | None = None    # takken / zennichi / frk / zenjukyo / other / none
+    所属団体: str | None = None         # 帯の表記（種類が other のとき、または手で直したとき）
+    取引態様: str | None = None         # 媒介 / 代理
+    売買設定: dict | None = None        # costs_sale.CompanySaleSettings と同じ名前（fee_mode など）
+    売買ローン目安: dict | None = None  # {"show": true, "rate": 1.0, "years": 35}
 
 
 @router.put("/me/company")
@@ -191,6 +201,7 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     import person
     uid, u = _me(authorization)
     co = body.model_dump()
+    sale = _sale_fields(co, u)
     # 担当者名（姓・名）と携帯は必須。名前の確認と変更の制限はLINE版と同じ（10/28本人決定）
     co["担当者名"] = person.normalize_name(co["担当者名"])
     mobile = person.normalize_mobile(co["携帯"])
@@ -216,8 +227,108 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     co["メール"] = co.pop("担当者メール")  # 名刺に載せるメール（受け取り用とは別）
     co["帯画像"] = (u.get("company") or {}).get("帯画像")
     co["名刺済み"] = bool(co.get("担当者名"))
-    store.update_user(uid, {"company": co, "delivery": delivery, "registered": True})
+    co.update(sale.pop("company"))
+    store.update_user(uid, {"company": co, "delivery": delivery, "registered": True, **sale})
     return {"ok": True}
+
+
+def _sale_on(uid):
+    import sale_bot
+    return sale_bot.ENABLED and (not sale_bot.ALLOW or uid in sale_bot.ALLOW)
+
+
+SALE_KEYS = ("所属団体_種類", "所属団体", "取引態様", "売買設定", "売買ローン目安")
+
+
+def _sale_fields(co, u):
+    """売買版の項目を取り出す。送られなかった項目は今の登録のまま残す（賃貸だけのアプリからの保存で消さない）。"""
+    import sale_bot
+    old = u.get("company") or {}
+    kind = co.pop("使い方", None)
+    out = {k: old[k] for k in SALE_KEYS if k in old}
+    vals = {k: co.pop(k, None) for k in SALE_KEYS}
+    if vals["所属団体_種類"] in sale_bot.ASSOC or vals["所属団体_種類"] == "none":
+        out["所属団体_種類"] = vals["所属団体_種類"]
+        out["所属団体"] = sale_bot.assoc_text(vals["所属団体_種類"], co.get("住所"))
+    if vals["所属団体"] is not None:  # 手で直した表記が優先
+        out["所属団体"] = vals["所属団体"][:80]
+        out.setdefault("所属団体_種類", "other")
+    if vals["取引態様"] in ("媒介", "代理"):
+        out["取引態様"] = vals["取引態様"]
+    if vals["売買設定"] is not None:
+        ok = {k: v for k, v in vals["売買設定"].items() if k in sale_bot.DEFAULT_SETTINGS}
+        if ok.get("fee_mode") not in (None, "max", "half", "free", "custom"):
+            raise HTTPException(422, {"code": "sale_fee", "message": "売買の仲介手数料の選び方が正しくありません。"})
+        out["売買設定"] = {**(old.get("売買設定") or {}), **ok}
+    if vals["売買ローン目安"] is not None:
+        out["売買ローン目安"] = {**sale_bot.DEFAULT_LOAN, **{k: v for k, v in vals["売買ローン目安"].items()
+                                                         if k in sale_bot.DEFAULT_LOAN}}
+    res = {"company": out}
+    if kind in ("rent", "sale", "both"):
+        res["use_kind"] = kind
+    return res
+
+
+def _run_sale_job(uid, u, jid, data, rental_a):
+    """アプリから届いた売買の図面（賃貸版の読み取りで「賃貸以外」）。売買版で読み直して作る。"""
+    import sale_bot
+    import sale_core
+    if not sale_core.route_from_rental(rental_a["result"]):
+        return store.update_job(jid, {"status": "failed", "error": "not_maisoku"})
+    a = sale_core.analyze(data)
+    v = sale_core.verdict(a["result"])
+    if v != "ok":
+        err = f"sale_unsupported:{a['result'].事実.物件種別 or ''}" if v == "unsupported" else f"sale_{v}"
+        return store.update_job(jid, {"status": "failed", "error": err, "log": a["log"]})
+    if sale_bot.needs_setup(u):
+        # アプリでは「売買の設定」画面を出してもらう（PUT /v1/me/company のあと POST /v1/jobs/{id}/resume）
+        sale_bot._save_analyzed(jid, a)
+        return store.update_job(jid, {"status": "needs_sale_setup"})
+    _finish_sale(uid, u, jid, a)
+
+
+def _finish_sale(uid, u, jid, a):
+    import sale_bot
+    import sale_core
+    if not store.try_consume(uid):
+        return store.update_job(jid, {"status": "failed", "error": "quota"})
+    try:
+        atena = (store.get_job(jid) or {}).get("宛名") or ""
+        company = {**bot.company_for_render(uid, u), "宛名": atena}
+        out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"],
+                                         estimate_html=sale_bot.estimate_html(company))
+        store.save_files(jid, out)
+        store.update_job(jid, {"status": "done", "kind": "sale", "title": out["title"], "texts": out["texts"],
+                               "log": out["log"], "pages": out["pages"], "verdict": "sale", "result": out["result"]})
+    except Exception:
+        store.refund(uid)
+        raise
+
+
+@router.post("/jobs/{jid}/resume")
+def resume_job(jid: str, authorization: str = Header("")):
+    """売買の設定（所属団体・売買の仲介手数料）を登録したあと、預かった売買の図面で作る。AIはもう一度呼ばない。"""
+    import sale_bot
+    uid, u = _me(authorization)
+    job = store.get_job(jid)
+    if not job or job["user_id"] != uid:
+        raise HTTPException(404)
+    if job.get("status") != "needs_sale_setup":
+        raise HTTPException(409, "この資料は作り直せません")
+    if sale_bot.needs_setup(u):
+        raise HTTPException(409, {"code": "needs_sale_setup", "message": "所属団体と売買の仲介手数料を登録してください。"})
+    store.update_job(jid, {"status": "processing"})
+    bot.pool.submit(_safe_resume, uid, u, jid, job)
+    return {"job_id": jid}
+
+
+def _safe_resume(uid, u, jid, job):
+    import sale_bot
+    try:
+        _finish_sale(uid, u, jid, sale_bot._load_analyzed(jid, job))
+    except Exception:
+        log.exception("アプリの売買の資料づくりで例外")
+        store.update_job(jid, {"status": "failed", "error": "system"})
 
 
 def _run_job(uid, jid, data):
@@ -227,6 +338,9 @@ def _run_job(uid, jid, data):
         store.update_job(jid, {"status": "processing"})
         a = core.analyze(data)
         v = core.verdict(a["result"])
+        import sale_bot
+        if v == "sale" and _sale_on(uid):
+            return _run_sale_job(uid, u, jid, data, a)
         if v not in ("ok", "commercial"):
             store.update_job(jid, {"status": "failed", "error": v, "log": a["log"]})
             return
@@ -286,6 +400,7 @@ def get_job(jid: str, authorization: str = Header("")):
     ca = job.get("created_at")
     res = {"job_id": jid, "created_at": ca.isoformat() if hasattr(ca, "isoformat") else ca,
            "status": job["status"], "error": job.get("error"), "title": job.get("title"),
+           "kind": job.get("kind") or "rent",  # 売買版：rent / sale（アプリは sale のとき売買の画面を出す）
            "pdf_url": None, "obikae_url": None, "texts": None}
     if job["status"] == "done":
         mz = (job.get("texts") or {}).get("motozuke") or {}

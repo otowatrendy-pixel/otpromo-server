@@ -21,8 +21,15 @@ DATA_API = "https://api-data.line.me/v2/bot"
 _ids = {}
 
 
+def _sale():
+    import sale_bot
+    return sale_bot.ENABLED
+
+
 def _spec():
-    return json.loads((Path(__file__).parent / "messages.json").read_text())["richmenu"]
+    # 売買版の公開後（SALE_ENABLED=1）は、messages_sale.json のメニュー（「元付へFAX」など）を使う
+    name = "messages_sale.json" if _sale() else "messages.json"
+    return json.loads((Path(__file__).parent / name).read_text())["richmenu"]
 
 
 def _action(a):
@@ -52,7 +59,8 @@ def ensure():
         return
     sp = _spec()
     bodies = {n: _body(n, sp[n]) for n in ("registered", "unregistered")}
-    imgs = {n: (STATIC / f"richmenu-{n}.png").read_bytes() for n in bodies}
+    suffix = "-sale" if _sale() else ""
+    imgs = {n: (STATIC / f"richmenu-{n}{suffix}.png").read_bytes() for n in bodies}
     ver = hashlib.sha256(json.dumps(bodies, ensure_ascii=False, sort_keys=True).encode()
                          + b"".join(imgs[n] for n in sorted(imgs))).hexdigest()[:16]
     meta = store.db().get("meta", "richmenu") or {}

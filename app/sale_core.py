@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tempfile
 import time
 import unicodedata
@@ -333,6 +334,10 @@ def render_documents(company: dict, img: Image.Image, result: SaleResult, pages:
                      sale_render.build_html(result, ob_png, company, sections=("qa",))],
         })
         pdf_okyaku, pdf_shanai = okyaku.read_bytes(), shanai.read_bytes()
+        # 2つを1つにしたもの（賃貸版と同じく store.save_files・アプリの pdf_url で使う）
+        both = Path(d) / "shiryou.pdf"
+        subprocess.run(["pdfunite", str(okyaku), str(shanai), str(both)], check=True)
+        pdf = both.read_bytes()
     t3 = time.perf_counter()
     f = result.事実
     title = " ".join(x for x in (f.物件名, f.号室 and f"{f.号室}号室") if x) or f.所在地 or "物件"
@@ -346,7 +351,7 @@ def render_documents(company: dict, img: Image.Image, result: SaleResult, pages:
     log = {**(log or {}), "秒_資料": round(t3 - t2, 2), "白で消した文字": hidden}
     log["秒_合計"] = round(sum(log.get(k, 0) for k in ("秒_準備", "秒_AI", "秒_写真補正", "秒_資料")), 2)
     return {
-        "pdf_okyaku": pdf_okyaku, "pdf_shanai": pdf_shanai, "obikae_png": ob_png,
+        "pdf": pdf, "pdf_okyaku": pdf_okyaku, "pdf_shanai": pdf_shanai, "obikae_png": ob_png,
         "page_jpg": core._jpeg(raw_page, 3000, 92),
         "obikae_jpg": core._jpeg(ob, 3000, 88), "obikae_preview": core._jpeg(ob, 1000, 80),
         "texts": texts, "title": title, "pages": pages, "log": log,

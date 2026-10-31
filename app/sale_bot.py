@@ -1,0 +1,510 @@
+"""売買版のLINEの会話（賃貸版と同じLINEで、図面を見て振り分ける）。
+
+SALE_ENABLED=0（初期値・本番）のあいだは、bot.py から呼ばれても何もしない＝賃貸版の動きは変わらない。
+1 にすると:
+- 登録の最初に「賃貸／売買／両方」を聞き、売買・両方なら所属団体と売買の仲介手数料を聞く
+- 賃貸版の読み取りで「賃貸以外」と出た図面を、売買版でもう一度読み、売買の資料を届ける
+- 賃貸だけで登録した方が売買の図面を送ったら、図面を預かって2つだけ聞き、終わったら続けて作る
+- メニューの「元付へFAX」で、賃貸の内見申込書と売買の物件確認・内見依頼書を振り分ける
+
+文面は messages_sale.json（ID は sale_ で始まる）。
+"""
+import io
+import logging
+import re
+import unicodedata
+from datetime import timedelta
+
+import config
+import line
+import store
+import texts
+
+log = logging.getLogger("sale_bot")
+
+ENABLED = config.env("SALE_ENABLED", "0") == "1"
+# 試験公開で売買を開ける方（LINEのユーザーIDかサーバーのID、カンマ区切り）。空なら全員
+ALLOW = {x.strip() for x in config.env("SALE_ALLOW_UIDS").split(",") if x.strip()}
+
+# 売買の設定の初期値（costs_sale.CompanySaleSettings と同じ名前）。会社ごとに company["売買設定"] で上書き
+DEFAULT_SETTINGS = {"fee_mode": "max", "fee_custom": None, "teiren_tokurei": False, "estimate_eval": True,
+                    "shihoshoshi_transfer": 66_000, "shihoshoshi_preserve": 33_000,
+                    "shihoshoshi_mortgage": 44_000, "touki_jippi": 8_000}
+# 月々の返済の目安（概算書に小さく入れる）。金利は仮置き（本人確認待ち）
+DEFAULT_LOAN = {"show": True, "rate": 1.0, "years": 35}
+FEE_NAMES = {"max": "上限どおり（価格×3%＋6万円・税別）", "half": "上限の半額", "free": "無料", "custom": "定額"}
+
+
+def on(c=None):
+    """この方に売買を開けているか。"""
+    if not ENABLED:
+        return False
+    if not ALLOW or c is None:
+        return True
+    return c.uid in ALLOW or c.line_uid in ALLOW
+
+
+# ---------- 所属団体（帯の表記） ----------------------------------------------------------
+
+PREFS = ("北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県", "茨城県", "栃木県", "群馬県", "埼玉県",
+         "千葉県", "東京都", "神奈川県", "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県", "静岡県",
+         "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県",
+         "広島県", "山口県", "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県", "熊本県", "大分県",
+         "宮崎県", "鹿児島県", "沖縄県")
+# 首都圏不動産公正取引協議会の地域（1都8県）
+SHUTOKEN = {"東京都", "神奈川県", "埼玉県", "千葉県", "茨城県", "栃木県", "群馬県", "山梨県", "長野県"}
+ASSOC = {
+    "takken": "（公社）{pref}宅地建物取引業協会会員",
+    "zennichi": "（公社）全日本不動産協会会員",
+    "frk": "（一社）不動産流通経営協会会員",
+    "zenjukyo": "（一社）全国住宅産業協会会員",
+}
+
+
+def prefecture(address):
+    a = unicodedata.normalize("NFKC", address or "").strip()
+    for p in PREFS:
+        if a.startswith(p):
+            return p
+    # 「東京」「大阪」のように都府県を省いた書き方
+    for p in PREFS:
+        if a.startswith(p[:-1]) and p[:-1] not in ("京都",):
+            return p
+    return None
+
+
+def assoc_text(kind, address):
+    """選んだ団体から帯の表記を作る。都道府県が分からない・首都圏の外は、公取協を空にして確認で直してもらう。"""
+    pref = prefecture(address)
+    if kind == "none":
+        return ""
+    head = ASSOC[kind].format(pref=pref or "〇〇県")
+    kotori = "（公社）首都圏不動産公正取引協議会加盟" if pref in SHUTOKEN else "（〇〇不動産公正取引協議会加盟）"
+    return f"{head}　{kotori}"
+
+
+def needs_setup(u):
+    """売買の資料に要る登録が足りないか（所属団体を一度も聞いていない・売買の手数料が未設定）。"""
+    co = u.get("company") or {}
+    return "所属団体" not in co or "売買設定" not in co
+
+
+def settings(co):
+    return {**DEFAULT_SETTINGS, **(co.get("売買設定") or {})}
+
+
+def loan(co):
+    return {**DEFAULT_LOAN, **(co.get("売買ローン目安") or {})}
+
+
+def fee_label(co):
+    s = settings(co)
+    if s["fee_mode"] == "custom" and s.get("fee_custom"):
+        return f"定額 {s['fee_custom']:,}円（税込）"
+    return FEE_NAMES.get(s["fee_mode"], FEE_NAMES["max"])
+
+
+# ---------- 登録の質問（bot.py の REG_STEPS に差し込む） -----------------------------------
+
+ASK = {"kind": "sale_reg_kind", "assoc": "sale_reg_assoc", "assoc_other": "sale_reg_assoc_other",
+       "assoc_check": "sale_reg_assoc_check", "sfee": "sale_reg_fee", "sfee_custom": "sale_reg_fee_custom"}
+
+
+def reg_steps(base, kind):
+    """賃貸版の登録の質問（base）から、選んだ使い方の質問の並びを作る。
+    kind: rent（今と同じ）/ sale（賃貸の手数料を聞かない）/ both（全部）。"""
+    steps = [s for s in base if not (kind == "sale" and s == "fee")]
+    if kind in ("sale", "both"):
+        steps.insert(steps.index("license") + 1, "assoc")
+        after = "fee" if "fee" in steps else "address"
+        steps.insert(steps.index(after) + 1, "sfee")
+    return steps
+
+
+def ask_message(c, step):
+    co = c.u.get("company") or {}
+    if step == "assoc_check":
+        return texts.build("sale_reg_assoc_check", 帯の表記=co.get("所属団体") or "（表記なし）")
+    return texts.build(ASK[step])
+
+
+def set_company(c, **kv):
+    co = dict(c.u.get("company") or {})
+    co.update(kv)
+    store.update_user(c.uid, {"company": co})
+    c.refresh()
+
+
+def set_settings(c, **kv):
+    co = c.u.get("company") or {}
+    set_company(c, 売買設定={**(co.get("売買設定") or {}), **kv})
+
+
+def reg_postback(c, step, k, v):
+    """登録中のボタン。戻り値: ("next", 差し込む質問) か ("ask", 聞き直す質問) か None（売買の質問ではない）。"""
+    if k == "kind" and step == "kind":
+        store.update_user(c.uid, {"use_kind": v})
+        return ("rebuild", v)
+    if k == "assoc" and step in ("assoc", "assoc_check"):
+        if v == "other":
+            return ("next", "assoc_other")
+        if v == "ok":
+            return ("next", None)
+        if v not in ASSOC and v != "none":
+            return ("ask", step)
+        set_company(c, 所属団体=assoc_text(v, (c.u.get("company") or {}).get("住所")), 所属団体_種類=v)
+        return ("next", None if v == "none" else "assoc_check")
+    if k == "sfee" and step == "sfee":
+        if v == "custom":
+            return ("next", "sfee_custom")
+        if v not in ("max", "half", "free"):
+            return ("ask", step)
+        set_settings(c, fee_mode=v, fee_custom=None)
+        return ("next", None)
+    return None
+
+
+def reg_text(c, step, t):
+    """登録中の文字。戻り値は reg_postback と同じ。"""
+    t = unicodedata.normalize("NFKC", t or "").strip()
+    if step == "assoc_other":
+        set_company(c, 所属団体=t[:80], 所属団体_種類="other")
+        return ("next", None)
+    if step in ("assoc", "assoc_check"):
+        # ボタンを押さずに団体名を書いてきたときは、そのまま表記として受け取る
+        set_company(c, 所属団体=t[:80], 所属団体_種類="other")
+        return ("next", None)
+    if step in ("sfee", "sfee_custom"):
+        n = parse_yen(t)
+        if n is None or not (0 <= n <= 10_000_000):
+            return ("ask", "sfee_custom")
+        set_settings(c, fee_mode="free" if n == 0 else "custom", fee_custom=n or None)
+        return ("next", None)
+    return None
+
+
+def parse_yen(t):
+    s = unicodedata.normalize("NFKC", t or "").replace(",", "").replace("円", "").replace("税込", "").strip()
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(万)?", s)
+    if not m:
+        return None
+    n = float(m.group(1)) * (10_000 if m.group(2) else 1)
+    return int(round(n))
+
+
+def confirm_fields(u):
+    """sale_reg_confirm に差し込む売買の行。"""
+    co = u.get("company") or {}
+    kind = u.get("use_kind") or "both"
+    rent = "" if kind == "sale" else f"賃貸の仲介手数料：賃料の{co.get('賃貸_仲介手数料_ヶ月', 1.0):g}ヶ月分（税別）\n"
+    return {"所属団体": co.get("所属団体") or "なし", "賃貸の手数料行": rent, "売買手数料": fee_label(co),
+            "取引態様": co.get("取引態様") or "媒介"}
+
+
+# ---------- 売買の図面が届いたとき ----------------------------------------------------------
+
+def handle_sale(c, data, jid, rental_a=None):
+    """賃貸版の読み取りで「賃貸以外」と出た図面。売買版で読み直して資料を届ける。
+    戻り値は送ったメッセージ（bot.process の続きは不要）。"""
+    import sale_core
+    if not on(c):
+        store.update_job(jid, {"status": "failed", "error": "sale"})
+        return c.send(texts.build("sale_err_disabled" if ENABLED else "err_sale"))
+    if rental_a is not None and not sale_core.route_from_rental(rental_a["result"]):
+        store.update_job(jid, {"status": "failed", "error": "not_maisoku"})
+        return c.send(texts.build("err_not_maisoku"))
+    a = sale_core.analyze(data)
+    v = sale_core.verdict(a["result"])
+    if v != "ok":
+        err = f"sale_unsupported:{a['result'].事実.物件種別 or ''}" if v == "unsupported" else f"sale_{v}"
+        store.update_job(jid, {"status": "failed", "error": err, "log": a["log"]})
+        return c.send(error_message(err))
+    if needs_setup(c.u):
+        hold_for_setup(c, jid, a)
+        return
+    return finish(c, jid, a)
+
+
+def error_message(err):
+    """売買版で作れなかったときの文（err は "sale_<判定>" か "sale_unsupported:<種別>"）。"""
+    code, _, kind = err[5:].partition(":")
+    if code == "unsupported":
+        return texts.build("sale_err_unsupported", 物件種別=kind or "この種類")
+    if code == "disabled":
+        return texts.build("sale_err_disabled")
+    return texts.build({"blurry": "err_blurry", "not_maisoku": "err_not_maisoku"}.get(code, "err_system"))
+
+
+def _save_analyzed(jid, a, **extra):
+    import sale_schema
+    buf = io.BytesIO()
+    a["img"].save(buf, "PNG")
+    store.db().put_file(f"jobs/{jid}/analyzed.png", buf.getvalue(), "image/png")
+    store.update_job(jid, {"status": "analyzed", "kind": "sale", "result": sale_schema.for_store(a["result"]),
+                           "pages": a["pages"], "log": a["log"], **extra})
+
+
+def _load_analyzed(jid, job):
+    import sale_schema
+    from PIL import Image
+    png = store.db().get_file(f"jobs/{jid}/analyzed.png")
+    return {"img": Image.open(io.BytesIO(png)).convert("RGB"), "pages": job.get("pages") or 0,
+            "result": sale_schema.SaleResult.model_validate(job["result"]), "log": job.get("log") or {}}
+
+
+def analyze_for_atena(c, jid, data, rental_a):
+    """宛名を聞いているあいだに、売買版で読み直して預かる（bot.analyze_and_ask から）。宛名が届いたら after_atena。"""
+    import sale_core
+    if not sale_core.route_from_rental(rental_a["result"]):
+        return store.update_job(jid, {"status": "failed", "error": "not_maisoku"})
+    a = sale_core.analyze(data)
+    v = sale_core.verdict(a["result"])
+    if v != "ok":
+        err = f"sale_unsupported:{a['result'].事実.物件種別 or ''}" if v == "unsupported" else f"sale_{v}"
+        return store.update_job(jid, {"status": "failed", "error": err, "log": a["log"]})
+    _save_analyzed(jid, a)
+
+
+def after_atena(c, jid, job, atena, after=()):
+    """宛名が届いた売買の図面。設定が足りなければ先に2つ聞き、そろっていれば作る。"""
+    if needs_setup(c.u):
+        store.update_job(jid, {"宛名": atena})
+        store.update_user(c.uid, {"sale_setup_job": jid, "sale_setup_at": store.now(),
+                                  "reg_queue": ["assoc", "sfee"], "reg_mode": "sale_setup"})
+        c.refresh()
+        return c.send(texts.build("sale_need_setup"), texts.build("sale_reg_assoc"))
+    return finish(c, jid, _load_analyzed(jid, job), atena, after)
+
+
+def hold_for_setup(c, jid, a):
+    """所属団体などを聞くあいだ、読み取り結果を預かる（AIをもう一度呼ばないため）。"""
+    _save_analyzed(jid, a)
+    store.update_user(c.uid, {"sale_setup_job": jid, "sale_setup_at": store.now(),
+                              "reg_queue": ["assoc", "sfee"], "reg_mode": "sale_setup"})
+    c.refresh()
+    c.send(texts.build("sale_need_setup"), texts.build("sale_reg_assoc"))
+
+
+def resume_after_setup(c):
+    """2つの質問が終わったら、預かった図面で作る（宛名を聞いていれば、その宛名で）。"""
+    jid = c.u.get("sale_setup_job")
+    at = c.u.get("sale_setup_at")
+    store.update_user(c.uid, {"sale_setup_job": None, "sale_setup_at": None, "reg_mode": None})
+    c.refresh()
+    job = store.get_job(jid) if jid else None
+    if not job or job.get("status") != "analyzed" or (at and at < store.now() - timedelta(hours=24)):
+        return c.send(line.text("売買の設定ができました。お預かりしていた募集図面の期限が切れたため、もう一度送ってください。"))
+    line.loading(c.line_uid, 60)
+    return finish(c, jid, _load_analyzed(jid, job), job.get("宛名") or "")
+
+
+def estimate_html(company, evals=None):
+    """購入諸費用の概算書のHTMLを作る関数を返す。costs_sale がまだ入っていなければ None（概算書なしで届ける）。
+    evals は {"land_eval": 円, "bldg_eval": 円}（スタッフが送った評価額。なければ価格から推計）。"""
+    try:
+        import costs_sale  # noqa: F401  購入諸費用の概算書（別スレッドで作成中。入ったらここでつなぐ）
+        import render_sale  # noqa: F401
+    except ImportError:
+        return None
+    import sale_core
+
+    def build(result, co):
+        f = costs_sale.SaleFacts(**{**sale_core.cost_inputs(result.事実), **(evals or {})})
+        s = costs_sale.CompanySaleSettings(**settings(company))
+        r = costs_sale.compute(f, s)
+        return render_sale.build_html(r, f, None, customer=co.get("宛名") or "", property_name=result.事実.物件名 or "")
+    return build
+
+
+def finish(c, jid, a, atena="", after=()):
+    """売買の資料を作り、件数を1つ使って届ける（賃貸版の bot.finish と同じ流れ）。"""
+    import bot
+    import sale_core
+    consumed = False
+    try:
+        if not store.try_consume(c.uid):
+            store.update_job(jid, {"status": "failed", "error": "quota"})
+            return c.send(texts.build("plan_needed", urls=bot.plan_urls(c)), *after)
+        consumed = True
+        company = {**bot.company_for_render(c.uid, c.u), "宛名": atena}
+        out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"],
+                                         estimate_html=estimate_html(company))
+        store.save_files(jid, out)
+        store.update_job(jid, {"status": "done", "kind": "sale", "title": out["title"], "texts": out["texts"],
+                               "log": out["log"], "pages": out["pages"], "result": out["result"], "宛名": atena,
+                               "verdict": "sale"})
+        recent = [{"id": jid, "title": out["title"], "at": store.now(), "kind": "sale"}] + \
+                 [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
+        store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:12]})
+        c.refresh()
+        deliver(c, jid, after=after)
+    except Exception as e:
+        log.exception("売買の資料づくりで例外")
+        if consumed:
+            store.refund(c.uid)
+        store.update_job(jid, {"status": "failed", "error": repr(e)[:500]})
+        c.send(texts.build("err_system"), *after)
+
+
+KEY_NOTES = re.compile(r"広告転載不可|広告不可|告知事項|物件確認|再建築")
+
+
+def key_notes(job):
+    """LINEの文に入れる大事な注意（最大2行）。"""
+    chui = [x for x in (job.get("texts") or {}).get("chui", []) if KEY_NOTES.search(x)]
+    return "".join(f"\n【ご注意】{x}" for x in chui[:2]) + ("\n" if chui else "")
+
+
+def deliver(c, jid, after=()):
+    import bot
+    job = store.get_job(jid)
+    d = c.u.get("delivery") or {}
+    exp = job["expires_at"].astimezone(store.JST)
+    url_okyaku, url_shanai = store.pdf_urls(jid, job)
+    img = line.image(store.file_url(jid, job, "obikae.jpg"), store.file_url(jid, job, "preview.jpg"))
+    drop = () if ((job.get("texts") or {}).get("motozuke") or {}).get("fax") else ("postback bfax=from_last&doc={資料ID}",)
+    common = dict(物件名=job["title"], のこり枚数の案内=bot.remain_note(c.u), 資料ID=jid, 注意の要点=key_notes(job), drop=drop)
+    if d.get("method") == "email" and d.get("email"):
+        import delivery
+        if delivery.send_mail(d["email"], job["title"], store.pdf_files(jid, job, job["title"]),
+                              store.file_url(jid, job, "shiryou.pdf")):
+            return c.send(img, texts.build("sale_deliver_mail", メールアドレス=d["email"], **common), *after)
+    c.send(img, texts.build("sale_deliver_line", お客様向けリンク=url_okyaku, 社内向けリンク=url_shanai,
+                            有効期限=f"{exp.month}月{exp.day}日", **common), *after)
+
+
+# ---------- 元付へのFAX（振り分け） --------------------------------------------------------
+
+def fax_start(c):
+    kinds = {r.get("kind", "rent") for r in (c.u.get("recent_jobs") or [])}
+    if kinds == {"sale"}:
+        return c.send(texts.build("sale_fax_start"))
+    if "sale" in kinds:
+        return c.send(texts.build("sale_fax_choose"))
+    return None  # 賃貸だけ → 今までどおり内見申込書へ
+
+
+# ---------- 登録内容の変更（売買の設定） ----------------------------------------------------
+
+EDIT = {"sfee": ("売買の仲介手数料", ["sfee"]), "assoc": ("所属団体", ["assoc"])}
+
+
+def edit_postback(c, k, v):
+    """「賃貸・売買の設定」以下のボタン。扱ったら True。"""
+    co = c.u.get("company") or {}
+    if k == "edit" and v == "deal":
+        c.send(texts.build("sale_edit_menu"))
+        return True
+    if k == "edit" and v == "torihiki":
+        c.send(texts.build("sale_edit_torihiki"))
+        return True
+    if k == "torihiki" and v in ("媒介", "代理"):
+        set_company(c, 取引態様=v)
+        c.send(texts.build("sale_edit_done", 項目="売買の取引態様"))
+        return True
+    if k == "edit" and v == "tokurei":
+        c.send(texts.build("sale_edit_tokurei", 今の設定="使う" if settings(co)["teiren_tokurei"] else "使わない"))
+        return True
+    if k == "tokurei" and v in ("on", "off"):
+        set_settings(c, teiren_tokurei=v == "on")
+        c.send(texts.build("sale_edit_done", 項目="800万円以下の特例"))
+        return True
+    if k == "edit" and v == "shiho":
+        s = settings(co)
+        store.update_user(c.uid, {"sale_edit": "shiho"})
+        c.send(texts.build("sale_edit_shiho", 移転=f"{s['shihoshoshi_transfer']:,}", 抵当権=f"{s['shihoshoshi_mortgage']:,}",
+                           保存=f"{s['shihoshoshi_preserve']:,}", 実費=f"{s['touki_jippi']:,}"))
+        return True
+    if k == "edit" and v == "loan":
+        L = loan(co)
+        store.update_user(c.uid, {"sale_edit": "loan"})
+        c.send(texts.build("sale_edit_loan", 金利=f"{L['rate']:g}", 年数=L["years"]))
+        return True
+    if k == "loan" and v == "off":
+        set_company(c, 売買ローン目安={**loan(co), "show": False})
+        store.update_user(c.uid, {"sale_edit": None})
+        c.send(texts.build("sale_edit_done", 項目="月々の返済の目安（載せない）"))
+        return True
+    return False
+
+
+SHIHO_KEYS = {"移転": "shihoshoshi_transfer", "抵当権": "shihoshoshi_mortgage", "保存": "shihoshoshi_preserve",
+              "実費": "touki_jippi"}
+
+
+def edit_text(c, t):
+    """司法書士報酬・返済の目安の数字。扱ったら True。"""
+    mode = c.u.get("sale_edit")
+    if not mode:
+        return False
+    s = unicodedata.normalize("NFKC", t or "").replace(",", "")
+    if mode == "eval":
+        return eval_text(c, s)
+    if mode == "shiho":
+        kv = {SHIHO_KEYS[k]: int(n) for k, n in re.findall(r"(移転|抵当権|保存|実費)\D*?(\d+)", s) if int(n) <= 1_000_000}
+        if not kv:
+            return False
+        set_settings(c, **kv)
+    elif mode == "loan":
+        r = re.search(r"金利\D*?(\d+(?:\.\d+)?)", s)
+        y = re.search(r"年数\D*?(\d+)", s)
+        if not (r or y):
+            return False
+        L = loan(c.u.get("company") or {})
+        if r and 0 < float(r.group(1)) < 20:
+            L["rate"] = float(r.group(1))
+        if y and 1 <= int(y.group(1)) <= 50:
+            L["years"] = int(y.group(1))
+        set_company(c, 売買ローン目安={**L, "show": True})
+    store.update_user(c.uid, {"sale_edit": None})
+    c.send(texts.build("sale_edit_done", 項目="司法書士報酬の目安" if mode == "shiho" else "月々の返済の目安"))
+    return True
+
+
+def monthly_payment(principal, rate_pct, years):
+    """元利均等の月々の返済額（円、1円未満切り上げ）。"""
+    n = years * 12
+    r = rate_pct / 100 / 12
+    if r == 0:
+        return -(-principal // n)
+    p = principal * r * (1 + r) ** n / ((1 + r) ** n - 1)
+    return int(-(-p // 1))
+
+
+# ---------- 評価額を送って作り直す（AIは使わない・件数に数えない） -------------------------------
+
+def parse_evals(s):
+    s = unicodedata.normalize("NFKC", s or "").replace(",", "").replace("円", "")
+    out = {}
+    for key, name in (("land_eval", "土地"), ("bldg_eval", "建物")):
+        m = re.search(name + r"\D{0,6}?(\d+(?:\.\d+)?)\s*(万)?", s)
+        if m:
+            out[key] = int(round(float(m.group(1)) * (10_000 if m.group(2) else 1)))
+    return out
+
+
+def eval_text(c, s):
+    import bot
+    import sale_core
+    import sale_schema
+    from PIL import Image
+    ev = parse_evals(s)
+    if not ev:
+        return False
+    jid = c.u.get("sale_eval_job")
+    store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
+    job = store.get_job(jid) if jid else None
+    page = store.get_page(jid) if job else None
+    est = estimate_html(c.u.get("company") or {}, ev)
+    if not job or job.get("user_id") != c.uid or job.get("kind") != "sale" or not page or est is None:
+        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
+        return True
+    company = {**bot.company_for_render(c.uid, c.u), "宛名": job.get("宛名") or ""}
+    r = sale_schema.SaleResult.model_validate(job["result"])
+    out = sale_core.render_documents(company, Image.open(io.BytesIO(page)).convert("RGB"), r,
+                                     job.get("pages") or 0, job.get("log") or {}, estimate_html=est)
+    store.save_files(jid, out)
+    store.update_job(jid, {"evals": ev})
+    url_okyaku, _ = store.pdf_urls(jid, store.get_job(jid))
+    c.send(texts.build("sale_eval_done", お客様向けリンク=url_okyaku))
+    return True

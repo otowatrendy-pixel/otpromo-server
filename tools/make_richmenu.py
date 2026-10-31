@@ -1,4 +1,5 @@
 # リッチメニューの画像を作り直す（messages.json の richmenu から）。手元で: python3 tools/make_richmenu.py
+# 売買版（messages_sale.json）の画像は: python3 tools/make_richmenu.py sale  → static/richmenu-*-sale.png
 import json, pathlib, sys
 from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "app"
@@ -7,6 +8,7 @@ fonts += (ROOT / "fonts/noto-sans-jp/400.css").read_text().replace("url(./files/
 ICON = {
  "撮って送る": '<path d="M20 26h10l5-7h30l5 7h10a6 6 0 0 1 6 6v40a6 6 0 0 1-6 6H20a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z"/><circle cx="50" cy="51" r="15"/>',
  "写真から送る": '<rect x="14" y="20" width="72" height="60" rx="6"/><circle cx="34" cy="40" r="7"/><path d="M14 72l24-22 16 14 12-10 20 18"/>',
+ "元付へFAX": '<rect x="22" y="14" width="56" height="34" rx="3"/><path d="M14 48h72v32H14z"/><path d="M32 60h36M32 70h24"/>',
  "内見申込FAX": '<rect x="22" y="14" width="56" height="34" rx="3"/><path d="M14 48h72v32H14z"/><path d="M32 60h36M32 70h24"/>',
  "のこり件数・プラン": '<circle cx="50" cy="50" r="34"/><path d="M50 30v22l14 10"/>',
  "登録内容の変更": '<path d="M24 76l6-20 36-36 14 14-36 36z"/><path d="M60 26l14 14"/>',
@@ -29,7 +31,8 @@ css = f"""<style>{fonts}
 .l{{font-weight:700;font-size:84px;line-height:1.2}} .lb{{font-size:100px}}
 .sub{{font-weight:400;font-size:52px;margin-top:14px}}
 </style>"""
-m = json.loads((ROOT / "messages.json").read_text())["richmenu"]
+SALE = len(sys.argv) > 1 and sys.argv[1] == "sale"
+m = json.loads((ROOT / ("messages_sale.json" if SALE else "messages.json")).read_text())["richmenu"]
 reg = m["registered"]["areas"]
 html_reg = css + '<div class="g" style="width:2500px;height:1686px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)">' + "".join(tile(a, main=(i < 2)) for i, a in enumerate(reg)) + "</div>"
 un = m["unregistered"]["areas"]
@@ -40,6 +43,6 @@ with sync_playwright() as p:
         pg = b.new_page(viewport={"width": 2500, "height": h})
         pg.set_content("<html><head><meta charset=utf-8></head><body>" + html + "</body></html>")
         pg.wait_for_timeout(800)
-        pg.screenshot(path=str(ROOT / "static" / f"{name}.png"), type="png")
+        pg.screenshot(path=str(ROOT / "static" / f"{name}{'-sale' if SALE else ''}.png"), type="png")
     b.close()
 print("ok")

@@ -24,6 +24,7 @@ import growth
 import line
 import monitor
 import naiken_bot
+import sale_bot
 import store
 import texts
 import usage
@@ -44,9 +45,10 @@ RICHMENU_UNREGISTERED = config.env("RICHMENU_UNREGISTERED")
 REG_STEPS = ["company", "shop", "staff", "mobile", "license", "tel", "fax", "address", "fee", "color", "font", "obi", "receive"]
 EDIT_STEPS = {"company": ["company", "shop"], "staff": ["staff", "mobile"], "mobile": ["mobile"], "license": ["license"], "tel": ["tel", "fax"],
               "address": ["address"], "fee": ["fee"], "color": ["color"], "font": ["font"],
-              "obi": ["obi"], "recv": ["receive"]}
+              "obi": ["obi"], "recv": ["receive"], "sfee": ["sfee"], "assoc": ["assoc"]}
 EDIT_NAMES = {"company": "会社名・店舗名", "staff": "担当者名・携帯", "mobile": "携帯番号", "license": "免許番号", "tel": "電話・FAX", "address": "住所",
-              "fee": "仲介手数料", "color": "テーマ色", "font": "書体", "obi": "帯の画像", "recv": "受け取り方"}
+              "fee": "仲介手数料", "color": "テーマ色", "font": "書体", "obi": "帯の画像", "recv": "受け取り方",
+              "sfee": "売買の仲介手数料", "assoc": "所属団体"}
 ASK = {"company": "reg_company", "shop": "reg_shop", "staff": "reg_staff", "mobile": "reg_mobile", "license": "reg_license", "tel": "reg_tel",
        "fax": "reg_fax", "address": "reg_address", "fee": "reg_fee", "fee_other": "reg_fee_other",
        "color": "reg_color", "color_code": "reg_color_code", "font": "reg_font", "obi": "reg_obi",
@@ -183,7 +185,7 @@ def on_follow(c):
         return c.send(texts.build("refollow", 会社名=c.u["company"].get("会社名", ""), のこり枚数の案内=remain_note(c.u)))
     link_menu(c.line_uid, False)
     name = line.profile(c.line_uid).get("displayName", "")
-    c.send(texts.build("follow", 表示名=name))
+    c.send(texts.build("sale_follow" if sale_bot.on() else "follow", 表示名=name))
 
 
 def link_menu(line_uid, registered):
@@ -206,6 +208,11 @@ def start_steps(c, steps, mode, prefix=None):
 
 
 def ask(c, step, prefix=None):
+    if step in sale_bot.ASK:  # 売買版の質問（使い方・所属団体・売買の仲介手数料）
+        msgs = [sale_bot.ask_message(c, step)]
+        if prefix:
+            msgs.insert(0, prefix)
+        return c.send(*msgs)
     msgs = []
     if step == "color":
         msgs.append(line.image(f"{config.BASE_URL}/static/colors.png", f"{config.BASE_URL}/static/colors.png"))
@@ -244,6 +251,8 @@ def advance(c, insert=None):
     if mode == "send_mail":
         store.update_user(c.uid, {"reg_mode": None})
         return send_last(c, "mail")
+    if mode == "sale_setup":  # 売買の図面を預かって2つ聞いたあと
+        return sale_bot.resume_after_setup(c)
     return c.send(confirm_message(c.u))
 
 
@@ -251,7 +260,10 @@ def confirm_message(u, mid="reg_confirm"):
     co = u.get("company") or {}
     d = u.get("delivery") or {}
     recv = {"line": "LINE", "email": f"メール（{d.get('email', '')}）", "fax": f"FAX（{d.get('fax', '')}）"}
-    return texts.build(mid, 会社名=co.get("会社名", ""), 店舗名=co.get("店舗名") or "なし",
+    extra = {}
+    if mid == "reg_confirm" and sale_bot.on() and (u.get("use_kind") in ("sale", "both") or "所属団体" in co):
+        mid, extra = "sale_reg_confirm", sale_bot.confirm_fields(u)
+    return texts.build(mid, **extra, 会社名=co.get("会社名", ""), 店舗名=co.get("店舗名") or "なし",
                        担当者名=co.get("担当者名", ""), 携帯番号=co.get("携帯", ""),
                        免許番号=co.get("免許", ""), 電話=co.get("電話", ""), FAX=co.get("FAX") or "なし",
                        住所=co.get("住所", ""), ヶ月=f"{co.get('賃貸_仲介手数料_ヶ月', 1.0):g}",
@@ -276,6 +288,8 @@ def set_delivery(c, **kv):
 
 def reg_text(c, step, t):
     """登録中に文字が送られてきたとき。"""
+    if step in sale_bot.ASK:
+        return _sale_step(c, step, sale_bot.reg_text(c, step, t))
     t = norm(t)
     if step == "company":
         set_company(c, 会社名=t[:60])
@@ -336,8 +350,25 @@ def reg_text(c, step, t):
     advance(c)
 
 
+def _sale_step(c, step, res):
+    """売買版の質問の答えを受けて、次へ進む・差し込む・聞き直す・使い方に合わせて並べ直す。"""
+    if res is None:
+        return ask(c, step)
+    what, arg = res
+    if what == "ask":
+        return ask(c, arg)
+    if what == "rebuild":  # 「賃貸／売買／両方」の答えで、残りの質問を並べ直す
+        store.update_user(c.uid, {"reg_queue": ["kind"] + sale_bot.reg_steps(REG_STEPS, arg)})
+        c.refresh()
+        return advance(c)
+    return advance(c, insert=arg)
+
+
 def reg_postback(c, k, v):
     step = current_step(c.u)
+    if k in ("kind", "assoc", "sfee"):
+        res = sale_bot.reg_postback(c, step, k, v) if step else None
+        return _sale_step(c, step, res) if step else None
     if k == "shop" and step == "shop":
         set_company(c, 店舗名="")
     elif k == "license" and step == "license":
@@ -374,6 +405,8 @@ def on_postback(c, data):
     k, _, v = data.partition("=")
     if k == "reg" and v == "start":
         store.update_user(c.uid, {"agreed_at": store.now(), "terms_version": config.TERMS_VERSION})
+        if sale_bot.on():  # 売買版の公開後は、最初に「賃貸／売買／両方」を聞く
+            return start_steps(c, ["kind"], "new")
         return start_steps(c, list(REG_STEPS), "new")
     if k == "reg" and v == "done":
         if not c.u.get("company", {}).get("会社名"):
@@ -381,6 +414,8 @@ def on_postback(c, data):
         store.update_user(c.uid, {"registered": True, "reg_queue": [], "reg_mode": None, "registered_at": store.now()})
         growth.on_registered(c.uid)
         link_menu(c.line_uid, True)
+        if sale_bot.on() and c.u.get("use_kind") in ("sale", "both"):
+            return c.send(texts.build("sale_reg_done"))
         return c.send(texts.build("reg_done"))
     if k == "reg" and v == "edit":
         store.update_user(c.uid, {"reg_queue": [], "reg_mode": None})
@@ -391,6 +426,9 @@ def on_postback(c, data):
         ask = asks_name(c.u)
         btns = [dict(b, label="宛名を聞かない" if ask else "宛名を毎回聞く") if b["action"] == "postback edit=atena" else b
                 for b in texts.buttons_of("reg_edit")]
+        if sale_bot.on():  # 「仲介手数料」を「賃貸・売買の設定」に（ボタンの数は変えない）
+            btns = [{"label": "賃貸・売買の設定", "action": "postback edit=deal"} if b["action"] == "postback edit=fee" else b
+                    for b in btns]
         return c.send(texts.build("reg_edit", buttons=btns, extra_buttons=[toggle]))
     if k == "edit" and v in ("mobile_hide", "mobile_show") and c.u.get("registered"):
         show = v == "mobile_show"
@@ -416,6 +454,8 @@ def on_postback(c, data):
             d = until.astimezone(store.JST)
             return c.send(texts.build("reg_staff_locked",
                                       変更できる日時=f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）{d.hour}時"))
+    if sale_bot.on(c) and c.u.get("registered") and sale_bot.edit_postback(c, k, v):
+        return
     if k == "edit" and v in EDIT_STEPS:
         store.update_user(c.uid, {"reg_edit_name": EDIT_NAMES[v]})
         mode = "edit" if c.u.get("registered") else "new"
@@ -425,11 +465,23 @@ def on_postback(c, data):
         set_delivery(c, method="line")
         store.update_user(c.uid, {"recvfax_wait": None})
         return c.send(line.text("承知しました。これからは資料をLINEでお届けします。"))
-    if k in ("shop", "license", "fax", "fee", "color", "font", "obi", "recv"):
+    if k in ("shop", "license", "fax", "fee", "color", "font", "obi", "recv", "kind", "assoc", "sfee"):
         return reg_postback(c, k, v)
+    if k == "help" and sale_bot.on(c) and v in ("menu", "sale"):
+        return c.send(texts.build("sale_help_menu" if v == "menu" else "sale_help_usage"))
     if k == "help":
         return c.send(texts.build({"usage": "help_usage", "contact": "help_contact", "share": "help_share",
                                    "menu": "help_menu"}.get(v, "help_usage")))
+    if k == "motofax" and v == "start":  # 売買版のメニュー「元付へFAX」：賃貸の内見申込書と売買の物件確認を振り分け
+        if not (sale_bot.on(c) and sale_bot.fax_start(c)):
+            return naiken_bot.on_postback(c, "start")
+        return
+    if k == "bfax" and sale_bot.on(c):
+        # 売買の物件確認・内見依頼書（中身は claude/baibai-naiken-fax ブランチ。つなぐまでは案内だけ）
+        return c.send(texts.build("sale_fax_start"))
+    if k == "eval" and sale_bot.on(c):
+        store.update_user(c.uid, {"sale_edit": "eval", "sale_eval_job": v.partition("doc=")[2] or c.u.get("last_job")})
+        return c.send(texts.build("sale_eval_ask"))
     if k == "plan" and v == "show":
         return c.send(*plan_show(c))
     if k == "plan" and v == "status":
@@ -531,6 +583,8 @@ def on_text(c, t):
     step = current_step(c.u)
     if step:
         return reg_text(c, step, t)
+    if sale_bot.on(c) and c.u.get("sale_edit") and sale_bot.edit_text(c, t):
+        return
     if norm(t) in naiken_bot.RESERVED_WORDS and c.u.get("registered"):
         return naiken_bot.show_reserved(c)
     if naiken_bot.active(c.u) or norm(t).startswith("内見"):
@@ -684,6 +738,9 @@ def process(c, data, held=None):
             a = core.analyze(data)
             v = core.verdict(a["result"])
             # 事業用の賃貸も、そのまま作る（お届けのときに一言添える）
+            if v == "sale" and sale_bot.ENABLED:  # 売買版：売買の図面として読み直して届ける
+                done.set()
+                return sale_bot.handle_sale(c, data, jid, a)
             if v not in ("ok", "commercial"):
                 done.set()
                 store.update_job(jid, {"status": "failed", "error": v, "log": a["log"]})
@@ -770,6 +827,8 @@ def analyze_and_ask(c, jid, data):
     try:
         a = core.analyze(data)
         v = core.verdict(a["result"])
+        if v == "sale" and sale_bot.on(c):  # 売買の図面：売買版で読み直して預かる（宛名が届いたら作る）
+            return sale_bot.analyze_for_atena(c, jid, data, a)
         if v not in ("ok", "commercial"):
             store.update_job(jid, {"status": "failed", "error": v, "log": a["log"]})
             return
@@ -813,8 +872,12 @@ def on_name(c, t):
         err = job.get("error") or ""
         if err.startswith("input:"):
             return c.send(line.text(err[6:] + "\n\n※今回の分は、件数に数えていません。"), *after)
+        if err.startswith("sale_"):
+            return c.send(sale_bot.error_message(err), *after)
         mid = {"blurry": "err_blurry", "not_maisoku": "err_not_maisoku", "sale": "err_sale"}.get(err, "err_system")
         return c.send(texts.build(mid), *after)
+    if job.get("kind") == "sale":
+        return sale_bot.after_atena(c, jid, job, atena, after)
     png = store.db().get_file(f"jobs/{jid}/analyzed.png")
     a = {"img": Image.open(io.BytesIO(png)).convert("RGB"), "pages": job.get("pages") or 0,
          "result": Result.model_validate(job["result"]), "log": job.get("log") or {}}

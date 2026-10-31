@@ -22,6 +22,11 @@ def load():
     d = json.loads(_PATH.read_text(encoding="utf-8"))
     COMMON = d.get("common", {})
     _MSG = {m["id"]: m for s in d["sections"] for m in s["messages"]}
+    # 売買版の文面（ID は sale_ で始まり、賃貸版と重ならない）。SALE_ENABLED=0 のあいだは使われない
+    sale = _PATH.with_name("messages_sale.json")
+    if sale.exists():
+        ds = json.loads(sale.read_text(encoding="utf-8"))
+        _MSG.update({m["id"]: m for s in ds["sections"] for m in s["messages"]})
 
 
 load()
