@@ -19,8 +19,10 @@ from pathlib import Path
 HERE = Path(__file__).parent
 TEMPLATE = HERE / "baibai_naiken_template.html"
 WEEK = "月火水木金土日"
-# QRの下に添える一言（11/1 本人：大きな広告はいらない。QRの下に一言だけ。飛び先は動画やYouTubeを含む紹介ページ）
-QR_CAPTION = "この依頼書は、スマホからLINEで作りました（1分資料 売買版）"
+# QRの横に添える一言（10/31 本人：月額を払って消すほど気にならない程度の控えめな一言。大きな広告はいらない）
+# QRの中身は短いURL（例 https://otpromo.com/b/fax）にし、サーバー側で紹介ページ?utm_source=naiken_fax へ転送する。
+# 長いURLだとQRの模様が細かくなり、FAXの標準画質で読めなくなりやすい（10/31 試算：25マス→33マス）
+QR_CAPTION = "この依頼書は「1分資料」で作りました。詳しくは→"
 BLANK_WISH = "　　月　　日（　　）　　時　　分頃"
 
 
@@ -67,7 +69,7 @@ def html(to, me, prop, wishes=None, now=None, qr_svg=None, qr_caption=QR_CAPTION
     me   : naiken.me_from_company() と同じ形（自社・担当者の名刺情報）
     prop : {"name", "room", "address", "price", "number"}（販売図面から自動で入る）
     wishes: 希望日時の文字列の並び（最大3つ。LINEで聞くのはここだけ）。空文字は手書き用の空欄。None なら空欄2行
-    qr_svg / qr_caption: 一番下のQRと、その下の一言。QRの飛び先（使い方動画・YouTubeを含む紹介ページ）は集客担当が決め、
+    qr_svg / qr_caption: 一番下のQR（20mm角）と、その横の一言。QRの飛び先（使い方動画・YouTubeを含む紹介ページ）は集客担当が決め、
            効果を測れるよう専用URLにする。qr_caption="" で一言なし。会社設定で消すときもここを空にする
     fax  : True ならFAXで送る版。文字・線・帯をすべて黒にする（濃紺はFAXの白黒変換で網点になり、細かい字がつぶれるため）。
            スマホで見せる控え・プレビューは False（青のまま）。送信用PDFだけ True で作り直す

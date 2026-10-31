@@ -73,10 +73,11 @@
   .card .lic { font-size: 7.5pt; color: var(--sub); line-height: 1.4; margin-top: .3mm; }
 
   .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 7.5pt; font-weight: 500; color: var(--sub); }
-  .foot .via { display: flex; flex-direction: column; align-items: flex-end; }
-  .foot .via svg { width: 16mm; height: 16mm; flex: none; display: block; }
-  /* QRの下の一言（読み取ると何が見られるか）。宣伝は控えめに、この一言だけ */
-  .foot .cap { margin-top: .6mm; font-size: 7.5pt; font-weight: 700; }
+  .foot .via { display: flex; align-items: flex-end; gap: 2mm; }
+  /* FAXの標準画質（縦3.85本/mm）でも読めるよう20mm角。中身は短いURLにして模様を粗く保つ */
+  .foot .via svg { width: 20mm; height: 20mm; flex: none; display: block; }
+  /* QRの横の一言。お金を払って消したくなるほど目立たせない（本人 10/31） */
+  .foot .cap { font-size: 7.5pt; }
 </style>
 </head>
 <body>
@@ -167,7 +168,7 @@
 
     <div class="foot">
       <span class="nw">万一、誤って届いた場合は、お手数ですが破棄のうえご連絡ください。</span>
-      <div class="via">{{ qr_svg }}<div class="cap nw">{{ qr_caption or "このFAXは 1分資料（otpromo.com）で送信しました" }}</div></div>
+      <div class="via"><span class="cap nw">{{ qr_caption or "このFAXは 1分資料（otpromo.com）で送信しました" }}</span>{{ qr_svg }}</div>
     </div>
   </div>
 
