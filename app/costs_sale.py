@@ -228,6 +228,7 @@ class LoanPlan:
     fixed_fee: int = 33_000                      # 保証料型の事務手数料（税込）
     hoshoryo_per_10m: int = 206_000              # 保証料型：借入1,000万円あたりの保証料の目安（35年・一括前払い）
     electronic_contract: bool = False            # 電子契約なら印紙税なし
+    flat35: bool = False                         # 全期間固定（フラット35）を想定するか。適合証明書の注記を出す
 
 
 @dataclass
@@ -241,7 +242,14 @@ class CompanySaleSettings:
     shihoshoshi_preserve: int = 33_000           # 所有権保存（新築）
     shihoshoshi_mortgage: int = 44_000           # 抵当権設定
     touki_jippi: int = 8_000                     # 登記事項証明・郵送などの実費の目安
-    fire_insurance: dict = field(default_factory=lambda: {"mansion": 60_000, "house": 200_000, "land": 0})  # 5年分の目安
+    # 火災保険・地震保険（5年一括の目安）。fire_mode="auto" は面積・構造から計算、"fixed" は fire_insurance の固定額
+    fire_mode: Literal["auto", "fixed"] = "auto"
+    fire_insurance: dict = field(default_factory=lambda: {"mansion": 100_000, "house": 300_000, "land": 0})  # fixed 用・面積不明時
+    fire_unit: dict = field(default_factory=lambda: {"mansion": 200_000, "wood": 220_000, "nonwood": 270_000})  # 建物の保険金額（再調達価額）の㎡単価
+    fire_rate_5y: dict = field(default_factory=lambda: {"M": 16_000, "T": 38_000, "H": 57_000})  # 火災保険 5年・保険金額1,000万円あたり（水災なし・家財なし）
+    eq_ratio: float = 0.5                        # 地震保険金額＝火災保険金額×この割合（30〜50%。0なら地震保険なし）
+    eq_rate: dict = field(default_factory=lambda: {"i": 27_500, "ro": 41_100})  # 地震保険 1年・1,000万円あたり（東京都、2022/10〜）
+    eq_long_5y: float = 4.7                      # 地震保険 5年一括の長期係数
     kisanbi_month: int = 1                       # 固定資産税の清算の起算日（関東は1月1日が多い）
 
 
@@ -285,14 +293,14 @@ def brokerage_fee(price_ex_tax: int, s: CompanySaleSettings) -> tuple[Optional[i
     p = price_ex_tax
     mx = min(p, 2_000_000) * 0.055 + max(0, min(p, 4_000_000) - 2_000_000) * 0.044 + max(0, p - 4_000_000) * 0.033
     mx = int(mx)
-    note = "上限額（物件価格×3%＋6万円＋消費税）" if p > 4_000_000 else "上限額"
+    note = ""   # 上限額などの文言は出さない（会社設定で額が変わるため。2026-10-31 本人指示）
     if s.teiren_tokurei and p <= 8_000_000:
         mx = max(mx, 330_000)
         note = "800万円以下の物件の特例による額（事前にご説明・ご同意のうえ）"
     if s.fee_mode == "max":
         return mx, note
     if s.fee_mode == "half":
-        return mx // 2, "上限額の半額"
+        return mx // 2, ""
     if s.fee_mode == "free":
         return 0, "無料"
     if s.fee_mode == "rate":
@@ -302,7 +310,7 @@ def brokerage_fee(price_ex_tax: int, s: CompanySaleSettings) -> tuple[Optional[i
         return fee, f"物件価格×{s.fee_rate * 100:g}%＋消費税"
     if s.fee_custom is None:
         return None, "金額は担当者にご確認ください"
-    return min(s.fee_custom, mx), "当社規定の額"
+    return min(s.fee_custom, mx), ""
 
 
 def price_split(f: SaleFacts) -> tuple[int, int]:
@@ -404,12 +412,46 @@ def jutaku_reg_ok(f: SaleFacts, staff: list[str]) -> Optional[bool]:
     return True
 
 
+def tentative_handover(base: date) -> date:
+    """仮の決済日（引渡日）＝基準日（図面を送った日）の翌々月1日。11月→1月、12月→2月。"""
+    m = base.month + 2
+    return D(base.year + (m - 1) // 12, (m - 1) % 12 + 1, 1)
+
+
+def fire_estimate(f: SaleFacts, s: CompanySaleSettings, staff: list[str]) -> tuple[Optional[int], str]:
+    """火災保険・地震保険の5年一括の目安。建物のみ（家財なし）・水災なし・地震保険は火災保険の eq_ratio。
+    保険金額＝面積×再調達価額の㎡単価。料率は損保各社の東京都の試算例（2024/10改定後）と地震保険基準料率から。"""
+    if f.property_type == "land":
+        return 0, ""
+    fixed = s.fire_insurance.get(f.property_type, 0)
+    if s.fire_mode == "fixed" or not f.floor_area:
+        return (fixed or None), "5年分の目安（補償内容で変わります）"
+    if f.property_type == "mansion":
+        cls, eq_cls, unit = "M", "i", s.fire_unit["mansion"]
+    elif f.structure in (None, "wood"):
+        cls, eq_cls, unit = "H", "ro", s.fire_unit["wood"]
+        staff.append("火災保険は木造（H構造）で計算しています。省令準耐火やツーバイフォーならT構造になり、保険料はかなり下がります。")
+    else:
+        cls, eq_cls, unit = "T", "i", s.fire_unit["nonwood"]
+    insured = int(f.floor_area * unit / 1_000_000) * 1_000_000 or 1_000_000   # 100万円単位
+    fire = insured / 10_000_000 * s.fire_rate_5y[cls]
+    eq_amt = min(int(insured * s.eq_ratio / 1_000_000) * 1_000_000, 50_000_000)
+    disc = 0.9 if (f.is_new or (f.built and f.built >= SHINTAISHIN)) else 1.0     # 建築年割引10%
+    eq = eq_amt / 10_000_000 * s.eq_rate[eq_cls] * s.eq_long_5y * disc
+    total = ceil_k(fire + eq)
+    if eq_amt:
+        note = f"5年分。建物{insured // 10_000:,}万円・地震{eq_amt // 10_000:,}万円（うち地震分 約{round(eq / 10_000, 1):g}万円）"
+    else:
+        note = f"5年分。建物{insured // 10_000:,}万円（地震保険なし）"
+    return total, note
+
+
 def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = None,
             contract_day: Optional[date] = None, handover_day: Optional[date] = None,
             today: Optional[date] = None, land_data_override: Optional[ev.LandData] = None) -> Result:
     today = today or date.today()
     contract_day = contract_day or today
-    handover_day = handover_day or (today + timedelta(days=60))
+    handover_day = handover_day or tentative_handover(today)
     lines: list[Line] = []
     notes: list[str] = []
     staff: list[str] = []
@@ -542,8 +584,10 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
         else:
             dim = calendar.monthrange(handover_day.year, handover_day.month)[1]
             days = dim - handover_day.day + 1
-            lines.append(Line("must", "管理費等の清算金", ceil_k(monthly * days / dim), "estimate",
-                              f"月額{monthly:,}円の引渡月{days}日分（翌月分の前払いが必要な場合があります）"))
+            # 引渡月の日割分＋翌月分を計上（翌月分は売主の口座から引き落とされていることが多い。2026-10-31 本人指示）
+            lines.append(Line("must", "管理費等の清算金", ceil_k(monthly * days / dim + monthly), "estimate",
+                              f"月額{monthly:,}円の、引渡月の日割分（{days}日分）と翌月分"))
+            notes.append("管理費等は、引渡月の日割分と翌月分を計上しています。管理会社の引き落としの時期によっては、翌々月分の前払いが必要な場合があります。")
         if f.shuzen_kikin:
             lines.append(Line("must", "修繕積立基金", f.shuzen_kikin, "exact", "図面記載の額"))
         if f.kanri_junbikin:
@@ -556,22 +600,33 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
                           "電子契約の場合はかかりません"))
         if loan.fee_type == "teiritsu":
             lines.append(Line("loan", "ローン事務手数料", int(loan.amount * loan.fee_rate), "estimate",
-                              f"借入額の{loan.fee_rate*100:.1f}%（金融機関により異なります）"))
+                              f"借入額の{loan.fee_rate*100:.1f}%（定率型。保証料はかからない形の目安）"))
         else:
-            lines.append(Line("loan", "ローン事務手数料", loan.fixed_fee, "estimate", "金融機関により異なります"))
+            lines.append(Line("loan", "ローン事務手数料", loan.fixed_fee, "estimate", "定額型の目安（別に保証料がかかります）"))
             lines.append(Line("loan", "ローン保証料", ceil_k(loan.amount / 10_000_000 * loan.hoshoryo_per_10m), "estimate",
-                              "35年・一括前払いの場合の目安"))
+                              "35年・一括前払いの目安（金利に上乗せする方法もあります）"))
         if jutaku is True:
             r = pick("reg_mortgage", handover_day)
         else:
             r = {"rate": 0.004, "end": None}
         lines.append(Line("loan", "登記費用（抵当権設定）",
                           ceil_k(reg_tax(loan.amount, r["rate"]) + s.shihoshoshi_mortgage), "estimate",
-                          "登録免許税＋司法書士報酬の目安"))
-        fi = s.fire_insurance.get(f.property_type, 0)
-        if fi:
-            lines.append(Line("loan", "火災保険・地震保険", fi, "estimate", "5年分の目安（補償内容で変わります）"))
-        notes.append(f"住宅ローンは借入額{loan.amount // 10000:,}万円とした場合の目安です。審査や条件は金融機関によって異なります。")
+                          f"登録免許税（借入額の{r['rate'] * 100:g}%）＋司法書士報酬の目安"))
+        notes.append(f"住宅ローンは借入額{loan.amount // 10000:,}万円とした場合の目安です。手数料・保証料の形は金融機関によって異なります。"
+                     "団体信用生命保険は、一般的な保障なら金利に含まれることが多いです。")
+        if loan.flat35:
+            notes.append("フラット35をご利用の場合は、物件の適合証明書の手数料（数万円程度）が別にかかります。")
+        if f.property_type == "land":
+            staff.append("土地を買って建てる場合、建物の完成前の支払いに「つなぎ融資」の利息・手数料がかかることがあります。")
+
+    # 6-2. 火災保険・地震保険（ローン利用時は加入が必要。現金購入でも加入をおすすめ）
+    fi, fnote = fire_estimate(f, s, staff)
+    if fi is None or fi > 0:
+        lines.append(Line("loan" if loan else "must", "火災保険・地震保険" if loan else "火災保険・地震保険（ご加入の場合）",
+                          fi, "estimate" if fi else "check", fnote or "補償内容によって変わります"))
+        if fi and s.fire_mode == "auto" and f.floor_area:
+            notes.append("火災保険は建物のみ（家財なし）・水災補償なし、地震保険は火災保険の50%で計算しています。家財や水災の補償を付けると高くなり、"
+                         "耐震等級などの割引があれば安くなります。")
 
     # 7. 後日かかる税金（参考）：不動産取得税
     acq = acquisition_tax(f, land_eval, bldg_eval, handover_day, jutaku, staff)

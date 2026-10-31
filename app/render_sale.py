@@ -88,7 +88,7 @@ def build_html(r: Result, f: SaleFacts, loan: LoanPlan | None, *, customer: str,
         sim_block = f"""
   <h2>住宅ローンシミュレーション（目安）</h2>
   <p class="simcond">借入額 {man(sim[0]["amount"])}・返済期間 {sim[0]["years"]}年・元利均等返済・ボーナス返済なし</p>
-  <table class="t sim"><tr class="hd"><th>金利タイプ</th><th>金利</th><th>毎月のご返済</th><th>年間のご返済</th><th>総返済額</th></tr>{trs}</table>"""
+  <table class="t sim"><colgroup><col style="width:31%"><col style="width:11%"><col style="width:19%"><col style="width:19%"><col style="width:20%"></colgroup><tr class="hd"><th>金利タイプ</th><th>金利</th><th>毎月のご返済</th><th>年間のご返済</th><th>総返済額</th></tr>{trs}</table>"""
         types = {x["type"] for x in sim}
         msg = "ローンのご返済額は、上記の金利が返済期間中ずっと変わらない場合の目安です"
         if "hendo" in types:
@@ -160,7 +160,7 @@ table.sim tr.sel th, table.sim tr.sel td {{ font-weight: 700; }}
     <div class="price">物件価格 <b>{man(f.price)}</b></div>
     <div class="sub">{html.escape(address)}　{"　".join(spec)}</div>
   </div>
-  <p class="cond">計算の前提：ご契約 {jdate(contract_day)}ごろ{"（仮）" if dates_tentative[0] else ""}、お引渡し {jdate(handover_day)}ごろ{"（仮）" if dates_tentative[1] else ""}{("、住宅ローン " + man(loan.amount)) if loan else "、住宅ローンなし"}</p>
+  <p class="cond">計算の前提：ご契約 {jdate(contract_day)}ごろ{"（仮）" if dates_tentative[0] else ""}、決済・お引渡し {jdate(handover_day)}{"（仮）" if dates_tentative[1] else ""}{("、住宅ローン " + man(loan.amount)) if loan else "、住宅ローンなし"}</p>
 
   <h2>お引渡しまでに必ずかかる費用</h2>
   <table class="t"><colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
@@ -197,7 +197,7 @@ table.sim tr.sel th, table.sim tr.sel td {{ font-weight: 700; }}
   const pg = document.querySelector('.page'), c = document.querySelector('.content'), b = document.querySelector('.band');
   const avail = pg.clientHeight - b.offsetHeight - c.offsetTop - 4;
   const h = c.scrollHeight;
-  if (h > avail) {{ const z = Math.max(0.7, avail / h); c.style.zoom = z; c.style.width = (100 / z) + '%'; }}
+  if (h > avail) {{ const z = Math.max(0.7, avail / h); c.style.zoom = z; }}   // 幅はそのまま（width を足すと右にはみ出して全体が縮む）
   document.body.dataset.fitted = '1';
 }});
 </script>

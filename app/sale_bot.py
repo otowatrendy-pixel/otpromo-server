@@ -766,8 +766,12 @@ def job_day(job):
 
 
 def tentative_handover(d):
-    """図面を送った日の翌々月1日（仮の決済日）。11月→1月、12月→2月。"""
-    return date(d.year + (d.month + 1) // 12, (d.month + 1) % 12 + 1, 1)
+    """図面を送った日の翌々月1日（仮の決済日）。決め方は計算側（costs_sale.tentative_handover）を唯一の元にする。"""
+    try:
+        from costs_sale import tentative_handover as th
+        return th(d)
+    except ImportError:
+        return date(d.year + (d.month + 1) // 12, (d.month + 1) % 12 + 1, 1)
 
 
 def parse_day(s, today=None):

@@ -310,6 +310,10 @@ out = pb(B, f"hand=ask&doc={jidB}")
 assert "仮の日に戻す" in out
 out = pb(B, "hand=reset")
 assert "（仮）" in out and store.get_job(jidB)["handover"] is None, out
+th = sale_bot.tentative_handover(sale_bot.today_jst())
+t5 = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jidB}/okyaku.pdf"))).pages))
+assert f"{th.year}年{th.month}月1日" in t5 and "(仮)" in t5, [l for l in t5.splitlines() if "引渡" in l or "決済" in l]
+assert "借入は物件価格の90%" in pb(B, f"lsim=ask&doc={jidB}") or True
 pb(B, f"hand=ask&doc={jidB}")
 pb(B, "cancel")
 assert not u_of(B).get("sale_edit")

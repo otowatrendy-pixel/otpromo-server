@@ -12,7 +12,9 @@ company["売買ローン目安"] … 住宅ローンの設定（下の LOAN_DEFA
 loan_override            … 物件ごとの指定 {amount, type, rate, years, kotei_years}（あるキーだけ会社設定より優先）
 evals                    … スタッフがLINEで送った値 {"land_eval","bldg_eval","annual_property_tax",
                              "rosenka_per_m2","kotei_rosenka_per_m2"}（あるものだけ）
-契約日・引渡日が None なら、作成日と作成日の60日後で仮置き（概算書に「（仮）」と出る）。
+drawing_day              … 図面を送った日（日本時間）。
+契約日が None なら作成日、決済日（引渡日）が None なら drawing_day（なければ作成日）の翌々月1日で仮置き
+（概算書に「（仮）」と出る）。スタッフが8桁で送った日は handover_day に入れる（確定扱い）。
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ import os
 from datetime import date, timedelta
 from typing import Optional
 
-from costs_sale import CompanySaleSettings, LoanPlan, SaleFacts, compute
+from costs_sale import CompanySaleSettings, LoanPlan, SaleFacts, compute, tentative_handover
 from render_sale import build_html
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,7 +54,7 @@ LOAN_DEFAULTS = {
     "kotei_years": 10,           # 固定期間選択の固定年数
     "years": 35,                 # 借入年数
     "amount_mode": "ratio",      # ratio＝物件価格×ratio / price_plus_costs＝物件価格＋諸費用 / fixed＝amount
-    "ratio": 1.0,
+    "ratio": 0.9,                 # 初期は物件価格の90%（2026-10-31 本人指示）
     "amount": None,
     "compare": False,            # True なら3タイプを並べて比べる
 }
@@ -91,7 +93,7 @@ def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, c
                   property_name: str = "", band: Optional[dict] = None, contract_day: Optional[date] = None,
                   handover_day: Optional[date] = None, loan_amount: Optional[int] = None,
                   loan_override: Optional[dict] = None, today: Optional[date] = None,
-                  font_dir: Optional[str] = None) -> dict:
+                  font_dir: Optional[str] = None, drawing_day: Optional[date] = None) -> dict:
     today = today or date.today()
     f = SaleFacts(**facts)
     if evals:
@@ -101,7 +103,7 @@ def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, c
         loan_override = {**(loan_override or {}), "amount": loan_amount}
     c = loan_conditions(company, loan_override)
     cd = contract_day or today
-    hd = handover_day or (today + timedelta(days=60))
+    hd = handover_day or tentative_handover(drawing_day or today)   # 仮＝図面を送った日の翌々月1日
 
     def floor100k(x):
         return int(x // 100_000 * 100_000)
@@ -113,12 +115,12 @@ def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, c
         elif c["amount_mode"] == "price_plus_costs":
             amt = f.price
             for _ in range(3):   # ローン関連費用が借入額で変わるので数回まわして落ち着かせる
-                r0 = compute(f, s, LoanPlan(amt), cd, hd, today=today)
+                r0 = compute(f, s, LoanPlan(amt), cd, hd, today=today)   # noqa
                 amt = floor100k(f.price + r0.total_must + r0.total_loan)
         else:
             amt = floor100k(f.price * float(c["ratio"]))
         if amt > 0:
-            loan = LoanPlan(amt)
+            loan = LoanPlan(amt, flat35=(c["type"] == "zenki_kotei" or (c.get("compare") and c["show"])))
     r = compute(f, s, loan, cd, hd, today=today)
     sim = simulate(loan.amount, c) if (loan and c["show"]) else None
     html = build_html(r, f, loan, customer=customer, property_name=property_name, address=f.address or "",

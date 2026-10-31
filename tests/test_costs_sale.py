@@ -79,7 +79,7 @@ facts = dict(property_type="mansion", price=49_800_000, seller_is_business=False
 out = make_estimate(company, facts, {"land_eval": 10_000_000, "bldg_eval": None}, customer="見本 太郎", property_name="メゾン見本 302号室",
                     band=dict(name="サンプル不動産株式会社", license="東京都知事（1）第00000号", address="東京都○○区見本町1-2-3", tel="03-0000-0000", staff="見本 花子", mobile="090-0000-0000"), today=D(2026,10,31))
 assert out["result"].lines[0].amount == 1_709_400 // 2 and len(out["simulation"]) == 3 and "住宅ローンシミュレーション" in out["html"]
-assert out["simulation"][0]["monthly"] == monthly_payment(49_800_000, 0.8, 35) and out["simulation"][0]["total"] == out["simulation"][0]["monthly"] * 420
+assert out["simulation"][0]["monthly"] == monthly_payment(44_800_000, 0.8, 35) and out["simulation"][0]["total"] == out["simulation"][0]["monthly"] * 420
 open(os.path.join(FX, "_line_sample.html"), "w").write(out["html"])
 # 物件ごとの指定（LINE「借入 3500万 変動 0.9% 35年」）
 o2 = make_estimate(company, facts, loan_override={"amount": 35_000_000, "type": "zenki_kotei", "rate": 2.0, "years": 30, "compare": False}, today=D(2026,10,31))
@@ -107,3 +107,34 @@ cal_u = ev.land_unit("○○区見本町2丁目", D(2027,1,15), LD, calib=fac); 
 ei = estimate_evals(SaleFacts("house", 58_000_000, land_area=100.5, floor_area=95.2, built=D(2012,9,1), address="○○区見本町2丁目", station_walk_min=8, youto="第一種低層住居専用地域"), D(2027,1,15), LD)
 assert ei.land_unit_est and not ei.price_based
 print("ALL OK 4")
+
+
+# ---- 5. 2026-10-31 手直し（決済日の仮置き・借入90%・管理費翌月分・手数料の文言・火災保険）
+def _t5():
+    from datetime import date as D
+    from costs_sale import tentative_handover, brokerage_fee, CompanySaleSettings, SaleFacts, compute, fire_estimate
+    from sale_estimate import make_estimate, LOAN_DEFAULTS
+    assert tentative_handover(D(2026, 10, 31)) == D(2026, 12, 1)
+    assert tentative_handover(D(2026, 11, 5)) == D(2027, 1, 1)
+    assert tentative_handover(D(2026, 12, 31)) == D(2027, 2, 1)
+    assert LOAN_DEFAULTS["ratio"] == 0.9
+    for mode in ("max", "half", "custom"):
+        _, note = brokerage_fee(30_000_000, CompanySaleSettings(fee_mode=mode, fee_custom=500_000))
+        assert "上限" not in note, note
+    f = dict(property_type="mansion", price=30_000_000, seller_is_business=False, floor_area=70.0,
+             built=D(2005, 4, 1), structure="rc", kanri_hi=20_000, shuzen_hi=10_000)
+    out = make_estimate({}, f, today=D(2026, 10, 31), drawing_day=D(2026, 11, 2))
+    r = out["result"]
+    assert out["loan_conditions"]["ratio"] == 0.9 and "決済・お引渡し 2027年1月1日（仮）" in out["html"]
+    kanri = next(l for l in r.lines if l.name == "管理費等の清算金")
+    assert kanri.amount == 60_000, kanri          # 1/1引渡し：1月分（全日）＋翌月分
+    staff = []
+    amt, note = fire_estimate(SaleFacts(**f), CompanySaleSettings(), staff)
+    # 建物1,400万：火災 16,000×1.4＝22,400、地震700万 27,500×0.7×4.7×0.9＝81,428 → 約10.4万円
+    assert amt == 104_000, (amt, note)
+    out2 = make_estimate({}, f, today=D(2026, 10, 31), handover_day=D(2027, 3, 15))
+    assert "2027年3月15日（仮）" not in out2["html"] and "2027年3月15日" in out2["html"]
+    print("ALL OK 5", amt, note)
+
+
+_t5()
