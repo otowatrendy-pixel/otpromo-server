@@ -42,6 +42,8 @@ ci = sale_core.cost_inputs(r.事実); print(ci)
 assert ci["property_type"] == "mansion" and ci["price"] == 39800000 and ci["floor_area"] == 65.12
 assert ci["floor_area_is_wall_center"] and ci["structure"] == "rc" and str(ci["built"]) == "1980-04-01"
 assert ci["seller_is_business"] is None and ci["kanri_hi"] == 12300 and not ci["shakuchi"]
+assert [sale_core.structure_code(x) for x in ("SRC造", "鉄筋コンクリート造", "軽量鉄骨造", "鉄骨造", "木造2階建", "")] == ["src", "rc", "light_steel", "steel", "wood", None]
+assert sale_core._percent("300％（前面道路により240%）") == 300 and ci["address"] == "東京都○○区見本町2丁目" and ci["commercial_area"] is False
 assert sale_core._yen("年額 12.5万円") == 125000 and sale_core._yen("98,000円") == 98000
 
 out = sale_core.render_documents(company, a["img"], r, a["pages"], a["log"])

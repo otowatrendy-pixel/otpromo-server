@@ -240,6 +240,22 @@ def built_date(text):
     return date(y, int(m.group(1)), 1)
 
 
+def structure_code(text):
+    """構造の表記 → wood / light_steel / steel / rc / src（読めなければ None）。SRCを先に見る。"""
+    st = unicodedata.normalize("NFKC", text or "").upper()
+    if re.search(r"SRC|鉄骨鉄筋", st):
+        return "src"
+    if re.search(r"RC|鉄筋コンクリート|コンクリート", st):
+        return "rc"
+    if re.search(r"軽量鉄骨|軽量S|LGS", st):
+        return "light_steel"
+    if re.search(r"鉄骨|S造|重量", st):
+        return "steel"
+    if re.search(r"木|W造", st):
+        return "wood"
+    return None
+
+
 def cost_inputs(f) -> dict:
     """読み取った事実を、購入諸費用の計算（costs_sale.SaleFacts）の引数にする。
     計算できない種別（収益・事業用など）や価格が読めないときは None。書いていない項目は None のまま。"""
@@ -252,8 +268,7 @@ def cost_inputs(f) -> dict:
         price = sec.価格.金額円 or price
     tt = f.取引態様 or ""
     st = unicodedata.normalize("NFKC", f.構造 or "")
-    structure = ("rc" if re.search(r"RC|SRC|鉄筋|鉄骨鉄筋|コンクリート", st)
-                 else "steel" if re.search(r"鉄骨|S造|軽量", st) else "wood" if re.search(r"木", st) else None)
+    structure = structure_code(st)
     area_text = f.専有面積 if kind == "mansion" else f.建物面積
     land_text = f.敷地持分 if kind == "mansion" else f.土地面積
     certified = f.認定住宅 or ""
@@ -277,7 +292,17 @@ def cost_inputs(f) -> dict:
         "teitanso": "低炭素" in certified,
         "kaitori_saihan": bool(f.買取再販),
         "shakuchi": bool(re.search(r"借地|地上権|賃借", f.土地権利 or "")),
+        # 評価額の推計用（地価公示＋構造・延床・築年数）
+        "address": f.所在地,
+        "youseki": _percent(f.容積率),
+        "commercial_area": bool(re.search(r"商業", f.用途地域 or "")),  # 近隣商業・商業
     }
+
+
+def _percent(text):
+    """「200%」「容積率 300％（前面道路により240%）」→ 最初の数字。読めなければ None。"""
+    m = re.search(r"([0-9]{2,4})\s*%", unicodedata.normalize("NFKC", text or ""))
+    return int(m.group(1)) if m else None
 
 
 # ---- 判定 -------------------------------------------------------------------------------
