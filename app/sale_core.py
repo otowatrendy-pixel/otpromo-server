@@ -301,7 +301,30 @@ def cost_inputs(f) -> dict:
         "address": f.所在地,
         "youseki": _percent(f.容積率),
         "commercial_area": bool(re.search(r"商業", f.用途地域 or "")),  # 近隣商業・商業
+        "station_walk_min": walk_min(f.交通),
+        "youto": first_youto(f.用途地域),
     }
+
+
+def walk_min(routes):
+    """交通の表記から、駅までの徒歩分のいちばん短いもの。「バス◯分」の行は使わない。なければ None。"""
+    best = None
+    for r in routes or []:
+        t = unicodedata.normalize("NFKC", r or "")
+        if re.search(r"バス|ﾊﾞｽ", t):
+            continue
+        for m in re.finditer(r"(?:徒歩|歩)\s*([0-9]+(?:\.[0-9]+)?)\s*分", t):
+            v = float(m.group(1))
+            best = v if best is None else min(best, v)
+    return best
+
+
+def first_youto(text):
+    """用途地域の表記の最初のもの（「第一種低層住居専用地域・第一種中高層…」→ 最初）。なければ None。"""
+    t = (text or "").strip()
+    if not t:
+        return None
+    return re.split(r"[、,，/／・\s]|及び", t)[0] or None
 
 
 def _percent(text):

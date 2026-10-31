@@ -44,6 +44,8 @@ assert ci["floor_area_is_wall_center"] and ci["structure"] == "rc" and str(ci["b
 assert ci["seller_is_business"] is None and ci["kanri_hi"] == 12300 and not ci["shakuchi"]
 assert [sale_core.structure_code(x) for x in ("SRC造", "鉄筋コンクリート造", "軽量鉄骨造", "鉄骨造", "木造2階建", "")] == ["src", "rc", "light_steel", "steel", "wood", None]
 assert sale_core._percent("300％（前面道路により240%）") == 240 and ci["address"] == "東京都○○区見本町2丁目" and ci["commercial_area"] is False
+assert sale_core.walk_min(["A線 B駅 徒歩12分", "C線 D駅 バス10分 停歩3分", "E線 F駅 徒歩7分"]) == 7.0 and ci["station_walk_min"] == 6.0
+assert sale_core.first_youto("第一種低層住居専用地域・第一種中高層住居専用地域") == "第一種低層住居専用地域" and ci["youto"] is None
 assert sale_core._yen("年額 12.5万円") == 125000 and sale_core._yen("98,000円") == 98000
 
 out = sale_core.render_documents(company, a["img"], r, a["pages"], a["log"])
