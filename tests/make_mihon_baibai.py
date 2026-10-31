@@ -18,6 +18,7 @@ for k, v in rows:
     d.rectangle((80, y, 1574, y + 62), outline="black", width=2); d.line((380, y, 380, y + 62), fill="black", width=2)
     d.text((100, y + 14), k, font=f(34), fill="black"); d.text((400, y + 14), v, font=f(34), fill="black"); y += 62
 d.text((80, y + 30), "手数料：分かれ　広告転載不可　レインズ番号 100123456789", font=f(34), fill="black")
+d.text((80, y + 150), "売主：見本ホーム株式会社　TEL 03-0000-3333", font=f(34), fill="black")
 d.text((80, y + 90), "【内見】前日までに要予約　TEL 03-0000-1111", font=f(34), fill="black")
 d.rectangle((0, 2120, W, H), fill=(30, 60, 140))
 d.text((60, 2150), "見本エステート株式会社", font=f(60), fill="white")
