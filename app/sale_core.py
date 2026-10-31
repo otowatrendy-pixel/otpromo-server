@@ -300,9 +300,10 @@ def cost_inputs(f) -> dict:
 
 
 def _percent(text):
-    """「200%」「容積率 300％（前面道路により240%）」→ 最初の数字。読めなければ None。"""
-    m = re.search(r"([0-9]{2,4})\s*%", unicodedata.normalize("NFKC", text or ""))
-    return int(m.group(1)) if m else None
+    """「200%」「容積率 300％（前面道路により240%）」→ いちばん小さい数字（前面道路で下がった実際の容積率）。
+    敷地持分の仮置きに使うため、建てられる容積に近い方を取る。読めなければ None。"""
+    nums = [int(n) for n in re.findall(r"([0-9]{2,4})\s*%", unicodedata.normalize("NFKC", text or ""))]
+    return min(nums) if nums else None
 
 
 # ---- 判定 -------------------------------------------------------------------------------
