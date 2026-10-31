@@ -45,6 +45,11 @@ def build_html(r, obikae_png: bytes, company: dict, sections=ALL_SECTIONS, bw=Fa
         f"<dt>Q{i}. {e(q.質問)}{' <span class=chk>要確認</span>' if q.要確認 else ''}</dt><dd>{e(q.参考回答)}</dd>"
         for i, q in enumerate(r.想定QA, 1))
     chui = "".join(f"<li>{e(t)}</li>" for t in r.スタッフへの注意)
+    # 横の販売図面（幅が高さより大きい）は、帯替え図面のページをA4横にする。縦の図面はA4縦のまま
+    from PIL import Image
+    import io
+    w, h = Image.open(io.BytesIO(obikae_png)).size
+    landscape = tuple(sections) == ("obikae",) and w > h
     if bw:
         company = {**company, "テーマ色": "#222222"}
     t = render.theme(company)
@@ -63,10 +68,11 @@ def build_html(r, obikae_png: bytes, company: dict, sections=ALL_SECTIONS, bw=Fa
 <p class=note>{render.NOTE}</p></section>""",
     }
     body = "\n".join(parts[k] for k in sections)
+    size, img_h = ("A4 landscape", "160mm") if landscape else ("A4", "250mm")
     return f"""<!doctype html><html lang=ja><meta charset=utf-8><style>
 {fcss}
 :root {{ --main: {t['main']}; --line: {t['line']}; --light: {t['light']}; --pale: {t['pale']}; --font: {family}; }}
-@page {{ size: A4; margin: 14mm 14mm 16mm; }}
+@page {{ size: {size}; margin: 14mm 14mm 16mm; }}
 body {{ font-family: var(--font); color: #222; font-size: 10.5pt; line-height: 1.7;
   word-break: auto-phrase; line-break: strict; }}
 h1 {{ color: var(--main); font-size: 16pt; border-bottom: 3px solid var(--main); padding-bottom: 4px; margin: 0 0 10px; }}
@@ -75,7 +81,7 @@ h2 {{ color: var(--main); font-size: 11.5pt; margin: 14px 0 4px; }}
 section {{ page-break-after: always; }}
 section.keep {{ page-break-after: avoid; }}
 section:last-child {{ page-break-after: auto; }}
-img {{ display: block; max-width: 100%; max-height: 250mm; margin: 0 auto; border: 1px solid #ccc; }}
+img {{ display: block; max-width: 100%; max-height: {img_h}; margin: 0 auto; border: 1px solid #ccc; }}
 ol.pt li {{ margin-bottom: 10px; }} ol.pt p {{ margin: 2px 0; }} small {{ color: #666; }}
 ul.chui {{ padding-left: 1.2em; }} ul.chui li {{ margin-bottom: 6px; background: var(--pale);
   border-left: 4px solid var(--main); padding: 4px 8px; list-style: none; margin-left: -1.2em; }}

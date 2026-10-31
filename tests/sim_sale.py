@@ -107,3 +107,12 @@ assert a["log"]["写真の補正"] == "補正なし"  # パソコンで作った
 assert out["texts"]["osusume_note"] == "お客様へ送る前に内容をご確認ください"
 sale_schema.SaleResult.model_validate(out["result"])  # 保存の形から戻せる
 print("OK", out["log"]["秒_合計"], "秒", OUT)
+
+# 横の販売図面は、帯替え図面のページをA4横にする（縦の図面は縦のまま）
+import io, sale_render
+from PIL import Image
+buf = io.BytesIO(); Image.new("RGB", (300, 200), "white").save(buf, "PNG")
+assert "size: A4 landscape" in sale_render.build_html(r, buf.getvalue(), company, sections=("obikae",))
+assert "size: A4 landscape" not in sale_render.build_html(r, buf.getvalue(), company, sections=("qa",))
+assert "size: A4 landscape" not in sale_render.build_html(r, out["obikae_png"], company, sections=("obikae",))
+print("OK 横の図面")
