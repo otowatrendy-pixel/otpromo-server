@@ -22,6 +22,8 @@ HERE = Path(__file__).parent
 TEMPLATE = HERE / "baibai_naiken_template.html"
 WEEK = "月火水木金土日"
 KINDS = ["区分マンション", "戸建", "土地"]
+# 読み取り（sale_schema.SaleFacts.物件種別）でこの3つ以外が来たときは、4つ目の欄として■で足す
+EXTRA_KINDS = ["収益一棟", "収益区分", "事業用"]
 BLANK_WISH = "　　月　　日（　　）　　時　　分頃"
 
 # 「ご確認のお願い」に並べる項目。on は最初から■にしておくもの
@@ -52,6 +54,26 @@ def kind_of(text):
     return ""
 
 
+def from_sale_facts(facts):
+    """売買の読み取り結果（sale_schema.SaleFacts、またはその dict）から、宛先と物件の下書きを作る。
+
+    元付業者_FAX が空なら空のまま（電話番号で代用しない。賃貸版と同じ決まり）。
+    check には、送る前に利用者へ確かめる宛先項目（空欄・読み取りに自信がない）を入れる。
+    """
+    f = facts.model_dump() if hasattr(facts, "model_dump") else dict(facts or {})
+    price = f.get("価格") or {}
+    shaky = set(f.get("読み取りに自信がない項目") or [])
+    check = [k for k, field in (("company", "元付業者"), ("fax", "元付業者_FAX")) if field in shaky or not f.get(field)]
+    room = re.sub(r"\s*号室?$", "", (f.get("号室") or "").strip()) or None
+    kind = f.get("物件種別") or ""
+    return {
+        "to": {"company": f.get("元付業者") or "", "branch": "", "person": "", "fax": f.get("元付業者_FAX") or "",
+               "tel": f.get("元付業者_電話") or "", "check": check},
+        "prop": {"kind": kind if kind in KINDS + EXTRA_KINDS else "", "name": f.get("物件名") or "", "room": room,
+                 "address": f.get("所在地") or "", "price": price.get("記載") or ""},
+    }
+
+
 def html(to, me, prop, wishes=None, guests=None, note=None, ad=False, now=None, qr_svg=None):
     """依頼書のHTMLを作る。
 
@@ -66,13 +88,15 @@ def html(to, me, prop, wishes=None, guests=None, note=None, ad=False, now=None, 
     import render
 
     prop = dict(prop or {})
-    prop["kind"] = prop.get("kind") if prop.get("kind") in KINDS else kind_of(prop.get("kind"))
+    k = prop.get("kind") or ""
+    prop["kind"] = k if k in KINDS + EXTRA_KINDS else kind_of(k)
+    kinds = KINDS + ([prop["kind"]] if prop["kind"] in EXTRA_KINDS else [])
     asks = [{"text": t, "on": (ad if k == "ad" else on)} for k, t, on in ASKS if k != "ad" or ad]
     if qr_svg is None:
         qr = HERE / "static" / "naiken-qr.svg"  # 賃貸版と同じ「内見FAX」経路のQR。売買版のLINEが決まったら差し替える
         qr_svg = Markup(qr.read_text(encoding="utf-8")) if qr.exists() else ""
     data = {
-        "sent_date": sent_date(now), "to": to or {}, "me": me or {}, "prop": prop, "kinds": KINDS,
+        "sent_date": sent_date(now), "to": to or {}, "me": me or {}, "prop": prop, "kinds": kinds,
         "wishes": [w or BLANK_WISH for w in (wishes or [])][:3] or [BLANK_WISH, BLANK_WISH],
         "guests": guests, "note": note, "asks": asks, "show_ad": ad, "qr_svg": qr_svg,
     }
