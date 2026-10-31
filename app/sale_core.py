@@ -82,12 +82,7 @@ def call_claude(jpeg: bytes):
         output_config={"effort": config.EFFORT},
         **kwargs,
     )
-    if resp.stop_reason == "refusal":
-        raise RuntimeError(f"モデルが処理を断りました: {resp.stop_details}")
-    if resp.stop_reason == "max_tokens":
-        raise RuntimeError("出力が上限で途切れました")
-    text = "".join(b.text for b in resp.content if b.type == "text")
-    obj, _ = json.JSONDecoder().raw_decode(text[text.index("{"):])
+    # 原価は形が崩れていても先に数える（やり直したときは analyze で1回目と合計して1件分にする）
     u = resp.usage
     pin, pout, pcache = core.PRICES.get(config.MODEL, core.PRICES["claude-sonnet-5-5"])
     cache_read = getattr(u, "cache_read_input_tokens", 0) or 0
@@ -96,7 +91,17 @@ def call_claude(jpeg: bytes):
     usage = {"入力トークン": u.input_tokens, "出力トークン": u.output_tokens, "キャッシュ読み出し": cache_read,
              "原価_円": round(usd * core.YEN, 2), "実際のモデル": resp.model}
     core._count_cost(usd * core.YEN)
-    return SaleResult.model_validate(obj), usage
+    if resp.stop_reason == "refusal":
+        raise RuntimeError(f"モデルが処理を断りました: {resp.stop_details}")
+    if resp.stop_reason == "max_tokens":
+        raise RuntimeError("出力が上限で途切れました")
+    try:
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        obj, _ = json.JSONDecoder().raw_decode(text[text.index("{"):])
+        return SaleResult.model_validate(obj), usage
+    except ValueError as e:
+        e.cost_yen = usage["原価_円"]
+        raise
 
 
 def analyze(data: bytes) -> dict:
@@ -112,8 +117,10 @@ def analyze(data: bytes) -> dict:
     else:
         try:
             result, usage = call_claude(jpeg)
-        except ValueError:  # JSONの形が崩れたときは1回だけやり直す
+        except ValueError as e:  # JSONの形が崩れたときは1回だけやり直す。原価は1回目と合計して1件分
+            first = getattr(e, "cost_yen", 0) or 0
             result, usage = call_claude(jpeg)
+            usage = {**usage, "原価_円": round(usage.get("原価_円", 0) + first, 2), "やり直し": 1}
     tidy(result)
     if pages > 1:
         # 図面の束（Excelで何件分もまとめたPDFなど）。1ページ目だけで作る

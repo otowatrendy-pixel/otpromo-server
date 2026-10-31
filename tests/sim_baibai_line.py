@@ -529,9 +529,27 @@ usage.notify_admin = _na
 assert "昨日：平均15.0円・最大22.5円（4件）" in lines, lines
 assert len(alerts) == 1 and "20円を超えました" in alerts[0][0] and "最大22.5円" in alerts[0][1] and "平均" not in alerts[0][1].split("でした")[0], alerts
 print(lines)
+# やり直したときは、1回目と2回目の原価を合計して1件分（10/31料金スレッド）
+_calls = []
+def _fake_claude(jpeg):
+    _calls.append(1)
+    if len(_calls) == 1:
+        e = ValueError("JSONの形が崩れた"); e.cost_yen = 7.5; raise e
+    return sale_core.SaleResult.model_validate_json(open(os.environ["SALE_MOCK_RESULT"], encoding="utf-8").read()), {"原価_円": 9.25}
+_cc, _mock = sale_core.call_claude, sale_core.SALE_MOCK_RESULT
+sale_core.call_claude, sale_core.SALE_MOCK_RESULT = _fake_claude, ""
+n0 = usage._get("usage_d_" + usage._day()).get("doc_ai_n", 0)
+y0 = usage._get("usage_d_" + usage._day()).get("doc_ai_yen", 0)
+try:
+    a = sale_core.analyze((ROOT / "tests" / "fixtures" / "mihon-baibai.png").read_bytes())
+finally:
+    sale_core.call_claude, sale_core.SALE_MOCK_RESULT = _cc, _mock
+assert a["log"]["原価_円"] == 16.75 and a["log"]["やり直し"] == 1, a["log"]
+dd = usage._get("usage_d_" + usage._day())
+assert dd["doc_ai_n"] == n0 + 1 and abs(dd["doc_ai_yen"] - y0 - 16.75) < 1e-6
 import texts
-import json as _j; ps = _j.dumps(texts.build("plan_show", urls={}), ensure_ascii=False)
-assert "月額2,480円" in ps and "年額24,800円" in ps and "月額4,280円" in ps and "年額42,800円" in ps and "1,480" not in ps, ps
+import json as _j; ps = _j.dumps(line.out(texts.build("plan_show", urls={f"Stripe決済ページ（{a}{b}）": "https://x" for a in ("ライト", "使い放題") for b in ("月額", "年額")})), ensure_ascii=False)
+assert "MAX（月払い）" in ps and "使い放題" not in ps and "月額2,480円" in ps and "年額24,800円" in ps and "月額4,280円" in ps and "年額42,800円" in ps and "1,480" not in ps, ps
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})
 assert r.returncode == 0

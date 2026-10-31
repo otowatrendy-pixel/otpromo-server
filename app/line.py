@@ -28,7 +28,7 @@ def verify(body: bytes, signature: str) -> bool:
 
 
 # 売買版（APP_MODE=sale）では、賃貸版と共通の文面も含めて「募集図面」を「販売図面」と言い換えて送る（10/31本人決定）
-SALE_TERMS = [("募集図面", "販売図面")]
+SALE_TERMS = [("募集図面", "販売図面"), ("使い放題プラン", "MAXプラン"), ("使い放題", "MAX")]  # 売買版の上のプランは「MAX」（10/31）
 
 
 def out(x):

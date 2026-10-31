@@ -55,7 +55,7 @@ def count(kind, n=1):
         log.exception("通数を数えられませんでした %s", kind)
 
 
-# 売買版：1件あたりのAI原価（10/31本人OK）。料金の試算は1件15円、使い放題は1件約34円を超えると赤字
+# 売買版：1件あたりのAI原価（10/31本人OK）。料金の試算は1件15円、MAXプランは1件約34円を超えると赤字
 DOC_COST_WARN_YEN = float(config.env("DOC_COST_WARN_YEN", "20"))
 
 
@@ -88,7 +88,7 @@ def _doc_cost_lines():
     if over:
         alert_once("doc_cost", f"1件あたりのAI原価が{DOC_COST_WARN_YEN:g}円を超えました",
                    f"昨日の読み取り{y['n']}件のうち、{'・'.join(over)}でした（目安{DOC_COST_WARN_YEN:g}円）。\n"
-                   f"料金の試算は1件15円です。使い放題プランは、1件約34円を超えると赤字になります。\n今月：{fmt(m)}")
+                   f"料金の試算は1件15円です。MAXの赤字ラインは約34円です。\n今月：{fmt(m)}")
     return text
 
 
