@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-31 売買版 第1版（下書き。SALE_ENABLED=1 のときだけ使う）",
+  "version": "2026-10-31 売買版 第2版（割合の手数料と、購入諸費用の概算書のつなぎを追加。SALE_ENABLED=1 のときだけ使う）",
   "note": "売買版の文面。messages.json（賃貸版）と同じ書き方。IDはすべて sale_ で始め、賃貸版のIDとは重ならない。SALE_ENABLED が 0（本番の初期値）のあいだは、どの文面も送られない。料金・無料件数・速さの秒数は決まっていないので【】で空けてある（決まったら差し替える）。司法書士の協力会社の名前は書かない。",
   "sections": [
     {
@@ -11,8 +11,14 @@
           "send": "reply",
           "text": "{表示名}さん、友だち追加ありがとうございます！\n\nこちらは「1分資料」です。\n賃貸でも売買でも、募集図面の写真かPDFをこのトークに送るだけで、接客に使える資料が届きます。賃貸か売買かは、図面を見て自動で見分けます。\n\n▼賃貸の図面なら\n帯替え図面・おすすめポイント・初期費用の概算書・内見申込書（FAX用）・想定Q&A\n\n▼売買の図面なら\n帯替え図面・おすすめポイント・購入諸費用の概算書・想定Q&A\n（元付業者への物件確認・内見依頼書のFAXもできます）\n\n帯替え図面の業者向け情報は自動で消します。残っていたらLINEで送るだけで、何度でも無料で直せます（件数には数えません）。\n募集図面【◯】件分は無料でお試しいただけます。\n\nはじめに、資料の帯に入れる会社情報を登録します（3分ほどで終わります）。\nご利用の前に、利用規約をご確認ください。\nhttps://otpromo.com/terms-ippun.html",
           "buttons": [
-            {"label": "同意して登録をはじめる", "action": "postback reg=start"},
-            {"label": "先に使い方を見る", "action": "postback help=usage"}
+            {
+              "label": "同意して登録をはじめる",
+              "action": "postback reg=start"
+            },
+            {
+              "label": "先に使い方を見る",
+              "action": "postback help=usage"
+            }
           ],
           "note": "集客プランの③（賃貸・売買共通のあいさつ）をLINEの実際の長さに合わせた版。所要時間は「3分ほど」（売買の質問が2つ増えるため。賃貸だけを選んだ方は今と同じ2〜3分）。"
         },
@@ -22,9 +28,18 @@
           "send": "reply",
           "text": "主にお使いになるのは、賃貸と売買のどちらですか？\n登録の質問を、お使いになる方に合わせます。\n\n※どちらを選んでも、両方の募集図面を送れます。あとから足りない項目だけお聞きします。",
           "buttons": [
-            {"label": "賃貸", "action": "postback kind=rent"},
-            {"label": "売買", "action": "postback kind=sale"},
-            {"label": "両方", "action": "postback kind=both"}
+            {
+              "label": "賃貸",
+              "action": "postback kind=rent"
+            },
+            {
+              "label": "売買",
+              "action": "postback kind=sale"
+            },
+            {
+              "label": "両方",
+              "action": "postback kind=both"
+            }
           ],
           "note": "答えで聞く質問を変える。賃貸＝今の賃貸版と同じ（所属団体・売買の手数料は聞かない）、売買＝賃貸の仲介手数料を聞かない、両方＝全部聞く。"
         },
@@ -34,12 +49,30 @@
           "send": "reply",
           "text": "所属されている業界団体を選んでください。\n売買の帯替え図面には、広告のルール（不動産の表示に関する公正競争規約）で、所属団体名と公正取引協議会の加盟の表示が必要です。\n\n2つ以上に入っている場合は、帯に載せたい方を選んでください。",
           "buttons": [
-            {"label": "宅建協会（ハトマーク）", "action": "postback assoc=takken"},
-            {"label": "全日（ウサギマーク）", "action": "postback assoc=zennichi"},
-            {"label": "不動産流通経営協会", "action": "postback assoc=frk"},
-            {"label": "全国住宅産業協会", "action": "postback assoc=zenjukyo"},
-            {"label": "その他（文字で送る）", "action": "postback assoc=other"},
-            {"label": "入っていない", "action": "postback assoc=none"}
+            {
+              "label": "宅建協会（ハトマーク）",
+              "action": "postback assoc=takken"
+            },
+            {
+              "label": "全日（ウサギマーク）",
+              "action": "postback assoc=zennichi"
+            },
+            {
+              "label": "不動産流通経営協会",
+              "action": "postback assoc=frk"
+            },
+            {
+              "label": "全国住宅産業協会",
+              "action": "postback assoc=zenjukyo"
+            },
+            {
+              "label": "その他（文字で送る）",
+              "action": "postback assoc=other"
+            },
+            {
+              "label": "入っていない",
+              "action": "postback assoc=none"
+            }
           ],
           "note": "ラベルは20文字以内。宅建協会と全日は、住所の都道府県から正式名（例：公益社団法人東京都宅地建物取引業協会）を作る。公正取引協議会も住所から決める（首都圏の1都8県は首都圏不動産公正取引協議会）。"
         },
@@ -56,8 +89,14 @@
           "send": "reply",
           "text": "売買の帯には、次のように載せます。\n\n{帯の表記}\n\nこのままでよろしいですか？",
           "buttons": [
-            {"label": "このままでOK", "action": "postback assoc=ok"},
-            {"label": "書き直す", "action": "postback assoc=other"}
+            {
+              "label": "このままでOK",
+              "action": "postback assoc=ok"
+            },
+            {
+              "label": "書き直す",
+              "action": "postback assoc=other"
+            }
           ],
           "note": "「入っていない」を選んだ方は「所属団体：なし」とは載せず、表記を空にする（公取協に加盟していない旨を載せる義務はないため）。そのときはこの確認を出さずに次へ進む。"
         },
@@ -67,10 +106,26 @@
           "send": "reply",
           "text": "購入諸費用の概算書に入れる、売買の仲介手数料を選んでください。\n\n上限どおり：価格×3%＋6万円（税別）\n※価格が400万円以下のときは、法律の上限で自動で計算します。",
           "buttons": [
-            {"label": "上限どおり", "action": "postback sfee=max"},
-            {"label": "半額", "action": "postback sfee=half"},
-            {"label": "無料", "action": "postback sfee=free"},
-            {"label": "金額を決めている", "action": "postback sfee=custom"}
+            {
+              "label": "上限どおり",
+              "action": "postback sfee=max"
+            },
+            {
+              "label": "半額",
+              "action": "postback sfee=half"
+            },
+            {
+              "label": "無料",
+              "action": "postback sfee=free"
+            },
+            {
+              "label": "割合を決めている",
+              "action": "postback sfee=rate"
+            },
+            {
+              "label": "金額を決めている",
+              "action": "postback sfee=custom"
+            }
           ]
         },
         {
@@ -81,13 +136,26 @@
           "buttons": []
         },
         {
+          "id": "sale_reg_fee_rate",
+          "when": "売買の仲介手数料で「割合を決めている」を押したとき",
+          "send": "reply",
+          "text": "仲介手数料の割合（価格の何%か、税抜）を数字で送ってください。消費税は概算書で自動で足します。\n（例：2）\n\n※法律の上限を超えるときは、上限で計算します。",
+          "buttons": []
+        },
+        {
           "id": "sale_reg_confirm",
           "when": "全部そろったとき（売買・両方を選んだ方）",
           "send": "reply",
           "text": "登録内容のご確認です。\n\n会社名：{会社名}\n店舗名：{店舗名}\n担当者：{担当者名}（携帯 {携帯番号}）\n免許番号：{免許番号}\n所属団体：{所属団体}\n電話：{電話}\nFAX：{FAX}\n住所：{住所}\n{賃貸の手数料行}売買の仲介手数料：{売買手数料}\n売買の取引態様：{取引態様}\nテーマ色：{色}\n書体：{書体}\n帯：{帯}\n受け取り方：{受け取り方}\n\nこの内容でよろしいですか？",
           "buttons": [
-            {"label": "この内容で登録", "action": "postback reg=done"},
-            {"label": "修正する", "action": "postback reg=edit"}
+            {
+              "label": "この内容で登録",
+              "action": "postback reg=done"
+            },
+            {
+              "label": "修正する",
+              "action": "postback reg=edit"
+            }
           ],
           "note": "{賃貸の手数料行} は「賃貸の仲介手数料：賃料の1ヶ月分（税別）\\n」か空。売買だけの方には賃貸の行を出さない。取引態様は初期値「媒介」（客付の立場。変更は「登録内容の変更」から）。"
         },
@@ -97,8 +165,14 @@
           "send": "reply",
           "text": "登録ありがとうございました！\nさっそく、募集図面を1枚撮って送ってみてください。PDFのままでも大丈夫です。賃貸か売買かは自動で見分けます。\n\nきれいに読み取るコツ\n・募集図面全体が入るように、横向きで\n・真上から、明るい場所で\n・影や光の反射が入らないように\n\n無料のこり【◯】件です。",
           "buttons": [
-            {"label": "カメラを開く", "action": "camera"},
-            {"label": "写真を選ぶ", "action": "cameraRoll"}
+            {
+              "label": "カメラを開く",
+              "action": "camera"
+            },
+            {
+              "label": "写真を選ぶ",
+              "action": "cameraRoll"
+            }
           ]
         }
       ]
@@ -132,7 +206,12 @@
           "when": "売買の募集図面が届いてすぐ（宛名を毎回聞く設定の方）",
           "send": "reply",
           "text": "募集図面を受け付けました。資料をお作りしています。\n\nお客様のお名前（購入諸費用の概算書の宛名）を送ってください。\n宛名を空欄のままでよい場合は「不要」と送ってください。",
-          "buttons": [{"label": "不要", "action": "postback atena=skip"}],
+          "buttons": [
+            {
+              "label": "不要",
+              "action": "postback atena=skip"
+            }
+          ],
           "note": "賃貸と売買のどちらかは、宛名を聞いた時点ではまだ分からない（読み取りと同時に聞くため）。そのため、宛名を聞く文は「概算書の宛名」だけにした共通の文（sale_atena_ask_common）を使う案もある。下書きでは共通の文を使う。"
         },
         {
@@ -140,7 +219,12 @@
           "when": "募集図面が届いてすぐ（売買版の公開後は atena_ask の代わりに使う）",
           "send": "reply",
           "text": "募集図面を受け付けました。資料をお作りしています。\n\nお客様のお名前（概算書の宛名）を送ってください。\n宛名を空欄のままでよい場合は「不要」と送ってください。",
-          "buttons": [{"label": "不要", "action": "postback atena=skip"}]
+          "buttons": [
+            {
+              "label": "不要",
+              "action": "postback atena=skip"
+            }
+          ]
         },
         {
           "id": "sale_deliver_slow",
@@ -156,10 +240,22 @@
           "send": "reply（間に合わなければpush）",
           "text": "売買の資料ができました！\n\n物件：{物件名}\n\n▼お客様向け（そのまま転送できます）\n帯替え図面・購入諸費用の概算書\n{お客様向けリンク}\n\n▼社内向け（接客の準備用）\nスタッフへの注意・おすすめポイント・想定Q&A\n{社内向けリンク}\n\n※リンクは{有効期限}まで開けます。\n{注意の要点}\nAIが作った下書きです。お客様にお渡しする前に、内容をご確認ください。税金・ローンの金額は目安です。\n\n{のこり枚数の案内}\n\n業者さま向けの情報（分かれ・元付の連絡先など）が残っていたら、このトークで「備考の分かれを消して」のように送ってください。何度でも無料で直します。",
           "buttons": [
-            {"label": "この物件で物件確認FAX", "action": "postback bfax=from_last&doc={資料ID}"},
-            {"label": "評価額を送って作り直す", "action": "postback eval=ask&doc={資料ID}"},
-            {"label": "メールにも送る", "action": "postback send=mail"},
-            {"label": "お客様への送り方", "action": "postback help=share"}
+            {
+              "label": "この物件で物件確認FAX",
+              "action": "postback bfax=from_last&doc={資料ID}"
+            },
+            {
+              "label": "評価額を送って作り直す",
+              "action": "postback eval=ask&doc={資料ID}"
+            },
+            {
+              "label": "メールにも送る",
+              "action": "postback send=mail"
+            },
+            {
+              "label": "お客様への送り方",
+              "action": "postback help=share"
+            }
           ],
           "note": "同じ送信に帯替え図面の画像を1つ添える。{注意の要点} は社内向けの注意のうち大事なもの（広告転載不可・告知事項・物件確認のお願い）を最大2行、「⚠」を付けずに「【ご注意】」で始めて入れる。なければ空。お客様に転送される画像・お客様向けPDFには注意書きを入れない。"
         },
@@ -169,8 +265,14 @@
           "send": "reply（間に合わなければpush）",
           "text": "売買の資料をメールでお送りしました（{メールアドレス}）。\n\n物件：{物件名}\n{注意の要点}\nAIが作った下書きです。お客様にお渡しする前に、内容をご確認ください。税金・ローンの金額は目安です。\n\n{のこり枚数の案内}",
           "buttons": [
-            {"label": "この物件で物件確認FAX", "action": "postback bfax=from_last&doc={資料ID}"},
-            {"label": "評価額を送って作り直す", "action": "postback eval=ask&doc={資料ID}"}
+            {
+              "label": "この物件で物件確認FAX",
+              "action": "postback bfax=from_last&doc={資料ID}"
+            },
+            {
+              "label": "評価額を送って作り直す",
+              "action": "postback eval=ask&doc={資料ID}"
+            }
           ]
         },
         {
@@ -178,7 +280,12 @@
           "when": "「評価額を送って作り直す」を押したとき",
           "send": "reply",
           "text": "固定資産税の評価額が分かれば、登録免許税と不動産取得税を、より正確な金額で作り直します（件数には数えません）。\n\n次のように送ってください。\n土地 12,345,678\n建物 4,567,890\n\n（評価証明書や納税通知書の写真を送っていただいても読み取ります。マンションは土地の持分の評価額をお書きください）",
-          "buttons": [{"label": "やめる", "action": "postback cancel"}],
+          "buttons": [
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
+          ],
           "note": "評価額が図面にないときは価格からの推計で「約◯円（推計）」と出している（10/31設計スレッドの決定）。作り直しは costs_sale.with_evals() を使い、AIは呼ばない。"
         },
         {
@@ -215,9 +322,18 @@
           "send": "reply",
           "text": "どちらのFAXをお送りしますか？",
           "buttons": [
-            {"label": "賃貸の内見申込書", "action": "postback naiken=start"},
-            {"label": "売買の物件確認・内見", "action": "postback bfax=start"},
-            {"label": "やめる", "action": "postback cancel"}
+            {
+              "label": "賃貸の内見申込書",
+              "action": "postback naiken=start"
+            },
+            {
+              "label": "売買の物件確認・内見",
+              "action": "postback bfax=start"
+            },
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
           ],
           "note": "最近の資料が賃貸だけなら naiken=start、売買だけなら bfax=start に、聞かずに進む。"
         },
@@ -227,9 +343,18 @@
           "send": "reply",
           "text": "物件確認・内見依頼書は、元付業者に1物件ずつFAXでお送りします。\n販売中かどうか、価格の変更、内見の可否を、まとめてご確認いただけます。元付業者さんは、ご回答欄に印を付けてそのまま返信できます。\n\n届いた売買の資料の下の「この物件で物件確認FAX」を押すと、物件名・元付業者・FAX番号は募集図面から自動で入ります。\n\n下のボタンから、最近お作りした売買の物件を選ぶこともできます。",
           "buttons": [
-            {"label": "最近の売買の物件から", "action": "postback bfax=recent"},
-            {"label": "募集図面を送る", "action": "camera"},
-            {"label": "やめる", "action": "postback cancel"}
+            {
+              "label": "最近の売買の物件から",
+              "action": "postback bfax=recent"
+            },
+            {
+              "label": "募集図面を送る",
+              "action": "camera"
+            },
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
           ],
           "note": "依頼書の中身は claude/baibai-naiken-fax ブランチ（baibai_naiken.py）。お客様のお名前は載せない。送信の予約・回数・送信停止リストは賃貸の内見FAXの仕組みを使う。"
         }
@@ -244,13 +369,34 @@
           "send": "reply",
           "text": "変更したい項目を選んでください。",
           "buttons": [
-            {"label": "賃貸の仲介手数料", "action": "postback edit=fee"},
-            {"label": "売買の仲介手数料", "action": "postback edit=sfee"},
-            {"label": "所属団体", "action": "postback edit=assoc"},
-            {"label": "売買の取引態様", "action": "postback edit=torihiki"},
-            {"label": "800万円以下の特例", "action": "postback edit=tokurei"},
-            {"label": "司法書士報酬の目安", "action": "postback edit=shiho"},
-            {"label": "月々の返済の目安", "action": "postback edit=loan"}
+            {
+              "label": "賃貸の仲介手数料",
+              "action": "postback edit=fee"
+            },
+            {
+              "label": "売買の仲介手数料",
+              "action": "postback edit=sfee"
+            },
+            {
+              "label": "所属団体",
+              "action": "postback edit=assoc"
+            },
+            {
+              "label": "売買の取引態様",
+              "action": "postback edit=torihiki"
+            },
+            {
+              "label": "800万円以下の特例",
+              "action": "postback edit=tokurei"
+            },
+            {
+              "label": "司法書士報酬の目安",
+              "action": "postback edit=shiho"
+            },
+            {
+              "label": "月々の返済の目安",
+              "action": "postback edit=loan"
+            }
           ],
           "note": "賃貸版の reg_edit はボタンが上限（13）に近いので、売買版の公開後は reg_edit の「仲介手数料」を「賃貸・売買の設定」（postback edit=deal）に置き換え、この一覧を出す。"
         },
@@ -260,8 +406,14 @@
           "send": "reply",
           "text": "帯に載せる、御社の取引態様を選んでください。\nお客様（買主様）の側で仲介する場合は「媒介」です。",
           "buttons": [
-            {"label": "媒介（仲介）", "action": "postback torihiki=媒介"},
-            {"label": "代理", "action": "postback torihiki=代理"}
+            {
+              "label": "媒介（仲介）",
+              "action": "postback torihiki=媒介"
+            },
+            {
+              "label": "代理",
+              "action": "postback torihiki=代理"
+            }
           ],
           "note": "「売主」は選べないようにする（自社が売主の物件は、このサービスの帯替えの対象外）。表示規約では「媒介」と「仲介」は同じ意味の言葉として使える。"
         },
@@ -271,8 +423,14 @@
           "send": "reply",
           "text": "価格が800万円以下の空き家などでは、あらかじめお客様にご説明して合意をいただければ、仲介手数料を最大33万円（税込）まで受け取れる特例があります（2024年7月から）。\n\n概算書で、この特例の金額を使いますか？\n今の設定：{今の設定}",
           "buttons": [
-            {"label": "使う", "action": "postback tokurei=on"},
-            {"label": "使わない", "action": "postback tokurei=off"}
+            {
+              "label": "使う",
+              "action": "postback tokurei=on"
+            },
+            {
+              "label": "使わない",
+              "action": "postback tokurei=off"
+            }
           ],
           "note": "使うにしても、概算書には「特例の適用にはお客様への事前のご説明と合意が必要です」の注記を入れる（costs_sale.py 側）。"
         },
@@ -281,7 +439,12 @@
           "when": "「司法書士報酬の目安」を押したとき",
           "send": "reply",
           "text": "購入諸費用の概算書に入れる、司法書士報酬の目安（税込）です。\n\n今の設定\n所有権移転：{移転}円\n抵当権設定：{抵当権}円\n所有権保存（新築）：{保存}円\n登記の実費：{実費}円\n\n変える場合は、次のように送ってください。\n移転 66000\n抵当権 44000",
-          "buttons": [{"label": "このままでよい", "action": "postback cancel"}],
+          "buttons": [
+            {
+              "label": "このままでよい",
+              "action": "postback cancel"
+            }
+          ],
           "note": "初期値は当社で決めた目安（本人確認待ち）。協力会社の名前・関係はどこにも出さない。"
         },
         {
@@ -290,8 +453,14 @@
           "send": "reply",
           "text": "購入諸費用の概算書に小さく入れる、月々の返済の目安の計算条件です。\n\n今の設定：金利 年{金利}%・{年数}年・元利均等・ボーナス払いなし\n\n変える場合は、次のように送ってください。\n金利 0.9 年数 35\n\n※お客様向けには「目安」と表示し、ローンの審査や実際の金利は断言しません。",
           "buttons": [
-            {"label": "このままでよい", "action": "postback cancel"},
-            {"label": "返済の目安を載せない", "action": "postback loan=off"}
+            {
+              "label": "このままでよい",
+              "action": "postback cancel"
+            },
+            {
+              "label": "返済の目安を載せない",
+              "action": "postback loan=off"
+            }
           ]
         },
         {
@@ -312,11 +481,26 @@
           "send": "reply",
           "text": "どちらをご覧になりますか？",
           "buttons": [
-            {"label": "賃貸の使い方", "action": "postback help=usage"},
-            {"label": "売買の使い方", "action": "postback help=sale"},
-            {"label": "お問い合わせ", "action": "postback help=contact"},
-            {"label": "よくある質問", "action": "uri https://otpromo.com/ippun-baibai.html#faq"},
-            {"label": "お友だちに紹介", "action": "postback referral=menu"}
+            {
+              "label": "賃貸の使い方",
+              "action": "postback help=usage"
+            },
+            {
+              "label": "売買の使い方",
+              "action": "postback help=sale"
+            },
+            {
+              "label": "お問い合わせ",
+              "action": "postback help=contact"
+            },
+            {
+              "label": "よくある質問",
+              "action": "uri https://otpromo.com/ippun-baibai.html#faq"
+            },
+            {
+              "label": "お友だちに紹介",
+              "action": "postback referral=menu"
+            }
           ],
           "note": "よくある質問のURLは、最後に見た資料が売買なら売買ページ、賃貸なら /ippun.html#faq にする。"
         },
@@ -326,8 +510,14 @@
           "send": "reply",
           "text": "売買の募集図面の使い方です。賃貸と同じく、送るだけです。\n\n①募集図面を撮る\n　全体が入るように、横向きで\n　（PDFのままでもOK。1ページ目を使います）\n②このトークに送る\n③資料が届く\n\n届く資料\n▼お客様向け\n・帯替え図面（御社の帯に、取引態様「媒介」・免許番号・所属団体を入れます）\n・購入諸費用の概算書（必ずかかる費用と、場合によりかかる費用を分けて載せます）\n▼社内向け\n・スタッフへの注意（物件確認のお願い、広告転載不可、告知事項など）\n・おすすめポイント\n・想定Q&A\n\n分かれ・片手・両手、レインズ番号などの業者向け情報は白く消します。告知事項や再建築不可などの大事な記載は消しません。\n税金・ローンの金額は目安です。図面に書いていないことは「要確認」と入ります。\n\n元付業者への物件確認・内見依頼書のFAXは、メニューの「元付へFAX」からどうぞ。",
           "buttons": [
-            {"label": "カメラを開く", "action": "camera"},
-            {"label": "売買の設定を見る", "action": "postback edit=deal"}
+            {
+              "label": "カメラを開く",
+              "action": "camera"
+            },
+            {
+              "label": "売買の設定を見る",
+              "action": "postback edit=deal"
+            }
           ]
         }
       ]
@@ -349,7 +539,10 @@
           "send": "push",
           "text": "いつも「1分資料」をご利用いただき、ありがとうございます。\n\n本日から、売買の募集図面にも対応しました。中古マンション・戸建・土地の図面を送ると、帯替え図面・おすすめポイント・購入諸費用の概算書・想定Q&Aが届きます。\n\nはじめて売買の図面を送ったときに、所属団体と売買の仲介手数料の2つだけお聞きします。\n【料金の扱い：料金スレッドの決定後に入れる】",
           "buttons": [
-            {"label": "売買の使い方", "action": "postback help=sale"}
+            {
+              "label": "売買の使い方",
+              "action": "postback help=sale"
+            }
           ],
           "note": "集客プランの②と同じ中身。「メニューの設定で」の部分は、初回の2問で聞く形に合わせて書き換えた。"
         }
@@ -361,12 +554,42 @@
       "size": "2500×1686px（大）",
       "chatBarText": "メニュー",
       "areas": [
-        {"pos": "左上", "label": "撮って送る", "sub": "賃貸も売買も", "action": "uri https://line.me/R/nv/camera/"},
-        {"pos": "中上", "label": "写真から送る", "sub": "撮った写真を選ぶ", "action": "uri https://line.me/R/nv/cameraRoll/multi"},
-        {"pos": "右上", "label": "元付へFAX", "sub": "内見申込・物件確認", "action": "postback motofax=start"},
-        {"pos": "左下", "label": "のこり件数・プラン", "sub": "", "action": "postback plan=status"},
-        {"pos": "中下", "label": "登録内容の変更", "sub": "手数料・所属団体など", "action": "postback reg=edit"},
-        {"pos": "右下", "label": "使い方・お問い合わせ", "sub": "賃貸・売買", "action": "postback help=menu"}
+        {
+          "pos": "左上",
+          "label": "撮って送る",
+          "sub": "賃貸も売買も",
+          "action": "uri https://line.me/R/nv/camera/"
+        },
+        {
+          "pos": "中上",
+          "label": "写真から送る",
+          "sub": "撮った写真を選ぶ",
+          "action": "uri https://line.me/R/nv/cameraRoll/multi"
+        },
+        {
+          "pos": "右上",
+          "label": "元付へFAX",
+          "sub": "内見申込・物件確認",
+          "action": "postback motofax=start"
+        },
+        {
+          "pos": "左下",
+          "label": "のこり件数・プラン",
+          "sub": "",
+          "action": "postback plan=status"
+        },
+        {
+          "pos": "中下",
+          "label": "登録内容の変更",
+          "sub": "手数料・所属団体など",
+          "action": "postback reg=edit"
+        },
+        {
+          "pos": "右下",
+          "label": "使い方・お問い合わせ",
+          "sub": "賃貸・売買",
+          "action": "postback help=menu"
+        }
       ],
       "note": "賃貸版のメニューとの違いは3つ：①「撮って送る」の小さい字を「賃貸も売買も」に ②「内見申込FAX」を「元付へFAX」（押すと賃貸／売買を振り分け）に ③小さい字を売買向けに。並びと色は同じ（使い慣れた位置を変えない）。"
     },
@@ -374,8 +597,18 @@
       "size": "2500×843px（小）",
       "chatBarText": "メニュー",
       "areas": [
-        {"pos": "左（2/3幅）", "label": "登録をはじめる", "sub": "3分ほど・賃貸も売買も", "action": "postback reg=start"},
-        {"pos": "右（1/3幅）", "label": "使い方", "sub": "", "action": "postback help=menu"}
+        {
+          "pos": "左（2/3幅）",
+          "label": "登録をはじめる",
+          "sub": "3分ほど・賃貸も売買も",
+          "action": "postback reg=start"
+        },
+        {
+          "pos": "右（1/3幅）",
+          "label": "使い方",
+          "sub": "",
+          "action": "postback help=menu"
+        }
       ]
     }
   }

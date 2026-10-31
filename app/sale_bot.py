@@ -27,7 +27,7 @@ ENABLED = config.env("SALE_ENABLED", "0") == "1"
 ALLOW = {x.strip() for x in config.env("SALE_ALLOW_UIDS").split(",") if x.strip()}
 
 # 売買の設定の初期値（costs_sale.CompanySaleSettings と同じ名前）。会社ごとに company["売買設定"] で上書き
-DEFAULT_SETTINGS = {"fee_mode": "max", "fee_custom": None, "teiren_tokurei": False, "estimate_eval": True,
+DEFAULT_SETTINGS = {"fee_mode": "max", "fee_custom": None, "fee_rate": None, "teiren_tokurei": False, "estimate_eval": True,
                     "shihoshoshi_transfer": 66_000, "shihoshoshi_preserve": 33_000,
                     "shihoshoshi_mortgage": 44_000, "touki_jippi": 8_000}
 # 月々の返済の目安（概算書に小さく入れる）。金利は仮置き（本人確認待ち）
@@ -99,6 +99,8 @@ def loan(co):
 
 def fee_label(co):
     s = settings(co)
+    if s["fee_mode"] == "rate" and s.get("fee_rate"):
+        return f"価格（税抜）の{s['fee_rate'] * 100:g}%＋消費税（上限まで）"
     if s["fee_mode"] == "custom" and s.get("fee_custom"):
         return f"定額 {s['fee_custom']:,}円（税込）"
     return FEE_NAMES.get(s["fee_mode"], FEE_NAMES["max"])
@@ -107,7 +109,8 @@ def fee_label(co):
 # ---------- 登録の質問（bot.py の REG_STEPS に差し込む） -----------------------------------
 
 ASK = {"kind": "sale_reg_kind", "assoc": "sale_reg_assoc", "assoc_other": "sale_reg_assoc_other",
-       "assoc_check": "sale_reg_assoc_check", "sfee": "sale_reg_fee", "sfee_custom": "sale_reg_fee_custom"}
+       "assoc_check": "sale_reg_assoc_check", "sfee": "sale_reg_fee", "sfee_custom": "sale_reg_fee_custom",
+       "sfee_rate": "sale_reg_fee_rate"}
 
 
 def reg_steps(base, kind):
@@ -157,6 +160,8 @@ def reg_postback(c, step, k, v):
     if k == "sfee" and step == "sfee":
         if v == "custom":
             return ("next", "sfee_custom")
+        if v == "rate":
+            return ("next", "sfee_rate")
         if v not in ("max", "half", "free"):
             return ("ask", step)
         set_settings(c, fee_mode=v, fee_custom=None)
@@ -173,6 +178,12 @@ def reg_text(c, step, t):
     if step in ("assoc", "assoc_check"):
         # ボタンを押さずに団体名を書いてきたときは、そのまま表記として受け取る
         set_company(c, 所属団体=t[:80], 所属団体_種類="other")
+        return ("next", None)
+    if step == "sfee_rate":
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*[%％]?", t)
+        if not m or not (0 < float(m.group(1)) <= 3):
+            return ("ask", "sfee_rate")
+        set_settings(c, fee_mode="rate", fee_rate=round(float(m.group(1)) / 100, 4), fee_custom=None)
         return ("next", None)
     if step in ("sfee", "sfee_custom"):
         n = parse_yen(t)
@@ -298,21 +309,32 @@ def resume_after_setup(c):
     return finish(c, jid, _load_analyzed(jid, job), job.get("宛名") or "")
 
 
+FONT_DIR = str(__import__("pathlib").Path(__file__).parent / "fonts" / "noto-sans-jp-ttf")
+
+
 def estimate_html(company, evals=None):
-    """購入諸費用の概算書のHTMLを作る関数を返す。costs_sale がまだ入っていなければ None（概算書なしで届ける）。
-    evals は {"land_eval": 円, "bldg_eval": 円}（スタッフが送った評価額。なければ価格から推計）。"""
+    """購入諸費用の概算書（A4 1枚のHTML）を作る関数を返す。sale_core.render_documents の estimate_html に渡す。
+    evals はスタッフが送った評価額 {"land_eval", "bldg_eval", ...}（なければ価格から推計）。
+    スタッフ向けの確認事項は、返した関数の .notes に入る（お客様向けPDFには出さず、社内向けの注意へ）。"""
     try:
-        import costs_sale  # noqa: F401  購入諸費用の概算書（別スレッドで作成中。入ったらここでつなぐ）
-        import render_sale  # noqa: F401
+        import sale_estimate
     except ImportError:
         return None
     import sale_core
 
     def build(result, co):
-        f = costs_sale.SaleFacts(**{**sale_core.cost_inputs(result.事実), **(evals or {})})
-        s = costs_sale.CompanySaleSettings(**settings(company))
-        r = costs_sale.compute(f, s)
-        return render_sale.build_html(r, f, None, customer=co.get("宛名") or "", property_name=result.事実.物件名 or "")
+        f = result.事実
+        # co は sale_core.render_documents の中で band_company 済み（免許の行に所属団体が入っている）
+        band = {"name": co.get("会社名", ""), "license": co.get("免許", ""),
+                "address": co.get("住所", ""), "tel": co.get("電話", ""), "staff": co.get("担当者名", ""),
+                "mobile": co.get("携帯", "") if co.get("携帯を載せる", True) else ""}
+        name = " ".join(x for x in (f.物件名, f.号室 and f"{f.号室}号室") if x) or f.所在地 or ""
+        co = {**co, "売買ローン目安": loan(co)}  # 返済の目安は会社の設定がなければ初期値（年1.0%・35年）
+        out = sale_estimate.make_estimate(co, sale_core.cost_inputs(f), evals, customer=co.get("宛名") or "",
+                                          property_name=name, band=band, font_dir=FONT_DIR)
+        build.notes[:] = list(out.get("staff_notes") or [])
+        return out["html"]
+    build.notes = []
     return build
 
 
@@ -327,8 +349,10 @@ def finish(c, jid, a, atena="", after=()):
             return c.send(texts.build("plan_needed", urls=bot.plan_urls(c)), *after)
         consumed = True
         company = {**bot.company_for_render(c.uid, c.u), "宛名": atena}
-        out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"],
-                                         estimate_html=estimate_html(company))
+        est = estimate_html(company)
+        out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"], estimate_html=est)
+        if est is not None:  # 概算書のスタッフ向け確認事項（評価額は推計、など）を社内向けの注意に足す
+            out["texts"]["chui"] = list(out["texts"].get("chui") or []) + est.notes
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "kind": "sale", "title": out["title"], "texts": out["texts"],
                                "log": out["log"], "pages": out["pages"], "result": out["result"], "宛名": atena,

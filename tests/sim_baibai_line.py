@@ -227,11 +227,19 @@ assert AI_CALLS == {"rental": 1, "sale": 1}
 pb(B, "assoc=zennichi")
 out = pb(B, "assoc=ok")
 assert "売買の仲介手数料" in out
-out = pb(B, "sfee=half")
+pb(B, "sfee=rate")
+out = text(B, "2%")
 assert "売買の資料ができました" in out, out
 assert AI_CALLS == {"rental": 1, "sale": 1}, AI_CALLS   # 預かった読み取りを使い、AIは呼び直さない
 job = store.get_job(u_of(B)["last_job"])
 assert job["kind"] == "sale" and job["宛名"] == "見本 一郎"
+assert u_of(B)["company"]["売買設定"]["fee_mode"] == "rate" and u_of(B)["company"]["売買設定"]["fee_rate"] == 0.02
+pdf = store.db().get_file(f"jobs/{u_of(B)['last_job']}/okyaku.pdf")
+import pypdf  # noqa: E402
+import unicodedata  # noqa: E402
+okyaku_text = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(pdf)).pages))
+print("お客様向けPDFのページ数:", len(pypdf.PdfReader(io.BytesIO(pdf)).pages))
+assert "購入諸費用" in okyaku_text and "見本 一郎" in okyaku_text, okyaku_text[:300]
 assert u_of(B)["company"]["所属団体"] == "（公社）全日本不動産協会会員　（公社）首都圏不動産公正取引協議会加盟"
 
 # 月々の返済の計算（元利均等）：3,000万円・年1%・35年 ≒ 84,686円

@@ -257,7 +257,7 @@ def _sale_fields(co, u):
         out["取引態様"] = vals["取引態様"]
     if vals["売買設定"] is not None:
         ok = {k: v for k, v in vals["売買設定"].items() if k in sale_bot.DEFAULT_SETTINGS}
-        if ok.get("fee_mode") not in (None, "max", "half", "free", "custom"):
+        if ok.get("fee_mode") not in (None, "max", "half", "free", "custom", "rate"):
             raise HTTPException(422, {"code": "sale_fee", "message": "売買の仲介手数料の選び方が正しくありません。"})
         out["売買設定"] = {**(old.get("売買設定") or {}), **ok}
     if vals["売買ローン目安"] is not None:
@@ -295,8 +295,10 @@ def _finish_sale(uid, u, jid, a):
     try:
         atena = (store.get_job(jid) or {}).get("宛名") or ""
         company = {**bot.company_for_render(uid, u), "宛名": atena}
-        out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"],
-                                         estimate_html=sale_bot.estimate_html(company))
+        est = sale_bot.estimate_html(company)
+        out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"], estimate_html=est)
+        if est is not None:
+            out["texts"]["chui"] = list(out["texts"].get("chui") or []) + est.notes
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "kind": "sale", "title": out["title"], "texts": out["texts"],
                                "log": out["log"], "pages": out["pages"], "verdict": "sale", "result": out["result"]})
