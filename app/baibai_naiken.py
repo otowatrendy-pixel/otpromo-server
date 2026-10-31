@@ -70,7 +70,8 @@ def from_sale_facts(facts):
         "to": {"company": f.get("元付業者") or "", "branch": "", "person": "", "fax": f.get("元付業者_FAX") or "",
                "tel": f.get("元付業者_電話") or "", "check": check},
         "prop": {"kind": kind if kind in KINDS + EXTRA_KINDS else "", "name": f.get("物件名") or "", "room": room,
-                 "address": f.get("所在地") or "", "price": price.get("記載") or ""},
+                 "address": f.get("所在地") or "", "price": price.get("記載") or "",
+                 "number": f.get("物件番号") or ""},
     }
 
 
