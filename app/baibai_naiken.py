@@ -79,6 +79,7 @@ def html(to, me, prop, wishes=None, now=None, qr_svg=None, qr_caption=QR_CAPTION
     from markupsafe import Markup
     import render
 
+    # 会社設定で「QRを載せない」ときは qr_svg="" と qr_caption="" が来る（そのときは何も出さない）
     if qr_svg is None:
         qr = HERE / "static" / "naiken-qr.svg"  # 賃貸版と同じ「内見FAX」経路のQR。売買版のLINEが決まったら差し替える
         qr_svg = Markup(qr.read_text(encoding="utf-8")) if qr.exists() else ""
