@@ -21,7 +21,7 @@ cases["test_max"] = dict(
     to={"company": "見本リアルエステート販売株式会社", "branch": "見本駅前支店", "person": "見本", "fax": "03-0000-0000"},
     prop={"name": "グランドパークメゾン見本タワー", "room": "1203", "address": "東京都○○区見本町10丁目11番12号",
           "price": "1億2,800万円", "number": "000000000000"},
-    wishes=["11月14日（土）10時00分頃", "11月14日（土）15時30分頃", "11月15日（日）午後"])
+    wishes=["11月14日（土）10時00分頃", "11月14日（土）15時30分頃", "11月15日（日）午後"], promo=bn.PROMO_MIHON)
 
 # 売買の読み取り結果（SaleFacts の dict）から下書きを作る。FAXが空なら電話で代用しない
 d = bn.from_sale_facts({"物件種別": "収益一棟", "物件名": "見本ビル", "号室": None, "所在地": "東京都○○区見本町1丁目",
@@ -39,6 +39,9 @@ groups = {out / f"{k}.pdf": [bn.html(me=bn.ME, **kw)] for k, kw in cases.items()
 # 名刺の連絡先が長いとき（はみ出さないか目で確かめる）
 LONG_ME = {**bn.ME, "company": "サンプル不動産コンサルティング株式会社", "address": "東京都○○区見本町10丁目11番12号 見本ビル3階",
            "email": "taro.mihon-sales@sample-fudosan-consulting.example.jp"}
+# FAXで送る版（全部黒）
+groups[out / "fax_mansion.pdf"] = [bn.html(me=bn.ME, fax=True, **bn.SAMPLES["mihon_mansion"])]
+assert "--ink:#000" in groups[out / "fax_mansion.pdf"][0] and "--ink:#000" not in groups[out / "mihon_mansion.pdf"][0]
 groups[out / "test_long_card.pdf"] = [bn.html(me=LONG_ME, **cases["test_max"])]
 render.to_pdfs(groups)
 for pdf in groups:
