@@ -203,6 +203,9 @@ def cron_daily(x_cron_key: str = Header("")):
     store_notices = campaign.daily()
     for uid, mid, kw in store_notices:
         bot.notify(uid, mid, kw)
+    import sale_bot
+    for uid, mid, kw in sale_bot.trial_expiry_notices():  # 売買版だけ：お試しの期限の3日前
+        bot.notify(uid, mid, kw)
     import retention
     import usage
     try:

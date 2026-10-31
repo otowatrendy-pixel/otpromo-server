@@ -666,11 +666,21 @@ def remain_note(u):
     if q["plan"] == "light":
         mid = "remain_light_low" if n <= 5 else "remain_light"
         return texts.note(mid, n=n, 更新日=store.renew_date(u))
+    exp = trial_until(u)  # 売買版のお試しの期限（賃貸版は空。文面にも差し込み先がない）
     if n == 0:
         return texts.note("remain_free_zero")
     if n == 1:
-        return texts.note("remain_free_last")
-    return texts.note("remain_free", n=n)
+        return texts.note("remain_free_last", 期限=exp)
+    return texts.note("remain_free", n=n, 期限=exp)
+
+
+def trial_until(u):
+    """お試しの期限の表示（例「11月30日（月）」）。期限がなければ空。"""
+    e = (u or {}).get("free_expires")
+    if not e:
+        return ""
+    d = e.astimezone(store.JST)
+    return f"{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）"
 
 
 def remain_buttons(u):

@@ -1008,3 +1008,27 @@ def _hand_rerender(c, iso, label):
         return True
     c.send(texts.build("sale_hand_done", 決済日=label, お客様向けリンク=url))
     return True
+
+
+# ---------- お試しの期限のお知らせ（毎朝9時の定期実行から） ------------------------------------
+
+def trial_expiry_notices(days_before=3):
+    """お試しの期限（登録から14日）の3日前に1回だけ知らせる相手。戻り値 [(uid, 文面ID, 差し込み)]。
+    有料プランの方・使い切った方・ブロック中の方には送らない（push の通数を使うため）。"""
+    import bot
+    from datetime import timedelta
+    if not SALE_ONLY:
+        return []
+    now = store.now()
+    out = []
+    for uid, u in store.db().all("users"):
+        e = u.get("free_expires")
+        if not e or u.get("trial_notice_sent") or u.get("blocked") or u.get("review"):
+            continue
+        if (u.get("plan") or "free") != "free" or not (now < e <= now + timedelta(days=days_before)):
+            continue
+        n = store.quota(u)["remaining"]
+        store.update_user(uid, {"trial_notice_sent": now})
+        if n:
+            out.append((uid, "sale_trial_expiring", {"期限": bot.trial_until(u), "n": n}))
+    return out

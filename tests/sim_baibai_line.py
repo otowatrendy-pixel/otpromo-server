@@ -514,7 +514,7 @@ assert "x=募集図面" in _json.dumps(_sent, ensure_ascii=False)  # postback �
 import texts as texts_mod
 from datetime import timedelta as _td
 check_stripe_split("sale")
-# 公開記念（2026/12/3〜2027/1/31 の登録はお試し10件・30日以内、1契約1回。期間外は5件）
+# お試しは登録から14日（期間外5件・公開記念の2026/12/3〜2027/1/31の登録は10件）。1契約1回
 from datetime import datetime as _dt
 J = store.JST
 for name, at, want in (("Ucamp", _dt(2026, 12, 3, 0, 0, tzinfo=J), "launch"), ("Ucamp2", _dt(2027, 1, 31, 23, 59, tzinfo=J), "launch"),
@@ -523,17 +523,26 @@ for name, at, want in (("Ucamp", _dt(2026, 12, 3, 0, 0, tzinfo=J), "launch"), ("
     assert store.launch_trial(name, at=at) == want, name
     assert store.launch_trial(name, at=at) is None  # 1契約1回
     u = store.get_user(name)
-    if want == "launch":
-        assert u["free_limit"] == 10 and u["free_expires"] == at + _td(days=30)
-    else:
-        assert u["free_limit"] == 5 and not u.get("free_expires")
-# 30日を過ぎたら残りは失効
+    assert u["free_expires"] == at + _td(days=14)
+    assert u["free_limit"] == (10 if want == "launch" else 5)
+# 14日を過ぎたら残りは失効
 store.update_user("Ucamp", {"free_expires": store.now() - _td(seconds=1)})
 assert store.quota(store.get_user("Ucamp"))["remaining"] == 0
 store.update_user("Ucamp2", {"free_expires": store.now() + _td(days=1), "free_used": 3})
 assert store.quota(store.get_user("Ucamp2"))["remaining"] == 7
 # あいさつの一文は期間中だけ
-assert texts_mod.launch_note(_dt(2026, 12, 10, tzinfo=J)) == "2027年1月31日までにご登録の方は、公開記念として、登録から30日以内に使える10件にしています。"
+assert texts_mod.launch_note(_dt(2026, 12, 10, tzinfo=J)) == "2027年1月31日までにご登録の方は、公開記念として10件にしています。"
+# 期限の3日前に1回だけお知らせ（有料・使い切り・期限まで3日より先の方には送らない）
+store.db().set("users", "Uexp1", {"plan": "free", "free_limit": 5, "free_used": 2, "free_expires": store.now() + _td(days=2, hours=23), "line_uid": "Lx1", "month_used": 0})
+store.db().set("users", "Uexp2", {"plan": "free", "free_limit": 5, "free_used": 2, "free_expires": store.now() + _td(days=5), "line_uid": "Lx2", "month_used": 0})
+store.db().set("users", "Uexp3", {"plan": "light", "free_limit": 5, "free_used": 0, "free_expires": store.now() + _td(days=1), "line_uid": "Lx3", "month_used": 0})
+got = [x for x in sale_bot.trial_expiry_notices() if x[0].startswith("Uexp")]
+assert [g[0] for g in got] == ["Uexp1"] and got[0][2]["n"] == 3, got
+assert not [x for x in sale_bot.trial_expiry_notices() if x[0].startswith("Uexp")]  # 1回だけ
+t = texts_mod.raw("sale_trial_expiring", **got[0][2])
+assert "のこり3件" in t and "までです" in t, t
+u1 = store.get_user("Uexp1"); u1["free_expires"] = store.now() + _td(days=5)
+assert "まで）" in bot.remain_note(u1)
 assert texts_mod.launch_note(_dt(2026, 11, 20, tzinfo=J)) == "" and texts_mod.launch_note(_dt(2027, 2, 1, tzinfo=J)) == ""
 # 日報の「1件あたりのAI原価」：平均・最大を出し、20円を超えたら【至急】で知らせる
 import usage
@@ -585,7 +594,7 @@ assert "今月のこり5件です" in bot.remain_note(store.get_user(uidM)) and 
 store.update_user(uidM, {"month_used": 0})
 assert bot.remain_note(store.get_user(uidM)) == ""
 for mid in ("remain_free_last", "remain_light_low", "naiken_trial", "nudge_free_used", "plan_light_empty", "plan_needed"):
-    t = _j.dumps(line.out(texts.build(mid, n=3, 更新日="12月1日", urls={})), ensure_ascii=False)
+    t = _j.dumps(line.out(texts.build(mid, n=3, 更新日="12月1日", 期限="11月30日（月）", urls={})), ensure_ascii=False)
     assert "1,480" not in t and "2,980" not in t and "使い放題" not in t and "{" not in t.replace('{"', "").replace("{}", ""), (mid, t[:300])
 assert store.quota(store.get_user(uidM))["remaining"] == 100
 assert "MAX（月払い）" in ps and "使い放題" not in ps and "月額2,480円" in ps and "年額24,800円" in ps and "月額4,280円" in ps and "年額42,800円" in ps and "1,480" not in ps, ps

@@ -368,7 +368,7 @@ def quota(u):
     if plan == "light":
         return {"plan": plan, "remaining": ai_balance(u), "free_left": 0, "month_used": u["month_used"]}
     left = max(0, u.get("free_limit", config.FREE_SHEETS) - u.get("free_used", 0))
-    if u.get("free_expires") and now() > u["free_expires"]:  # 売買版の公開記念の10件は登録から30日で失効
+    if u.get("free_expires") and now() > u["free_expires"]:  # 売買版のお試しは登録から14日で残りが消える
         left = 0
     return {"plan": "free", "remaining": left, "free_left": left, "month_used": u["month_used"]}
 
@@ -419,8 +419,9 @@ def refund(uid):
 
 
 def launch_trial(uid, at=None):
-    """登録のときに1回だけ呼ぶ。公開記念の期間（config.LAUNCH_TRIAL_START〜END）なら、お試しを
-    LAUNCH_TRIAL_SHEETS 件・登録から LAUNCH_TRIAL_DAYS 日以内にする。1契約1回（trial_kind で見る）。戻り値は "launch"／"normal"／None（済み）。"""
+    """登録のときに1回だけ呼ぶ（売買版）。お試しは登録から config.TRIAL_DAYS 日以内（過ぎたら残りは消える）。
+    公開記念の期間（config.LAUNCH_TRIAL_START〜END）なら件数を LAUNCH_TRIAL_SHEETS に。1契約1回（trial_kind で見る）。
+    戻り値は "launch"／"normal"／None（済み）。"""
     from datetime import datetime as _dt
     t = at or now()
     st, en = config.LAUNCH_TRIAL_START, config.LAUNCH_TRIAL_END
@@ -429,9 +430,10 @@ def launch_trial(uid, at=None):
     def fn(u):
         if u.get("trial_kind"):
             return None
+        if config.TRIAL_DAYS:
+            u["free_expires"] = t + timedelta(days=config.TRIAL_DAYS)
         if inside:
-            u.update({"trial_kind": "launch", "free_limit": max(u.get("free_limit", config.FREE_SHEETS), config.LAUNCH_TRIAL_SHEETS),
-                      "free_expires": t + timedelta(days=config.LAUNCH_TRIAL_DAYS)})
+            u.update({"trial_kind": "launch", "free_limit": max(u.get("free_limit", config.FREE_SHEETS), config.LAUNCH_TRIAL_SHEETS)})
             return "launch"
         u["trial_kind"] = "normal"
         return "normal"
