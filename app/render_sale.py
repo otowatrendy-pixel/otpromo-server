@@ -97,6 +97,7 @@ def build_html(r: Result, f: SaleFacts, loan: LoanPlan | None, *, customer: str,
             msg += "。固定期間選択は、固定期間が終わった後の金利で変わります"
         notes.insert(-1, msg + "。実際の金利は、金融機関の審査や商品で決まります。")
     others = "、".join(OTHERS[f.property_type])
+    self_row = "" if (f.property_type == "land" and not loan) else f'''<div class="row"><span class="l">ご用意いただく自己資金の目安<small>{"住宅ローン " + man(loan.amount) + " を除いた額" if loan else ""}</small></span><b>約{yen(self_fund)}</b></div>'''
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
 <style>
@@ -160,7 +161,7 @@ table.sim tr.sel th, table.sim tr.sel td {{ font-weight: 700; }}
     <div class="price">物件価格 <b>{man(f.price)}</b></div>
     <div class="sub">{html.escape(address)}　{"　".join(spec)}</div>
   </div>
-  <p class="cond">計算の前提：ご契約 {jdate(contract_day)}ごろ{"（仮）" if dates_tentative[0] else ""}、決済・お引渡し {jdate(handover_day)}{"（仮）" if dates_tentative[1] else ""}{("、住宅ローン " + man(loan.amount)) if loan else "、住宅ローンなし"}</p>
+  <p class="cond">計算の前提：ご契約 {jdate(contract_day)}ごろ{"（仮）" if dates_tentative[0] else ""}、決済・お引渡し {jdate(handover_day)}{"（仮）" if dates_tentative[1] else ""}{("、住宅ローン " + man(loan.amount)) if loan else ("、住宅ローン関連の費用は含みません" if f.property_type == "land" else "、住宅ローンなし")}</p>
 
   <h2>お引渡しまでに必ずかかる費用</h2>
   <table class="t"><colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
@@ -178,7 +179,7 @@ table.sim tr.sel th, table.sim tr.sel td {{ font-weight: 700; }}
   <div class="sum">
     <div class="row"><span class="l">諸費用の合計（目安）<small>{"「要確認」の項目を除く" if has_check else "参考の費用を除く"}</small></span><b>約{yen(shohiyou)}</b></div>
     <div class="row"><span class="l">物件価格と諸費用の合計</span><b>約{yen(total)}</b></div>
-    <div class="row"><span class="l">ご用意いただく自己資金の目安<small>{"住宅ローン " + man(loan.amount) + " を除いた額" if loan else ""}</small></span><b>約{yen(self_fund)}</b></div>
+{self_row}
   </div>
 
   {sim_block}

@@ -494,6 +494,8 @@ def on_postback(c, data):
         return sale_bot.bfax_postback(c, v)
     if k == "lsim" and sale_bot.on(c):  # この資料だけ、住宅ローンの条件を変えて作り直す
         return sale_bot.lsim_ask(c, v.partition("doc=")[2] or c.u.get("last_job"))
+    if k in ("lq", "lq2") and sale_bot.on(c):  # 図面の直後のローンの質問
+        return sale_bot.lq_postback(c, k, v)
     if k == "hand" and sale_bot.on(c):  # この資料だけ、決済日（引渡日）を変えて作り直す
         jid = v.partition("doc=")[2] or c.u.get("sale_eval_job") or c.u.get("last_job")
         return sale_bot.hand_reset(c, jid) if v.startswith("reset") else sale_bot.hand_ask(c, jid)
@@ -601,6 +603,8 @@ def on_text(c, t):
     step = current_step(c.u)
     if step:
         return reg_text(c, step, t)
+    if sale_bot.on(c) and (c.u.get("sale_lq") or {}).get("step") == "amount" and sale_bot.lq_text(c, t):
+        return
     if sale_bot.on(c) and c.u.get("sale_edit") and sale_bot.edit_text(c, t):
         return
     if norm(t) in naiken_bot.RESERVED_WORDS and c.u.get("registered"):

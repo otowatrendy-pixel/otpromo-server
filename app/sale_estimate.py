@@ -109,7 +109,7 @@ def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, c
         return int(x // 100_000 * 100_000)
 
     loan = None
-    if c["use"]:
+    if c["use"] and f.property_type != "land":   # 土地はローン関連・シミュレーションを出さない
         if c["amount_mode"] == "fixed" and c.get("amount"):
             amt = int(c["amount"])
         elif c["amount_mode"] == "price_plus_costs":

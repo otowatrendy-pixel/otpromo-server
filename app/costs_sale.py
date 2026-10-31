@@ -412,6 +412,14 @@ def jutaku_reg_ok(f: SaleFacts, staff: list[str]) -> Optional[bool]:
     return True
 
 
+LAND_LOAN_NOTE = ("土地のご購入に住宅ローンをご利用になる場合は、建物の建築と合わせたお借入れになることが多く、"
+                  "つなぎ融資の有無や費用、お借入れの進め方が金融機関や建築会社によって大きく異なります。"
+                  "そのため、この概算書には住宅ローン関連の費用を含めていません。お借入れ先や建築会社のお見積りでご確認ください。")
+LAND_LOAN_STAFF = ("土地はローン関連の費用（つなぎ融資・抵当権設定・事務手数料など）を載せていません。"
+                   "お客様に聞かれたら「建物と合わせたお借入れになることが多く、金融機関や建築会社で形も費用も大きく変わるため、"
+                   "正確なお見積りはお借入れ先と建築会社からお出しいただくようお願いしています」とご案内ください。")
+
+
 def tentative_handover(base: date) -> date:
     """仮の決済日（引渡日）＝基準日（図面を送った日）の翌々月1日。11月→1月、12月→2月。"""
     m = base.month + 2
@@ -594,6 +602,12 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
             lines.append(Line("must", "管理準備金", f.kanri_junbikin, "exact", "図面記載の額"))
 
     # 6. 住宅ローン関連
+    # 土地はローン関連を出さない（建築と合わせたお借入れが多く、つなぎ融資・分割実行・抵当権の付け方が
+    # 金融機関や建築会社でまちまちなため。2026-10-31 本人指示）
+    if f.property_type == "land":
+        loan = None
+        notes.append(LAND_LOAN_NOTE)
+        staff.append(LAND_LOAN_STAFF)
     if loan:
         lines.append(Line("loan", "印紙税（ローン契約書）",
                           0 if loan.electronic_contract else stamp_tax(loan.amount, False), "estimate",
@@ -616,8 +630,6 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
                      "団体信用生命保険は、一般的な保障なら金利に含まれることが多いです。")
         if loan.flat35:
             notes.append("フラット35をご利用の場合は、物件の適合証明書の手数料（数万円程度）が別にかかります。")
-        if f.property_type == "land":
-            staff.append("土地を買って建てる場合、建物の完成前の支払いに「つなぎ融資」の利息・手数料がかかることがあります。")
 
     # 6-2. 火災保険・地震保険（ローン利用時は加入が必要。現金購入でも加入をおすすめ）
     fi, fnote = fire_estimate(f, s, staff)
@@ -632,7 +644,7 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
     acq = acquisition_tax(f, land_eval, bldg_eval, handover_day, jutaku, staff)
     lines.append(Line("later", "不動産取得税", acq, "estimate" if acq is not None else "check",
                       ("要件を満たせば軽減措置でかからない見込みです（要件の確認が必要です）" if acq == 0
-                       else ("住宅を新築すると軽減を受けられる場合があります（期限などの要件あり）" if f.property_type == "land"
+                       else ("住宅を新築すると軽減を受けられる場合があります（要件あり）" if f.property_type == "land"
                              else "引渡しの数か月後に都税事務所から納税通知書が届きます")) if acq is not None
                       else "軽減措置の要件をご確認のうえお知らせします"))
 

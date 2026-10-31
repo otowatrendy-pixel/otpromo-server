@@ -26,6 +26,8 @@ os.environ.setdefault("SALE_MOCK_RESULT", str(ROOT / "tests" / "fixtures" / "mih
 OFF = len(sys.argv) > 1 and sys.argv[1] == "off"
 os.environ["APP_MODE"] = "rent" if OFF else "sale"
 import shutil  # noqa: E402
+import pypdf  # noqa: E402
+import unicodedata  # noqa: E402
 shutil.rmtree(os.environ["LOCAL_DIR"], ignore_errors=True)
 
 import bot  # noqa: E402
@@ -166,9 +168,22 @@ out = pb(A, "reg=done")
 assert "登録ありがとうございました" in out and "自動で見分けます" not in out, out
 store.update_user(store.user_by_line(A)[0], {"company": {**u_of(A)["company"], "宛名を聞く": False}})
 
-# ---- 2) 売買の図面 → 売買の資料 ----
+# ---- 2) 売買の図面 → ローンの予定を聞く → 売買の資料 ----
 out = image(A)
+assert "住宅ローンのご利用予定" in out and "ローンあり（物件価格の90%）" in out and "売買の資料ができました" not in out, out
+assert store.get_job(u_of(A)["sale_lq"]["jid"])["status"] == "analyzed"
+out = pb(A, "lq=amount")
+assert "借入額を送ってください" in out
+out = text(A, "よく分からない")
+assert "借入額を送ってください" in out  # 読めないときは聞き直す
+out = text(A, "3200万")
+assert "シミュレーション" in out and "いつもの設定：付ける" in out, out
+out = pb(A, "lq2=cmp")
 assert "売買の資料ができました" in out, out
+assert store.get_job(u_of(A)["last_job"])["loan"] == {"use": True, "amount": 32_000_000, "show": True, "compare": True}
+ta = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{u_of(A)['last_job']}/okyaku.pdf"))).pages))
+assert "3,200万" in ta and "全期間固定" in ta and "変動" in ta, [l for l in ta.splitlines() if "ローン" in l or "万" in l][:20]
+assert not u_of(A).get("sale_lq")
 uidA = store.user_by_line(A)[0]
 job = store.get_job(u_of(A)["last_job"])
 assert job["kind"] == "sale" and job["status"] == "done"
@@ -244,8 +259,12 @@ AI_CALLS.update(rental=0, sale=0)
 out = image(B)   # 宛名を聞く設定（初期値）のまま
 assert "宛名" in out
 out = text(B, "見本 一郎")
+assert "住宅ローンのご利用予定" in out, out
+out = pb(B, "lq=yes")
+out = pb(B, "lq2=show")
 assert "売買の資料ができました" in out, out
-assert AI_CALLS == {"rental": 0, "sale": 1}, AI_CALLS
+assert store.get_job(u_of(B)["last_job"])["loan"] == {"use": True, "show": True, "compare": False}
+assert AI_CALLS == {"rental": 0, "sale": 1}, AI_CALLS  # 答えを待つあいだもAIは呼び直さない
 job = store.get_job(u_of(B)["last_job"])
 assert job["kind"] == "sale" and job["宛名"] == "見本 一郎"
 assert u_of(B)["company"]["売買設定"]["fee_mode"] == "rate" and u_of(B)["company"]["売買設定"]["fee_rate"] == 0.02
@@ -269,13 +288,13 @@ out = pb(B, f"lsim=ask&doc={jidB}")
 assert "今の条件" in out, out
 out = text(B, "借入 3500万 全期間固定 2.0% 30年")
 assert "作り直しました" in out, out
-assert store.get_job(jidB)["loan"] == {"amount": 35000000, "type": "zenki_kotei", "rate": 2.0, "years": 30}
+assert store.get_job(jidB)["loan"] == {"use": True, "show": True, "compare": False, "amount": 35000000, "type": "zenki_kotei", "rate": 2.0, "years": 30}
 pdf = store.db().get_file(f"jobs/{jidB}/okyaku.pdf")
 t2 = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(pdf)).pages))
 assert "3,500万" in t2, [l for l in t2.splitlines() if "ローン" in l]
 pb(B, f"lsim=ask&doc={jidB}")
 text(B, "ローンなし")
-assert store.get_job(jidB)["loan"] == {"amount": 35000000, "type": "zenki_kotei", "rate": 2.0, "years": 30, "use": False}
+assert store.get_job(jidB)["loan"] == {"use": False, "show": True, "compare": False, "amount": 35000000, "type": "zenki_kotei", "rate": 2.0, "years": 30}
 t3 = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jidB}/okyaku.pdf"))).pages))
 assert "3,500万" not in t3 and "抵当権設定" not in t3, [l for l in t3.splitlines() if "ローン" in l or "抵当" in l]
 out = pb(B, f"lsim=ask&doc={jidB}")
@@ -340,6 +359,35 @@ assert naiken.sale_words({"type": "text", "text": "内見申込書を管理会�
 out = pb(B, "bfax=recent")
 assert "メゾン見本" in out, out
 assert sale_bot.parse_evals("年税額 123,400 土地 1000万") == {"land_eval": 10_000_000, "annual_property_tax": 123400}
+
+# 会社設定で「聞かない」なら、質問なしで会社設定のまま作る
+store.update_user(store.user_by_line(B)[0], {"plan": "unlimited"})  # 件数の上限に当たらないように
+pb(B, "edit=loan")
+out = pb(B, "loan=ask_off")
+assert "聞かない" in out and u_of(B)["company"]["売買ローン目安"]["ask_loan"] is False
+out = image(B)
+out = text(B, "見本 二郎")
+assert "売買の資料ができました" in out and "住宅ローンのご利用予定" not in out, out
+pb(B, "edit=loan"); pb(B, "loan=ask_on")
+# 現金（ローンなし）
+out = image(B); text(B, "見本 三郎")
+out = pb(B, "lq=no")
+assert "売買の資料ができました" in out and store.get_job(u_of(B)["last_job"])["loan"] == {"use": False}, out
+# 土地：ローンは聞かず、資料のあとにスタッフ向けの一言
+import json as _json
+_land = _json.loads(open(os.environ["SALE_MOCK_RESULT"], encoding="utf-8").read())
+_land["事実"]["物件種別"] = "土地"
+LAND_JSON = os.path.join(os.environ["LOCAL_DIR"], "land.json")
+open(LAND_JSON, "w", encoding="utf-8").write(_json.dumps(_land, ensure_ascii=False))
+import config as _cfg
+_old_mock, sale_core.SALE_MOCK_RESULT = sale_core.SALE_MOCK_RESULT, LAND_JSON
+out = image(B); out = text(B, "見本 四郎")
+sale_core.SALE_MOCK_RESULT = _old_mock
+assert store.get_job(u_of(B)["last_job"])["result"]["事実"]["物件種別"] == "土地"
+assert "住宅ローンのご利用予定" not in out and "つなぎ融資" in out and "売買の資料ができました" in out, out
+
+before = store.quota(u_of(B))["remaining"]  # ここから先（評価額の作り直し）は件数に数えない
+jidB = u_of(B)["last_job"]
 
 # 実際の評価額を送ると、補正の記録が1件残る（土地面積が分かるときだけ）。係数は3件たまるまで1.0
 import calibration

@@ -269,6 +269,8 @@ def handle_sale(c, data, jid, rental_a=None):
     if needs_setup(c.u):
         hold_for_setup(c, jid, a)
         return
+    if ask_loan(c, jid, a):
+        return
     return finish(c, jid, a)
 
 
@@ -322,7 +324,10 @@ def after_atena(c, jid, job, atena, after=()):
                                   "reg_queue": ["assoc", "sfee"], "reg_mode": "sale_setup"})
         c.refresh()
         return c.send(texts.build("sale_need_setup"), texts.build("sale_reg_assoc"))
-    return finish(c, jid, _load_analyzed(jid, job), atena, after)
+    a = _load_analyzed(jid, job)
+    if not after and ask_loan(c, jid, a, atena, saved=True):  # 何枚か続けて送られたときは聞かず、会社設定のまま作る
+        return
+    return finish(c, jid, a, atena, after)
 
 
 def hold_for_setup(c, jid, a):
@@ -343,8 +348,11 @@ def resume_after_setup(c):
     job = store.get_job(jid) if jid else None
     if not job or job.get("status") != "analyzed" or (at and at < store.now() - timedelta(hours=24)):
         return c.send(line.text("売買の設定ができました。お預かりしていた募集図面の期限が切れたため、もう一度送ってください。"))
+    a = _load_analyzed(jid, job)
+    if ask_loan(c, jid, a, job.get("宛名") or "", saved=True):
+        return
     line.loading(c.line_uid, 60)
-    return finish(c, jid, _load_analyzed(jid, job), job.get("宛名") or "")
+    return finish(c, jid, a, job.get("宛名") or "")
 
 
 FONT_DIR = str(__import__("pathlib").Path(__file__).parent / "fonts" / "noto-sans-jp-ttf")
@@ -427,6 +435,98 @@ def record_calibration(jid, result, land_eval):
         return None
 
 
+# ---------- 図面を送った直後に、住宅ローンの予定を聞く（マンション・戸建てだけ。土地は聞かない） -----------
+# 答えは job.loan（物件ごとの指定）に入れて概算書へ。作り直し（「ローン条件を変える」）は件数に数えない
+
+def is_land(result):
+    return getattr(result.事実, "物件種別", "") == "土地"
+
+
+def _land_staff():
+    try:
+        from costs_sale import LAND_LOAN_STAFF
+        return LAND_LOAN_STAFF
+    except ImportError:
+        return ""
+
+
+def ask_loan(c, jid, a, atena="", saved=False):
+    """聞いたら True（答えが届いたら finish）。会社設定で「聞かない」・土地のときは False。"""
+    L = loan(c.u.get("company") or {})
+    if is_land(a["result"]) or not L.get("ask_loan", True):
+        return False
+    if not saved:
+        _save_analyzed(jid, a)
+    store.update_job(jid, {"宛名": atena, "loan": None})
+    store.update_user(c.uid, {"sale_lq": {"jid": jid, "step": "q1", "at": store.now()}})
+    c.send(texts.build("sale_loan_q1", 借入の目安=amount_label(L)))
+    return True
+
+
+def _lq_job(c):
+    q = c.u.get("sale_lq") or {}
+    jid = q.get("jid")
+    job = store.get_job(jid) if jid else None
+    if not job or job.get("status") != "analyzed" or job.get("user_id") != c.uid or \
+            (q.get("at") and q["at"] < store.now() - timedelta(hours=24)):
+        return None, None
+    return jid, job
+
+
+def _lq_q2(c, jid, lo):
+    store.update_job(jid, {"loan": lo})
+    store.update_user(c.uid, {"sale_lq": {**(c.u.get("sale_lq") or {}), "step": "q2"}})
+    L = loan(c.u.get("company") or {})
+    now = "3タイプで比べる" if L.get("show") and L.get("compare") else "付ける" if L.get("show") else "付けない"
+    return c.send(texts.build("sale_loan_q2", いつもの設定=now))
+
+
+def _lq_finish(c, jid, job, lo):
+    store.update_job(jid, {"loan": lo})
+    store.update_user(c.uid, {"sale_lq": None})
+    c.refresh()
+    line.loading(c.line_uid, 60)
+    return finish(c, jid, _load_analyzed(jid, store.get_job(jid)), job.get("宛名") or "")
+
+
+def lq_postback(c, k, v):
+    """lq=yes/no/amount/unknown（Q1）、lq2=show/cmp/off（Q2）。"""
+    jid, job = _lq_job(c)
+    if not jid:
+        store.update_user(c.uid, {"sale_lq": None})
+        return c.send(line.text("お預かりしていた募集図面が見つかりませんでした。お手数ですが、もう一度送ってください。"))
+    if k == "lq":
+        if v == "no":
+            return _lq_finish(c, jid, job, {"use": False})
+        if v == "amount":
+            store.update_user(c.uid, {"sale_lq": {**c.u["sale_lq"], "step": "amount"}})
+            return c.send(texts.build("sale_loan_amount_ask"))
+        return _lq_q2(c, jid, {"use": True})
+    lo = {**(job.get("loan") or {"use": True})}
+    lo.update({"show": {"show": True, "cmp": True}.get(v, False), **({"compare": v == "cmp"} if v in ("show", "cmp") else {})})
+    return _lq_finish(c, jid, job, lo)
+
+
+def lq_text(c, t):
+    """借入額の入力（「3500万」など）。扱ったら True。"""
+    q = c.u.get("sale_lq") or {}
+    if q.get("step") != "amount":
+        return False
+    s = unicodedata.normalize("NFKC", t or "").replace(",", "")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(億|万)?", s)
+    amt = int(round(float(m.group(1)) * {"億": 100_000_000, "万": 10_000}.get(m.group(2), 1))) if m else 0
+    if amt < 1_000_000 or amt > 2_000_000_000:  # 100万円〜20億円だけ受け付ける（「3500」は万円とみなす）
+        amt = amt * 10_000 if m and not m.group(2) and 100 <= amt <= 200_000 else 0
+    if not amt:
+        c.send(texts.build("sale_loan_amount_ask"))
+        return True
+    jid, job = _lq_job(c)
+    if not jid:
+        store.update_user(c.uid, {"sale_lq": None})
+        return False
+    return _lq_q2(c, jid, {"use": True, "amount": amt}) or True
+
+
 def finish(c, jid, a, atena="", after=()):
     """売買の資料を作り、件数を1つ使って届ける（賃貸版の bot.finish と同じ流れ）。"""
     import bot
@@ -438,7 +538,10 @@ def finish(c, jid, a, atena="", after=()):
             return c.send(texts.build("plan_needed", urls=bot.plan_urls(c)), *after)
         consumed = True
         company = {**bot.company_for_render(c.uid, c.u), "宛名": atena}
-        est = estimate_html(company)
+        job0 = store.get_job(jid) or {}
+        est = estimate_html(company, loan_override=job0.get("loan"))  # 図面の直後に聞いたローンの答え（なければ会社設定）
+        if is_land(a["result"]):
+            after = (texts.build("sale_land_loan_note", スタッフ向けの案内例=_land_staff()),) + tuple(after)
         out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"], estimate_html=est)
         if est is not None:  # 概算書のスタッフ向け確認事項（評価額は推計、など）を社内向けの注意に足す
             out["texts"]["chui"] = list(out["texts"].get("chui") or []) + est.notes
@@ -594,8 +697,10 @@ def loan_menu(c, prefix=None):
                       変動=f"{r['hendo']:g}", 固定期間=f"{r['kotei_kikan']:g}", 固定期間の年数=str(L["kotei_years"]),
                       全期間固定=f"{r['zenki_kotei']:g}", 借入額=amount_label(L),
                       比較="3タイプを並べる" if L.get("compare") else "選んだタイプだけ",
+                      毎回聞く="毎回聞く" if L.get("ask_loan", True) else "聞かない（この設定で作る）",
                       drop=("postback loan=on" if L["show"] else "postback loan=off",
-                            "postback loan=cmp_on" if L.get("compare") else "postback loan=cmp_off"))
+                            "postback loan=cmp_on" if L.get("compare") else "postback loan=cmp_off",
+                            "postback loan=ask_on" if L.get("ask_loan", True) else "postback loan=ask_off"))
     return c.send(*([prefix] if prefix else []), msg) or True
 
 
@@ -603,6 +708,9 @@ def loan_postback(c, v):
     if v in ("on", "off"):
         _save_loan(c, show=v == "on")
         return loan_menu(c, texts.build("sale_edit_done", 項目="住宅ローンシミュレーション（" + ("付ける" if v == "on" else "付けない") + "）"))
+    if v in ("ask_on", "ask_off"):
+        _save_loan(c, ask_loan=v == "ask_on")
+        return loan_menu(c, texts.build("sale_edit_done", 項目="図面を送った後のローンの質問（" + ("毎回聞く" if v == "ask_on" else "聞かない") + "）"))
     if v in ("cmp_on", "cmp_off"):
         _save_loan(c, compare=v == "cmp_on")
         return loan_menu(c, texts.build("sale_edit_done", 項目="住宅ローンシミュレーション（" + ("3タイプを並べる" if v == "cmp_on" else "1つだけ載せる") + "）"))

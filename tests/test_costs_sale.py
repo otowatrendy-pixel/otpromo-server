@@ -138,3 +138,18 @@ def _t5():
 
 
 _t5()
+
+
+# ---- 6. 土地はローン関連を出さない
+def _t6():
+    from datetime import date as D
+    from sale_estimate import make_estimate
+    o = make_estimate({"売買ローン目安": {"use": True, "show": True}},
+                      dict(property_type="land", price=30_000_000, seller_is_business=False, land_area=100.0), today=D(2026, 10, 31))
+    r = o["result"]
+    assert o["simulation"] is None and not [l for l in r.lines if l.group == "loan"]
+    assert "住宅ローン関連の費用は含みません" in o["html"] and any("つなぎ融資" in n for n in r.notes)
+    print("ALL OK 6")
+
+
+_t6()
