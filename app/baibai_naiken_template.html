@@ -2,107 +2,76 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>物件確認・内見依頼書</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+<title>内見依頼書</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Noto+Serif+JP:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  /* 売買版。賃貸版 naiken_template.html の見た目（濃紺1色・名刺ブロック）をそのまま引き継ぐ。
-     FAXは白黒（1ビット）になる前提：薄い塗りの上に文字を置かない。色は濃い紺だけ。
-     同梱の書体は 400 と 700 だけなので、それ以外の太さは使わない（疑似太字＝Type3 を出さないため） */
-  :root { --ink:#0b2a6b; --line:#0b2a6b; --sub:#2e3b5c; }
+  /* 売買版。賃貸版 naiken_template.html をほぼそのまま使い、表題・あいさつ・価格の行だけ変える（11/1 本人：物件確認は済んでいる前提、記入は最低限）。
+     FAXは白黒（1ビット）になる前提：薄い塗りの上に文字を置かない。色は濃い紺だけ */
+  :root { --ink:#0b2a6b; --line:#0b2a6b; --sub:#3b4a6b; }
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: #fff; }
-  body { font-family: "Noto Sans JP", "IPAGothic", sans-serif; color: var(--ink); font-weight: 400; }
-  .page { width: 210mm; height: 297mm; padding: 11mm 14mm 8mm; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  body { font-family: "Noto Sans JP", "IPAGothic", sans-serif; color: var(--ink); }
+  .page { width: 210mm; height: 297mm; padding: 13mm 15mm 9mm; position: relative; overflow: hidden; display: flex; flex-direction: column; }
   .nw { white-space: nowrap; }
-  b, strong { font-weight: 700; }
 
   /* 送信情報 */
-  .meta { display: flex; justify-content: space-between; align-items: flex-end; font-size: 10.5pt; }
-  .meta .pages { border: 1.2px solid var(--line); padding: .8mm 3mm; font-size: 9.5pt; }
+  .meta { display: flex; justify-content: space-between; align-items: flex-end; font-size: 11pt; font-weight: 500; }
+  .meta .pages { border: 1.2px solid var(--line); padding: 1mm 3mm; font-size: 10pt; }
 
   /* 宛先 */
-  .to { margin-top: 3.5mm; display: flex; justify-content: space-between; align-items: flex-end; }
-  .to .co { font-size: 16pt; font-weight: 700; line-height: 1.35; border-bottom: 2px solid var(--line); padding-bottom: .8mm; padding-right: 6mm; }
-  .to .co small { font-size: 11.5pt; font-weight: 700; margin-left: 2mm; }
-  .to .person { font-size: 11.5pt; margin-top: 1.2mm; }
-  .to .fax { font-size: 11.5pt; font-weight: 700; margin-top: .6mm; letter-spacing: .02em; }
-  .to .from { text-align: right; font-size: 9.5pt; line-height: 1.55; }
-  .to .from b { font-size: 11pt; }
+  .to { margin-top: 5mm; display: flex; justify-content: space-between; align-items: flex-end; }
+  .to .co { white-space: nowrap; font-size: 17pt; font-weight: 700; line-height: 1.35; border-bottom: 2px solid var(--line); padding-bottom: 1mm; padding-right: 6mm; }
+  .to .co small { font-size: 12pt; font-weight: 700; margin-left: 2mm; }
+  .to .person { font-size: 12pt; font-weight: 500; margin-top: 1.5mm; }
+  .to .fax { font-size: 12pt; font-weight: 700; margin-top: 1mm; letter-spacing: .02em; }
+  .to .from { text-align: right; font-size: 10pt; line-height: 1.6; font-weight: 500; }
+  .to .from b { font-size: 11.5pt; font-weight: 700; }
 
   /* 表題 */
-  .title { margin-top: 4mm; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; gap: 5mm; height: 13mm; }
-  .title h1 { font-size: 21pt; font-weight: 700; letter-spacing: .3em; margin-right: -.3em; }
-  .title .en { font-size: 8pt; font-weight: 700; letter-spacing: .2em; border-left: 1.5px solid #fff; padding-left: 4mm; line-height: 1.3; }
+  .title { margin-top: 6mm; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; gap: 6mm; height: 15mm; }
+  .title h1 { font-size: 25pt; font-weight: 900; letter-spacing: .55em; margin-right: -.55em; }
+  .title .en { font-size: 9pt; font-weight: 700; letter-spacing: .25em; border-left: 1.5px solid #fff; padding-left: 5mm; }
 
-  .greet { margin-top: 2.8mm; font-size: 10.3pt; line-height: 1.65; }
+  .greet { margin-top: 4mm; font-size: 11pt; line-height: 1.75; font-weight: 500; }
 
   /* 物件・日時 */
-  table.prop { width: 100%; border-collapse: collapse; margin-top: 2.5mm; }
-  .prop th, .prop td { border: 1.2px solid var(--line); padding: 1.2mm 3mm; height: 8.5mm; vertical-align: middle; }
-  .prop th { width: 33mm; font-size: 9.8pt; font-weight: 700; text-align: left; white-space: nowrap; }
-  .prop th::before { content: ""; display: inline-block; width: 1.5mm; height: 3.8mm; background: var(--ink); margin-right: 2mm; vertical-align: -0.6mm; }
-  .prop td { font-size: 12pt; font-weight: 700; }
-  .prop td .big { font-size: 15.5pt; }
-  .prop td .room { font-size: 15.5pt; margin-left: 4mm; }
-  .prop td .s { font-size: 9pt; font-weight: 400; margin-left: 2mm; }
-  .kinds { display: flex; gap: 6mm; font-size: 11pt; }
-  .kinds .on { font-weight: 700; }
-  .kinds .off { font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; margin-top: 3.5mm; }
+  th, td { border: 1.2px solid var(--line); padding: 2mm 3.5mm; vertical-align: middle; }
+  th { width: 34mm; font-size: 10.5pt; font-weight: 700; text-align: left; white-space: nowrap; }
+  th::before { content: ""; display: inline-block; width: 1.6mm; height: 4mm; background: var(--ink); margin-right: 2mm; vertical-align: -0.6mm; }
+  td { font-size: 13pt; font-weight: 700; }
+  td .big { font-size: 17pt; font-weight: 900; }
+  td .room { font-size: 17pt; font-weight: 900; margin-left: 4mm; }
+  td .s { font-size: 10pt; font-weight: 500; }
   .wish { display: flex; align-items: center; gap: 3mm; }
-  .wish + .wish { margin-top: .8mm; }
-  .wish .no { font-size: 8.5pt; font-weight: 700; border: 1.2px solid var(--line); border-radius: 1mm; padding: 0 1.5mm; }
-  .wish .dt { font-size: 12pt; }
-  .wish.first .dt { font-size: 13.5pt; }
+  .wish + .wish { margin-top: 1mm; }
+  .wish .no { font-size: 9pt; font-weight: 700; border: 1.2px solid var(--line); border-radius: 1mm; padding: 0 1.6mm; }
+  .wish.first .dt { font-size: 15pt; font-weight: 900; }
 
-  /* 見出し（点線つき） */
-  .lbl { display: flex; align-items: center; gap: 3mm; font-size: 10pt; font-weight: 700; }
+  /* 下半分：ご案内担当（名刺） */
+  .lower { flex: 1; display: flex; flex-direction: column; padding-top: 8mm; }
+  .lbl { display: flex; align-items: center; gap: 3mm; font-size: 10.5pt; font-weight: 700; }
   .lbl::after { content: ""; flex: 1; border-top: 1.2px dashed var(--line); }
-  .lbl .hint { font-size: 8.5pt; font-weight: 400; }
+  .cardwrap { flex: 1; display: flex; align-items: center; justify-content: center; }
 
-  /* 中段：確認したいこと（左）＋ご案内担当の名刺（右） */
-  .mid { margin-top: 3mm; display: flex; gap: 6mm; align-items: stretch; }
-  .ask { flex: 1; display: flex; flex-direction: column; }
-  .ask ul { list-style: none; margin-top: 2mm; font-size: 10pt; line-height: 1.55; }
-  .ask li { display: flex; gap: 1.8mm; }
-  .ask li .bx { flex: none; font-weight: 700; }
-  .ask li.off { font-weight: 400; }
-  .ask .memo { margin-top: auto; border: 1.2px solid var(--line); padding: 1.3mm 2.5mm; font-size: 9.3pt; line-height: 1.5; }
-  .ask .memo b { margin-right: 2mm; }
-  .cardcol { width: 92mm; flex: none; display: flex; flex-direction: column; }
-  .cardwrap { flex: 1; display: flex; align-items: center; justify-content: center; padding-top: 2mm; }
+  /* 名刺：91×55mmを約1.2倍（109×66mm） */
+  .card { width: 109mm; height: 66mm; position: relative; background: #fff; border: 0.35mm solid #8a93a6; box-shadow: 1.2mm 1.2mm 0 0 #2b3550; padding: 6mm 7mm 5mm 9mm; display: flex; flex-direction: column; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2.2mm; background: var(--ink); }
+  .card .shop { font-size: 11pt; font-weight: 900; letter-spacing: .04em; }
+  .card .branch { font-size: 8pt; font-weight: 500; margin-top: .4mm; color: var(--sub); }
+  .card .mid { margin-top: auto; }
+  .card .role { font-size: 7.5pt; font-weight: 500; color: var(--sub); }
+  .card .name { font-family: "Noto Serif JP", serif; font-size: 21pt; font-weight: 600; letter-spacing: .14em; line-height: 1.25; word-spacing: .3em; margin-top: .5mm; }
+  .card .roma { font-size: 7pt; font-weight: 500; letter-spacing: .2em; color: var(--sub); }
+  .card .addr { margin-top: auto; padding-top: 2.4mm; border-top: 0.3mm solid #8a93a6; font-size: 7.3pt; line-height: 1.6; font-weight: 500; }
+  .card .addr .row { display: flex; gap: 3.2mm; }
+  .card .addr b { font-weight: 700; }
+  .card .lic { position: absolute; right: 7mm; top: 6.3mm; font-size: 6.3pt; color: var(--sub); text-align: right; line-height: 1.45; }
 
-  /* 名刺：標準サイズ 91×55mm（賃貸版は1.2倍。売買版は回答欄を入れるため原寸） */
-  .card { width: 89mm; height: 54mm; position: relative; background: #fff; border: 0.35mm solid #6f7a90; box-shadow: 1mm 1mm 0 0 #2b3550; padding: 5mm 6mm 4mm 8mm; display: flex; flex-direction: column; }
-  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2mm; background: var(--ink); }
-  .card .shop { font-size: 10pt; font-weight: 700; letter-spacing: .03em; }
-  .card .branch { font-size: 7.5pt; margin-top: .3mm; color: var(--sub); }
-  .card .who { margin-top: auto; }
-  .card .role { font-size: 7pt; color: var(--sub); }
-  .card .name { font-family: "Noto Serif JP", serif; font-size: 18pt; font-weight: 700; letter-spacing: .12em; line-height: 1.25; word-spacing: .3em; margin-top: .3mm; }
-  .card .roma { font-size: 6.5pt; letter-spacing: .2em; color: var(--sub); }
-  .card .addr { margin-top: auto; padding-top: 1.8mm; border-top: 0.3mm solid #6f7a90; font-size: 6.8pt; line-height: 1.55; }
-  .card .addr .row { display: flex; gap: 2.6mm; }
-  .card .lic { position: absolute; right: 6mm; top: 5.3mm; font-size: 5.8pt; color: var(--sub); text-align: right; line-height: 1.45; }
-
-  /* ご回答欄（元付業者さまが手書きで記入して返信する） */
-  .reply { margin-top: 3mm; border: 1.8px solid var(--line); }
-  .reply .head { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.2px solid var(--line); padding: 1.3mm 3mm; }
-  .reply .head h2 { font-size: 11pt; font-weight: 700; letter-spacing: .15em; }
-  .reply .head .ret { font-size: 9.5pt; }
-  .reply .head .ret b { font-size: 11pt; letter-spacing: .02em; }
-  .reply table { width: 100%; border-collapse: collapse; }
-  .reply th, .reply td { border-top: 1px solid var(--line); padding: 1.6mm 3mm; font-size: 10pt; vertical-align: middle; }
-  .reply tr:first-child th, .reply tr:first-child td { border-top: 0; }
-  .reply th { width: 25mm; text-align: left; font-weight: 700; white-space: nowrap; border-right: 1px solid var(--line); }
-  .reply td { line-height: 1.5; }
-  .reply td .opt { margin-right: 4.5mm; }
-  .reply td .blank { display: inline-block; border-bottom: 1px solid var(--line); vertical-align: bottom; }
-  .reply .sign td { padding-top: 2.4mm; padding-bottom: 2.4mm; }
-
-  .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 7.3pt; color: var(--sub); padding-top: 2mm; }
+  .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 7.5pt; font-weight: 500; color: var(--sub); }
   .foot .via { display: flex; align-items: center; gap: 2mm; text-align: right; }
-  .foot .via svg { width: 14mm; height: 14mm; flex: none; }
+  .foot .via svg { width: 15mm; height: 15mm; flex: none; }
 </style>
 </head>
 <body>
@@ -115,9 +84,9 @@
 
   <div class="to">
     <div>
-      <div class="co"><span class="nw">{{ to.company or "　　　　　　　　　　　　" }}</span>{% if to.branch %}<small class="nw">{{ to.branch }}</small>{% endif %}<small class="nw">御中</small></div>
+      <div class="co"><span class="nw">{{ to.company }}</span>{% if to.branch %}<small class="nw">{{ to.branch }}</small>{% endif %}<small class="nw">御中</small></div>
       <div class="person nw">{{ to.person or "ご担当者" }}　様</div>
-      <div class="fax nw">FAX：{{ to.fax or "　　　－　　　　－　　　　" }}</div>
+      <div class="fax nw">FAX：{{ to.fax }}</div>
     </div>
     <div class="from">
       <b class="nw">{{ me.company }}</b><br>
@@ -127,21 +96,17 @@
     </div>
   </div>
 
-  <div class="title"><h1>物件確認・内見依頼書</h1><span class="en nw">PROPERTY CHECK<br>&amp; VIEWING</span></div>
+  <div class="title"><h1>内見依頼書</h1><span class="en nw">VIEWING REQUEST</span></div>
 
   <p class="greet">
     <span class="nw">いつも大変お世話になっております。</span><br>
-    <span class="nw">下記物件につきまして、販売状況のご確認と、ご内見のお願いでご連絡いたしました。</span><br>
-    <span class="nw">お手数をおかけしますが、下の「ご回答欄」にご記入のうえ、FAXでご返信いただけますと幸いです。</span>
+    <span class="nw">下記物件の内見をお願いしたく、ご連絡いたしました。</span><br>
+    <span class="nw">ご確認のほど、どうぞよろしくお願い申し上げます。</span>
   </p>
 
-  <table class="prop">
+  <table>
     <tr>
-      <th>物件種別</th>
-      <td><div class="kinds">{% for k in kinds %}<span class="nw {{ 'on' if k == prop.kind else 'off' }}">{{ '■' if k == prop.kind else '□' }} {{ k }}</span>{% endfor %}</div></td>
-    </tr>
-    <tr>
-      <th>{{ "物件名・号室" if prop.kind == "区分マンション" or prop.room else "物件名" }}</th>
+      <th>物件名・号室</th>
       <td><span class="big nw">{{ prop.name }}</span>{% if prop.room %}<span class="room nw">{{ prop.room }}号室</span>{% endif %}</td>
     </tr>
     {% if prop.address %}
@@ -153,7 +118,7 @@
     {% if prop.price %}
     <tr>
       <th>価格</th>
-      <td><span class="big nw">{{ prop.price }}</span><span class="s nw">（募集図面に記載の価格）</span></td>
+      <td><span class="nw">{{ prop.price }}</span><span class="s nw">（募集図面に記載の価格）</span></td>
     </tr>
     {% endif %}
     {% if prop.number %}
@@ -172,105 +137,44 @@
     </tr>
   </table>
 
-  <div class="mid">
-    <div class="ask">
-      <div class="lbl"><span class="nw">ご確認のお願い</span></div>
-      <ul>
-        {% for a in asks %}
-        <li class="{{ '' if a.on else 'off' }}"><span class="bx">{{ '■' if a.on else '□' }}</span><span class="nw">{{ a.text }}</span></li>
-        {% endfor %}
-      </ul>
-      {% if guests or note %}
-      <div class="memo">
-        {% if guests %}<div class="nw"><b>ご案内人数</b>{{ guests }}</div>{% endif %}
-        {% if note %}<div class="nw"><b>備考</b>{{ note }}</div>{% endif %}
-      </div>
-      {% endif %}
-    </div>
-    <div class="cardcol">
-      <div class="lbl"><span class="nw">ご案内担当</span></div>
-      <div class="cardwrap">
-        <div class="card">
-          {% if me.license %}<div class="lic"><span class="nw">{{ me.license }}</span></div>{% endif %}
-          <div class="shop nw">{{ me.company }}</div>
-          {% if me.branch %}<div class="branch nw">{{ me.branch }}</div>{% endif %}
-          <div class="who">
-            {% if me.role %}<div class="role nw">{{ me.role }}</div>{% endif %}
-            <div class="name nw">{{ me.name }}</div>
-            {% if me.roman %}<div class="roma nw">{{ me.roman }}</div>{% endif %}
-          </div>
-          <div class="addr">
-            <div class="nw">〒{{ me.zip }}　{{ me.address }}</div>
-            <div class="row"><span class="nw"><b>TEL</b> {{ me.tel }}</span><span class="nw"><b>FAX</b> {{ me.fax }}</span>{% if me.mobile %}<span class="nw"><b>携帯</b> {{ me.mobile }}</span>{% endif %}</div>
-            {% if me.email %}<div class="nw"><b>E-mail</b> {{ me.email }}</div>{% endif %}
-          </div>
+  <div class="lower">
+    <div class="lbl"><span class="nw">ご案内担当</span></div>
+    <div class="cardwrap">
+      <div class="card">
+        {% if me.license %}<div class="lic"><span class="nw">{{ me.license }}</span></div>{% endif %}
+        <div class="shop nw">{{ me.company }}</div>
+        {% if me.branch %}<div class="branch nw">{{ me.branch }}</div>{% endif %}
+        <div class="mid">
+          {% if me.role %}<div class="role nw">{{ me.role }}</div>{% endif %}
+          <div class="name nw">{{ me.name }}</div>
+          {% if me.roman %}<div class="roma nw">{{ me.roman }}</div>{% endif %}
+        </div>
+        <div class="addr">
+          <div class="nw">〒{{ me.zip }}　{{ me.address }}</div>
+          <div class="row"><span class="nw"><b>TEL</b> {{ me.tel }}</span><span class="nw"><b>FAX</b> {{ me.fax }}</span>{% if me.mobile %}<span class="nw"><b>携帯</b> {{ me.mobile }}</span>{% endif %}</div>
+          {% if me.email %}<div class="nw"><b>E-mail</b> {{ me.email }}</div>{% endif %}
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="reply">
-    <div class="head">
-      <h2 class="nw">ご回答欄</h2>
-      <span class="ret nw">ご記入のうえ、本紙をそのままご返信ください　返信先FAX <b>{{ me.fax }}</b></span>
+    <div class="foot">
+      <span class="nw">万一、誤って届いた場合は、お手数ですが破棄のうえご連絡ください。</span>
+      <div class="via"><span class="nw">このFAXは 1分資料（otpromo.com）で送信しました</span>{{ qr_svg }}</div>
     </div>
-    <table>
-      <tr>
-        <th>販売状況</th>
-        <td><span class="opt nw">□ 販売中</span><span class="opt nw">□ 商談中（<span class="blank" style="width:9mm"></span>番手まで受付）</span><span class="opt nw">□ 成約済み</span><span class="nw">□ 販売停止</span></td>
-      </tr>
-      <tr>
-        <th>価格</th>
-        <td><span class="opt nw">□ 図面のとおり</span><span class="nw">□ 変更あり（<span class="blank" style="width:30mm"></span>万円）</span></td>
-      </tr>
-      <tr>
-        <th>ご内見</th>
-        <td><span class="opt nw">□ 第<span class="blank" style="width:6mm"></span>希望で可</span><span class="opt nw">□ 別日時で可（<span class="blank" style="width:7mm"></span>月<span class="blank" style="width:7mm"></span>日<span class="blank" style="width:7mm"></span>時）</span><span class="nw">□ 不可</span></td>
-      </tr>
-      <tr>
-        <th>現況</th>
-        <td><span class="opt nw">□ 空室</span><span class="opt nw">□ 居住中</span><span class="opt nw">□ 賃貸中</span><span class="nw">□ 更地・その他</span></td>
-      </tr>
-      <tr>
-        <th>鍵・立会い</th>
-        <td><span class="opt nw">□ 現地で立会い</span><span class="opt nw">□ キーボックス（番号は別途連絡）</span><span class="nw">□ 御社でお渡し</span></td>
-      </tr>
-      {% if show_tax %}
-      <tr>
-        <th>税・評価額<br><span class="nw" style="font-weight:400;font-size:8pt">わかる範囲で</span></th>
-        <td style="line-height:2.1"><div class="nw">固定資産税・都市計画税（年額）<span class="blank" style="width:34mm"></span>円</div><div class="nw">固定資産税評価額　土地<span class="blank" style="width:30mm"></span>円　建物<span class="blank" style="width:30mm"></span>円</div></td>
-      </tr>
-      {% endif %}
-      {% if show_ad %}
-      <tr>
-        <th>広告掲載</th>
-        <td><span class="opt nw">□ 可</span><span class="opt nw">□ 条件付きで可（<span class="blank" style="width:42mm"></span>）</span><span class="nw">□ 不可</span></td>
-      </tr>
-      {% endif %}
-      <tr class="sign">
-        <th>ご回答者</th>
-        <td><span class="opt nw">ご担当<span class="blank" style="width:34mm"></span>様</span><span class="opt nw">TEL<span class="blank" style="width:36mm"></span></span><span class="nw"><span class="blank" style="width:7mm"></span>月<span class="blank" style="width:7mm"></span>日</span></td>
-      </tr>
-    </table>
-  </div>
-
-  <div class="foot">
-    <span class="nw">万一、誤って届いた場合は、お手数ですが破棄のうえご連絡ください。</span>
-    <div class="via"><span class="nw">このFAXは 1分資料（otpromo.com）で送信しました</span>{{ qr_svg }}</div>
   </div>
 
 </div>
 <script>
-  // 項目が多くてA4 1枚からはみ出すときだけ、全体を少しずつ縮める（最小72%。賃貸版の「最小70%」ルールに合わせる）
-  function fit() {
-    const p = document.querySelector('.page');
-    let z = 1;
-    while (p.scrollHeight > p.clientHeight + 1 && z > 0.72) {
-      z = Math.round((z - 0.02) * 100) / 100;
-      p.style.zoom = z; p.style.width = (210 / z) + 'mm'; p.style.height = (297 / z) + 'mm';
+  // 宛先の会社名＋支店名が長いと「御中」だけ次の行に落ちるので、1行に収まるまで宛先の文字を小さくする（最小11pt）
+  function fitTo() {
+    const to = document.querySelector('.to'), co = document.querySelector('.to .co');
+    let pt = 17;
+    while (to.scrollWidth > to.clientWidth + 1 && pt > 11) {
+      pt -= 0.5; co.style.fontSize = pt + 'pt';
+      co.querySelectorAll('small').forEach(e => e.style.fontSize = (pt * 0.7) + 'pt');
     }
   }
-  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(fit);
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(fitTo);
 </script>
 </body>
 </html>
