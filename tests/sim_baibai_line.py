@@ -531,7 +531,7 @@ assert len(alerts) == 1 and "20円を超えました" in alerts[0][0] and "最�
 print(lines)
 # やり直したときは、1回目と2回目の原価を合計して1件分（10/31料金スレッド）
 _calls = []
-def _fake_claude(jpeg):
+def _fake_claude(jpeg, effort=None):
     _calls.append(1)
     if len(_calls) == 1:
         e = ValueError("JSONの形が崩れた"); e.cost_yen = 7.5; raise e
