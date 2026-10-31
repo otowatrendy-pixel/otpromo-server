@@ -496,7 +496,9 @@ def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=
     # 書体はネットから読まず、同梱のものを使う
     tpl = re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "", tpl)
     css = font_css({"書体": "ゴシック"})[0] + font_css({"書体": "明朝"})[0]
-    # 一番下のQR（いまは内見申込書FAX専用の友だち追加 https://lin.ee/YzyWFNQ。10/29本人承認）と、その下の一言。
+    # 一番下のQR（https://otpromo.com/f。11/1本人決定：短いURLからHPの紹介ページへ転送。転送先と集計用の印
+    # ?utm_source=naiken_fax はHP側の転送設定で決めるので、QRを作り直さずに行き先を変えられる。
+    # 白黒FAXの標準画質でも読めるよう、URLは短く保つ）と、その下の一言。
     # 会社の設定で「載せない」なら、QRも一言も出さない
     from markupsafe import Markup
     qr = HERE / "static" / "naiken-qr.svg"
