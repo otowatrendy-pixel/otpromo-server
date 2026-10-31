@@ -420,6 +420,19 @@ LAND_LOAN_STAFF = ("土地はローン関連の費用（つなぎ融資・抵当
                    "正確なお見積りはお借入れ先と建築会社からお出しいただくようお願いしています」とご案内ください。")
 
 
+def estimate_building_tax(f: SaleFacts, evi) -> tuple[int, float, str]:
+    """業者売主で「うち消費税」が分からないときの建物の消費税の推計。(消費税, 建物の割合, 根拠の言い方)
+    評価額が分かれば（推計でも）時価に直して按分：土地は評価額÷0.7、建物は評価額÷0.6（建築費の6割程度）。
+    分からなければ マンション50%・戸建て40%。建物の割合は20〜80%に収める。"""
+    if evi.land and evi.bldg:
+        lm, bm = evi.land / 0.7, evi.bldg / 0.6
+        share, how = bm / (lm + bm), "評価額から"
+    else:
+        share, how = (0.5 if f.property_type == "mansion" else 0.4), "一般的な目安で"
+    share = min(0.8, max(0.2, share))
+    return int(f.price * share * 10 / 110), share, how
+
+
 def tentative_handover(base: date) -> date:
     """仮の決済日（引渡日）＝基準日（図面を送った日）の翌々月1日。11月→1月、12月→2月。"""
     m = base.month + 2
@@ -464,26 +477,41 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
     notes: list[str] = []
     staff: list[str] = []
 
+    evi = estimate_evals(f, handover_day, land_data_override)
     ex, ctax = price_split(f)
-    if f.seller_is_business and f.property_type != "land" and f.price_tax is None:
-        staff.append("売主が業者のようですが、価格の「うち消費税」が読み取れません。仲介手数料と印紙税は税込価格で計算しています（多めの目安）。")
+    tax_estimated = False
+    if f.seller_is_business and f.property_type != "land":
+        if f.price_tax is None:
+            ctax, share, how = estimate_building_tax(f, evi)
+            ex = f.price - ctax
+            tax_estimated = True
+            staff.append(f"売主が業者ですが、価格の「うち消費税」が販売図面にありません。建物の割合を{how}約{round(share * 100)}%とみて、"
+                         f"消費税を約{ctax // 10_000:,}万円と推計し、仲介手数料と印紙税は税抜の約{ex // 10_000:,}万円で計算しています。"
+                         "売主に消費税額（または土地・建物の内訳）を確認してください。")
+            notes.append("売主が事業者のため、建物の価格に消費税がかかります（物件価格に含まれています）。"
+                         "仲介手数料などは消費税を除いた価格で計算しており、消費税の額は推計です。")
+        else:
+            notes.append(f"売主が事業者のため、物件価格には建物の消費税{ctax:,}円が含まれています。仲介手数料などは消費税を除いた価格で計算しています。")
     if f.seller_is_business is None:
         staff.append("売主が個人か業者か図面から読み取れません（建物の消費税・契約不適合責任に関係します）。")
 
     # 1. 仲介手数料
     fee, fee_note = brokerage_fee(ex, s)
-    lines.append(Line("must", "仲介手数料", fee, "exact" if fee is not None else "check", fee_note))
+    if fee is not None and tax_estimated:
+        fee_note = (fee_note + "。" if fee_note else "") + "消費税を除いた価格（推計）で計算"
+    lines.append(Line("must", "仲介手数料", fee, ("estimate" if tax_estimated else "exact") if fee is not None else "check", fee_note))
 
     # 2. 印紙税（売買契約書）。消費税額が書いてあれば税抜の金額で判定
     stamp_reduced = is_reduced("stamp_sale_reduced_until", contract_day)
     st = stamp_tax(ex, stamp_reduced)
+    if tax_estimated and stamp_tax(f.price, stamp_reduced) != st:
+        staff.append(f"印紙税は税抜（推計）で{st:,}円ですが、税込なら{stamp_tax(f.price, stamp_reduced):,}円です。契約書に消費税額が書かれるか確認してください。")
     lines.append(Line("must", "印紙税（売買契約書）", st, "exact",
                       "軽減措置後の額" if stamp_reduced else "本則の額（軽減措置の期限後）"))
     if not stamp_reduced:
         notes.append("契約予定日が印紙税の軽減措置の期限（2027年3月31日）より後のため、本則の税額で計算しています。")
 
     # 3. 登記費用（所有権）
-    evi = estimate_evals(f, handover_day, land_data_override)
     land_eval, bldg_eval, estimated = evi.land, evi.bldg, evi.estimated
     if estimated and not s.estimate_eval:
         land_eval = f.land_eval

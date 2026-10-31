@@ -153,3 +153,29 @@ def _t6():
 
 
 _t6()
+
+
+# ---- 7. 業者売主の建物の消費税
+def _t7():
+    from datetime import date as D
+    from costs_sale import SaleFacts, CompanySaleSettings, compute, brokerage_fee
+    import costs_sale, evaluation as ev
+    LD7 = ev.LandData.load(os.path.join(FX, "landprice_points.json"), os.path.join(FX, "chome_points.json"))
+    base = dict(property_type="mansion", price=49_800_000, seller_is_business=True, floor_area=62.15, built=D(2008, 3, 1),
+                structure="rc", kanri_hi=15_800, shuzen_hi=12_400, address="東京都○○区見本町2丁目", youseki=200)
+    # 消費税額が書いてある
+    r = compute(SaleFacts(**base, price_tax=2_000_000), CompanySaleSettings(), today=D(2026, 10, 31), land_data_override=LD7)
+    fee = r.lines[0]
+    assert fee.amount == brokerage_fee(47_800_000, CompanySaleSettings())[0] and fee.kind == "exact"
+    # 書いていない → 推計
+    r2 = compute(SaleFacts(**base), CompanySaleSettings(), today=D(2026, 10, 31), land_data_override=LD7)
+    f2 = r2.lines[0]
+    assert f2.kind == "estimate" and f2.amount < brokerage_fee(49_800_000, CompanySaleSettings())[0]
+    assert any("消費税" in x for x in r2.staff_notes) and any("事業者" in n for n in r2.notes)
+    # 個人売主は消費税なし
+    r3 = compute(SaleFacts(**{**base, "seller_is_business": False}), CompanySaleSettings(), today=D(2026, 10, 31), land_data_override=LD7)
+    assert r3.lines[0].amount == brokerage_fee(49_800_000, CompanySaleSettings())[0]
+    print("ALL OK 7", f2.amount, f2.note, [x for x in r2.staff_notes if "消費税" in x])
+
+
+_t7()
