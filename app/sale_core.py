@@ -33,7 +33,10 @@ from sale_schema import SaleResult
 SALE_TYPES = {t.strip() for t in os.environ.get("SALE_TYPES", "区分マンション,戸建,土地").split(",") if t.strip()}
 # 当社（客付）の取引態様。帯に「取引態様：媒介」と載せる（宅建業法34条・表示規約）
 OUR_TORIHIKI = os.environ.get("SALE_OUR_TORIHIKI", "媒介")
-SALE_MOCK_RESULT = os.environ.get("SALE_MOCK_RESULT")  # 見本のJSON。入っていればAIを呼ばない（動作確認用）
+SALE_MOCK_RESULT = os.environ.get("SALE_MOCK_RESULT")
+# 思考の深さ（low / medium / high）。文字データのあるPDFと、画像だけ（写真・スキャン・FAX）で分ける
+EFFORT_TEXT = os.environ.get("SALE_EFFORT_TEXT", "low")
+EFFORT_IMAGE = os.environ.get("SALE_EFFORT_IMAGE", "medium")  # 見本のJSON。入っていればAIを呼ばない（動作確認用）
 
 
 # ---- 白塗り（売買の業者間の情報） ----------------------------------------------------------
@@ -61,7 +64,7 @@ def protect_list(texts):
 
 
 # ---- AI ---------------------------------------------------------------------------------
-def call_claude(jpeg: bytes):
+def call_claude(jpeg: bytes, effort: str = None):
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_KEY, base_url="https://api.anthropic.com")
     kwargs = {}
@@ -78,7 +81,7 @@ def call_claude(jpeg: bytes):
                                          "data": base64.standard_b64encode(jpeg).decode()}},
             {"type": "text", "text": USER},
         ]}],
-        output_config={"effort": config.EFFORT},
+        output_config={"effort": effort or config.EFFORT},
         **kwargs,
     )
     if resp.stop_reason == "refusal":
@@ -105,18 +108,24 @@ def analyze(data: bytes) -> dict:
     if min(img.size) < 400:
         raise core.InputError("画像が小さすぎて読み取れません。もう少し大きく写して送ってください。")
     jpeg = core._jpeg(img, 2000)
+    # 思考の深さ：文字データのあるPDFは「低」、画像だけのPDF（FAX・スキャン・文字化け）と写真は「中」（10/31本人）
+    try:
+        layer = text_layer(data, pages)
+    except Exception:
+        layer = ("", False)
+    effort = EFFORT_TEXT if layer[1] else EFFORT_IMAGE
     t1 = time.perf_counter()
     if SALE_MOCK_RESULT:
         result, usage = SaleResult.model_validate_json(Path(SALE_MOCK_RESULT).read_text(encoding="utf-8")), {}
     else:
         try:
-            result, usage = call_claude(jpeg)
+            result, usage = call_claude(jpeg, effort)
         except ValueError:  # JSONの形が崩れたときは1回だけやり直す
-            result, usage = call_claude(jpeg)
+            result, usage = call_claude(jpeg, effort)
     tidy(result)
     # 二重の点検：図面の文字（PDFの文字データ＋文字認識）から大切な言葉を探し、AIの結果になければ注意を出す
     try:
-        double_check(result, page_text(data, img, pages))
+        double_check(result, page_text(data, img, pages, layer))
     except Exception as ex:  # 点検ができなくても資料は作る
         result.スタッフへの注意.append(f"大切な記載の自動点検ができませんでした（{ex.__class__.__name__}）。告知事項・再建築・借地などは原本で確認してください。")
     if pages > 1:
@@ -132,7 +141,7 @@ def analyze(data: bytes) -> dict:
         img, fix = core.make_page(img, result, camera)
     t3 = time.perf_counter()
     log = {"種類": "売買", "秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "秒_写真補正": round(t3 - t2, 2),
-           "写真の補正": fix, "モデル": config.MODEL, **usage}
+           "写真の補正": fix, "モデル": config.MODEL, "思考の深さ": effort, "文字データ": layer[1], **usage}
     return {"img": img, "pages": pages, "result": result, "log": log}
 
 
@@ -366,30 +375,34 @@ CHECKS = [
 _NONE_AFTER = re.compile(r"^[\s:：・]*(無|なし|無し|ナシ|不要|-|－|ー)")
 
 
-def page_text(data: bytes, img, pages: int) -> str:
-    """図面の文字。PDFの文字データ（1ページ目）と、画像の文字認識を合わせたもの。"""
+def text_layer(data: bytes, pages: int) -> tuple:
+    """PDFの1ページ目の文字データと、それが信用できるか（十分な量があり、文字化けしていない）。写真なら ("", False)。"""
     import subprocess
+    if not pages:
+        return "", False
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "in.pdf"
+        src.write_bytes(data)
+        r = subprocess.run(["pdftotext", "-l", "1", "-layout", str(src), "-"], capture_output=True, timeout=30)
+    text = unicodedata.normalize("NFKC", r.stdout.decode("utf-8", "ignore"))  # 「⾺」「⼟」のような部首の字も普通の漢字にそろえる
+    # 文字化けしたPDF（独自の文字の割り当ての図面）は、文字データを信用しない
+    body = re.sub(r"\s", "", text)
+    normal = len(re.findall(r"[\u0020-\u007e\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef㎡]", body))
+    return text, len(body) >= 300 and normal / len(body) >= 0.9
+
+
+def page_text(data: bytes, img, pages: int, layer=None) -> str:
+    """図面の文字。信用できる文字データがあればそれを、なければ画像の文字認識も合わせたもの。"""
     import numpy as np
-    parts = []
-    if pages:
-        with tempfile.TemporaryDirectory() as d:
-            src = Path(d) / "in.pdf"
-            src.write_bytes(data)
-            r = subprocess.run(["pdftotext", "-l", "1", "-layout", str(src), "-"], capture_output=True, timeout=30)
-            parts.append(r.stdout.decode("utf-8", "ignore"))
-        # 文字データが十分にあるPDFは、文字認識を省く（数秒かかるため）
-        # （文字化けしたPDF＝独自の文字の割り当ての図面は、文字データを信用せず文字認識も使う）
-        body = re.sub(r"\s", "", parts[0])
-        normal = len(re.findall(r"[\u0020-\u007e\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef㎡]", body))
-        if len(body) >= 300 and normal / len(body) >= 0.9:
-            return unicodedata.normalize("NFKC", parts[0])
+    text, good = layer if layer is not None else text_layer(data, pages)
+    if good:  # 文字認識は数秒かかるので省く
+        return unicodedata.normalize("NFKC", text)
     im = img.convert("RGB")
     if max(im.size) > 2400:
         sc = 2400 / max(im.size)
         im = im.resize((round(im.width * sc), round(im.height * sc)))
     out, _ = hide._engine()(np.asarray(im))
-    parts.append("\n".join(t for _, t, _ in out or []))
-    return unicodedata.normalize("NFKC", "\n".join(parts))
+    return unicodedata.normalize("NFKC", text + "\n" + "\n".join(t for _, t, _ in out or []))
 
 
 def double_check(result: SaleResult, text: str) -> list:
