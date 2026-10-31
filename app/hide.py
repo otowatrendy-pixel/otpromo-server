@@ -216,7 +216,7 @@ def _fill_between(boxes, kept, lines, limit):
     return out
 
 
-def _erase(arr, x0, y0, x1, y1):
+def _erase(arr, x0, y0, x1, y1, dark_ok=False):
     """枠の中の文字を、まわりの地の色で塗る。表の罫線（長い縦線・横線）は残す。"""
     import cv2
     H, W = arr.shape[:2]
@@ -230,7 +230,20 @@ def _erase(arr, x0, y0, x1, y1):
     box = arr[y0:y1, x0:x1]
     bg = np.percentile(box.reshape(-1, 3), 90, axis=0).astype(np.uint8)
     # 紺色などの濃い地（表の見出しのセル）は、業者向けの情報が書かれる所ではないので塗らない
+    # 売買版：濃い地に白い文字（ほとんどが濃い色の枠）。90%の明るさの色は文字の色になるので、別の塗り方にする
+    if dark_ok and np.median(box.reshape(-1, 3).mean(axis=1)) < 110:
+        bg = np.zeros(3)
     if bg.mean() < 150:
+        if not dark_ok:
+            return
+        # 売買版：濃い地に白い文字（紺の帯風のデザインの図面）。地の色（いちばん多い濃い色）で塗る
+        # 白い文字の縁のにじみも消えるよう、少し広げて、地の色（濃い方から2割の色）で塗る
+        g = 4
+        X0, Y0, X1, Y1 = max(0, x0 - g), max(0, y0 - g), min(W, x1 + g), min(H, y1 + g)
+        wide = arr[Y0:Y1, X0:X1]
+        lum = wide.reshape(-1, 3).mean(axis=1)
+        dark = wide.reshape(-1, 3)[lum <= np.percentile(lum, 20)]
+        wide[:] = np.median(dark, axis=0).astype(np.uint8)
         return
     ink = (gray < int(np.percentile(gray, 90)) - 40).astype(np.uint8)
     hl = cv2.morphologyEx(ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (90, 1)))
@@ -256,7 +269,7 @@ def apply(page: Image.Image, result, extra=None, protect=None):
         # 用紙の4分の1を超える大きな枠は、読み違いとみなして消さない
         if (x1 - x0) * (y1 - y0) > page.width * page.height * 0.25:
             continue
-        _erase(arr, x0, y0, x1, y1)
+        _erase(arr, x0, y0, x1, y1, dark_ok=extra is not None)
     out = Image.fromarray(arr)
     return out, notes
 

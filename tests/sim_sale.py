@@ -34,10 +34,14 @@ assert r.想定QA[0].要確認 is False and "かかりません" in r.想定QA[0
 assert sale_core.band_company(company)["帯_3行目"] == "取引態様：媒介"
 # 6) 和暦
 assert sale_core.built_year("昭和56年5月") == 1981 and sale_core.built_year("平成元年") == 1989 and sale_core.built_year("築年不詳") is None
+# 6b) 「より」の価格は計算に使わない
+r3 = r.model_copy(deep=True); r3.事実.価格.記載 = "7,080万円（税込）より"; r3.事実.価格.金額円 = 70800000
+sale_core.tidy(r3); assert r3.事実.価格.金額円 is None and any("棟・区画" in t for t in r3.スタッフへの注意)
+assert sale_core.cost_inputs(r3.事実) is None
 # 7) 賃貸図面・種別
 r2 = r.model_copy(deep=True); r2.事実.取引 = "賃貸"; assert sale_core.verdict(r2) == "rental"
-sale_core.SALE_TYPES.discard("土地"); r2.事実.取引 = "売買"; r2.事実.物件種別 = "土地"; assert sale_core.verdict(r2) == "unsupported"
-sale_core.SALE_TYPES.add("土地")
+r2.事実.取引 = "売買"; r2.事実.物件種別 = "収益一棟"; assert sale_core.verdict(r2) == "unsupported"  # 収益・事業用は第2弾
+r2.事実.物件種別 = "土地"; assert sale_core.verdict(r2) == "ok"
 
 # 8) 購入諸費用の計算に渡す形
 ci = sale_core.cost_inputs(r.事実); print(ci)
