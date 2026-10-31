@@ -198,23 +198,29 @@ def me_from_company(co, guide=None):
             "email": co.get("メール", ""), "license": co.get("免許", "")}
 
 
-def build(d, company):
-    """下書きと会社情報から、申込書のPDFとプレビュー画像（PNG）を作る。"""
+def build(d, company, via="line"):
+    """下書きと会社情報から、申込書のPDF（控え・青）・プレビュー画像（PNG）・FAX送信用PDF（黒）を作る。
+
+    スマホで見せる控えとプレビューは青のまま、faximo へ渡す送信用だけ文字・線・帯をすべて黒にする
+    （濃紺はFAXの白黒変換で網点になり、小さい字がかすれるため。売買版からの引き継ぎ 10/31）。
+    """
     to = dict(d.get("to") or {})
     to["fax"] = fax_display(to.get("fax", ""))
     to.setdefault("person", "")
     prop = d.get("prop") or {}
     r = Result(事実=Facts(取引="賃貸"))
-    html_text = render.naiken_html(r, company, wishes=[wish_label(w) for w in d.get("wishes", [])],
-                                   to=to, me=me_from_company(company, d.get("guide")), guests=d.get("guests"),
-                                   prop={"name": prop.get("name", ""), "room": prop.get("room"),
-                                         "address": prop.get("address", "")})
+    kw = dict(wishes=[wish_label(w) for w in d.get("wishes", [])],
+              to=to, me=me_from_company(company, d.get("guide")), guests=d.get("guests"),
+              prop={"name": prop.get("name", ""), "room": prop.get("room"), "address": prop.get("address", "")},
+              via=via)
     with tempfile.TemporaryDirectory() as tmp:
-        pdf = Path(tmp) / "naiken.pdf"
-        render.to_pdf(html_text, pdf)
+        pdf, fax_pdf = Path(tmp) / "naiken.pdf", Path(tmp) / "naiken_fax.pdf"
+        # ブラウザの起動は1回で、控えと送信用の2つを作る
+        render.to_pdfs({pdf: [render.naiken_html(r, company, **kw)],
+                        fax_pdf: [render.naiken_html(r, company, fax=True, **kw)]})
         png = Path(tmp) / "naiken"
         subprocess.run(["pdftoppm", "-r", "110", "-png", "-singlefile", str(pdf), str(png)], check=True)
-        return pdf.read_bytes(), (Path(tmp) / "naiken.png").read_bytes()
+        return pdf.read_bytes(), (Path(tmp) / "naiken.png").read_bytes(), fax_pdf.read_bytes()
 
 
 # ---------- 回数 ----------
@@ -304,15 +310,16 @@ def add_pack(uid, n=PACK_SIZE):
 
 # ---------- 送る ----------
 
-def save_preview(uid, d, company):
-    """プレビューを作って保存する。戻り値 (fax_id, rec)。"""
-    pdf, png = build(d, company)
+def save_preview(uid, d, company, via="line"):
+    """プレビューを作って保存する。戻り値 (fax_id, rec)。via は作った経路（"line" / "app"）。"""
+    pdf, png, fax_pdf = build(d, company, via=via)
     fid = "N" + store.now().strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(4)
     rec = {"user_id": uid, "status": "preview", "draft": d, "token": secrets.token_urlsafe(24),
            "expires_at": store.now() + timedelta(days=7), "created_at": store.now()}
     store.db().set("faxes", fid, rec)
     store.db().put_file(f"faxes/{fid}/naiken.pdf", pdf, "application/pdf")
     store.db().put_file(f"faxes/{fid}/naiken.png", png, "image/png")
+    store.db().put_file(f"faxes/{fid}/naiken_fax.pdf", fax_pdf, "application/pdf")  # faximo へ渡す送信用（黒）
     return fid, rec
 
 
@@ -356,7 +363,8 @@ def send(uid, fid):
 def _dispatch(uid, fid, rec, u, source):
     """回数を数えた後、faximo へ渡す。送れなければ回数を戻す。今すぐ送る・予約の時刻の両方から使う。"""
     to = rec["draft"]["to"]
-    pdf = store.db().get_file(f"faxes/{fid}/naiken.pdf")
+    # 送信用（黒）を送る。この仕組みより前に作ったプレビュー（予約中など）は控えのPDFで送る
+    pdf = store.db().get_file(f"faxes/{fid}/naiken_fax.pdf") or store.db().get_file(f"faxes/{fid}/naiken.pdf")
     sender = delivery.fax_sender((u.get("company") or {}).get("会社名"))
     ready = delivery.fax_ready() or bool(u.get("review"))  # 審査用アカウントは送ったことにする
     ok = ready and delivery.send_fax(normalize_fax(to["fax"]), pdf, sender,

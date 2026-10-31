@@ -14,8 +14,10 @@ pushed = []
 line.push = lambda to, msgs: pushed.append(msgs) or True
 delivery.fax_ready = lambda: True
 seq = {"n": 0}
+sent_pdfs = []
 def fake_send(number, pdf, sender):
     seq["n"] += 1
+    sent_pdfs.append(pdf)
     return f"FX{seq['n']}"
 delivery._fax_api_send = fake_send
 results = {}
@@ -31,6 +33,9 @@ d = {"to": {"company": "テスト管理", "fax": "03-1234-5678"}, "prop": {"name
      "wishes": [{"date": "11/12", "time": "14:00"}]}
 fid, rec = naiken.save_preview(uid, d, store.get_user(uid)["company"])
 print("送信:", naiken.send(uid, fid))
+# faximo へ渡すのは送信用（黒）のPDF。スマホで見る控え（青）とは別物（10/31 売買版からの引き継ぎ）
+assert sent_pdfs and sent_pdfs[0] == store.db().get_file(f"faxes/{fid}/naiken_fax.pdf"), "送信用PDFが使われていない"
+assert sent_pdfs[0] != store.db().get_file(f"faxes/{fid}/naiken.pdf")
 m0 = naiken.remaining(store.get_user(uid))[0]
 
 print("\n=== 話し中で再送（1回だけ知らせる） ===")

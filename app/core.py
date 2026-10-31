@@ -251,7 +251,7 @@ def render_documents(company: dict, img: Image.Image, result: Result, pages: int
         render.to_pdfs({
             okyaku: [render.build_html(result, ob_png, company, sections=("obikae", "estimate"))],
             shanai: [render.build_html(result, ob_png, company, sections=("osusume",)),
-                     render.naiken_html(result, company),
+                     render.naiken_html(result, company, via="blank"),
                      render.build_html(result, ob_png, company, sections=("qa",))],
         })
         pdf_okyaku, pdf_shanai = okyaku.read_bytes(), shanai.read_bytes()

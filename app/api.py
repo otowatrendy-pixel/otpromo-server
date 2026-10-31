@@ -473,7 +473,7 @@ def naiken_preview(body: NaikenIn, authorization: str = Header("")):
     d = {"job_id": body.job_id, "to": {"company": body.to_company, "branch": body.to_branch, "fax": body.to_fax},
          "prop": {"name": body.prop_name, "room": body.prop_room, "address": body.prop_address or ""},
          "wishes": [_wish(w) for w in body.wishes[:2]], "guests": body.guests, "guide": body.guide}
-    fid, rec = naiken.save_preview(uid, d, u.get("company") or {})
+    fid, rec = naiken.save_preview(uid, d, u.get("company") or {}, via="app")
     return {"fax_id": fid, "status": "preview", "preview_url": naiken.file_url(fid, rec, "naiken.png"),
             "pdf_url": naiken.file_url(fid, rec, "naiken.pdf")}
 

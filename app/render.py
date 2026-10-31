@@ -418,6 +418,7 @@ def to_pdfs(groups: dict):
                 tmp.write_text(h, encoding="utf-8")
                 page.goto(tmp.as_uri(), wait_until="networkidle")
                 page.evaluate("document.fonts.ready")
+                page.evaluate("window.fitDone || null")  # 内見申込書：長い行を縮める処理が終わるのを待つ
                 part = out.with_suffix(f".{i}.pdf")
                 page.pdf(path=str(part), format="A4", print_background=True)
                 tmp.unlink()
@@ -434,11 +435,39 @@ def to_pdfs(groups: dict):
 NAIKEN_TEMPLATE = HERE / "naiken_template.html"
 WEEK = "月火水木金土日"
 
+# QRの下に添える一言（受け取った元付業者さま向けの控えめな宣伝。売買版からの引き継ぎ 10/31）
+#   「1分」を所要時間の意味では使わない。アプリから作った申込書に「LINEで」と書かないよう、作った経路で分ける
+NAIKEN_QR_CAPTION = {
+    "line": "この申込書は、スマホからLINEで作りました（1分資料）",
+    "app": "この申込書は、スマホのアプリで作りました（1分資料）",
+    # 資料一式に入れる手書き用の申込書（LINE版・アプリ版の両方。お客様が印刷して自分でFAXする）
+    "blank": "この申込書は、1分資料で作りました（otpromo.com）",
+}
 
-def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=None, prop=None) -> str:
+# FAXで送る版だけ、色をすべて黒に置きかえる（テンプレートの色は --ink・--line・--sub と名刺の枠線・影だけ）
+NAIKEN_FAX_CSS = """
+  :root { --ink:#000 !important; --line:#000 !important; --sub:#000 !important; }
+  .card { border-color: #000 !important; box-shadow: 1.2mm 1.2mm 0 0 #000 !important; }
+  .card .addr { border-top-color: #000 !important; }
+  /* FAXでは小さい細字がかすれるので、補助の文字を少し大きく・太くする */
+  .card .branch, .card .lic, .card .role, .card .roma { font-size: 8.5pt !important; font-weight: 700 !important; }
+  .card .addr, .foot { font-size: 8.5pt !important; font-weight: 700 !important; }
+"""
+
+
+def naiken_qr_on(company: dict) -> bool:
+    """会社の設定で「内見申込書にQRを載せない」を選んでいれば False（設定の入口・料金は未定。11/11の公開後に決める）。"""
+    return (company or {}).get("内見FAXのQR") != "なし"
+
+
+def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=None, prop=None,
+                fax=False, via="line", qr_caption=None) -> str:
     """内見申込書（FAX用）。テンプレートは内見FAX担当が作った naiken_template.html（Jinja2）。
 
     資料一式に入れるときは希望日時を空欄にし、元付業者と自社の情報だけ入れておく。
+    fax : True ならFAXで送る版（文字・線・帯をすべて黒）。スマホで見る控え・プレビューは False（青のまま）
+    via : 申込書を作った経路（"line" / "app"）。QRの下の一言を分ける
+    qr_caption : QRの下の一言を直接決めるとき（"" で一言なし）
     """
     from jinja2 import Template
     f = r.事実
@@ -467,12 +496,16 @@ def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=
     # 書体はネットから読まず、同梱のものを使う
     tpl = re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "", tpl)
     css = font_css({"書体": "ゴシック"})[0] + font_css({"書体": "明朝"})[0]
-    # 一番下の友だち追加QR（内見申込書FAX専用の経路 https://lin.ee/YzyWFNQ、15mm角。10/29本人承認）
+    # 一番下のQR（いまは内見申込書FAX専用の友だち追加 https://lin.ee/YzyWFNQ。10/29本人承認）と、その下の一言。
+    # 会社の設定で「載せない」なら、QRも一言も出さない
     from markupsafe import Markup
     qr = HERE / "static" / "naiken-qr.svg"
-    data.setdefault("qr_svg", Markup(qr.read_text(encoding="utf-8")) if qr.exists() else "")
+    on = naiken_qr_on(company) and qr.exists()
+    data["qr_svg"] = Markup(qr.read_text(encoding="utf-8")) if on else ""
+    data["qr_caption"] = (NAIKEN_QR_CAPTION.get(via, NAIKEN_QR_CAPTION["line"]) if qr_caption is None else qr_caption) if on else ""
     html_text = Template(tpl, autoescape=True).render(**data)
-    return html_text.replace("<style>", "<style>\n" + css, 1)
+    html_text = html_text.replace("<style>", "<style>\n" + css, 1)
+    return html_text.replace("</style>", NAIKEN_FAX_CSS + "</style>", 1) if fax else html_text
 
 
 def png_bytes(img: Image.Image) -> bytes:
