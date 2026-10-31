@@ -42,6 +42,9 @@ LONG_ME = {**bn.ME, "company": "サンプル不動産コンサルティング株
 # FAXで送る版（全部黒）
 groups[out / "fax_mansion.pdf"] = [bn.html(me=bn.ME, fax=True, **bn.SAMPLES["mihon_mansion"])]
 assert "--ink:#000" in groups[out / "fax_mansion.pdf"][0] and "--ink:#000" not in groups[out / "mihon_mansion.pdf"][0]
+# QRを載せない会社（一言も宣伝も出ない）
+h = bn.html(me=bn.ME, qr_svg="", qr_caption="", **bn.SAMPLES["mihon_mansion"])
+assert "1分資料" not in h.split('<div class="foot">')[1] and "<svg" not in h.split('<div class="foot">')[1]
 groups[out / "test_long_card.pdf"] = [bn.html(me=LONG_ME, **cases["test_max"])]
 render.to_pdfs(groups)
 for pdf in groups:

@@ -168,7 +168,7 @@
 
     <div class="foot">
       <span class="nw">万一、誤って届いた場合は、お手数ですが破棄のうえご連絡ください。</span>
-      <div class="via"><span class="cap nw">{{ qr_caption or "このFAXは 1分資料（otpromo.com）で送信しました" }}</span>{{ qr_svg }}</div>
+      <div class="via">{% if qr_caption %}<span class="cap nw">{{ qr_caption }}</span>{% endif %}{{ qr_svg }}</div>
     </div>
   </div>
 
