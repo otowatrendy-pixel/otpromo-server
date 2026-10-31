@@ -7,7 +7,7 @@
 <style>
   /* 売買版。賃貸版 naiken_template.html をほぼそのまま使い、表題・あいさつ・価格の行だけ変える（11/1 本人：物件確認は済んでいる前提、記入は最低限）。
      FAXは白黒（1ビット）になる前提：薄い塗りの上に文字を置かない。色は濃い紺だけ */
-  :root { --ink:#0b2a6b; --line:#0b2a6b; --sub:#3b4a6b; }
+  :root { --ink:#0b2a6b; --line:#0b2a6b; --sub:#0b2a6b; /* 補助の文字も濃紺（薄い色はFAXで網点になり読みにくい） */ }
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: #fff; }
@@ -56,7 +56,7 @@
   .cardwrap { flex: 1; display: flex; align-items: center; justify-content: center; }
 
   /* 名刺：91×55mmを約1.2倍（109×66mm） */
-  .card { width: 109mm; height: 66mm; position: relative; background: #fff; border: 0.35mm solid #8a93a6; box-shadow: 1.2mm 1.2mm 0 0 #2b3550; padding: 6mm 7mm 5mm 9mm; display: flex; flex-direction: column; }
+  .card { width: 112mm; height: 74mm; position: relative; background: #fff; border: 0.35mm solid #8a93a6; box-shadow: 1.2mm 1.2mm 0 0 #2b3550; padding: 6mm 7mm 5mm 9mm; display: flex; flex-direction: column; }
   .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2.2mm; background: var(--ink); }
   .card .shop { font-size: 11pt; font-weight: 900; letter-spacing: .04em; }
   .card .branch { font-size: 8pt; font-weight: 500; margin-top: .4mm; color: var(--sub); }
@@ -64,10 +64,13 @@
   .card .role { font-size: 7.5pt; font-weight: 500; color: var(--sub); }
   .card .name { font-family: "Noto Serif JP", serif; font-size: 21pt; font-weight: 600; letter-spacing: .14em; line-height: 1.25; word-spacing: .3em; margin-top: .5mm; }
   .card .roma { font-size: 7pt; font-weight: 500; letter-spacing: .2em; color: var(--sub); }
-  .card .addr { margin-top: auto; padding-top: 2.4mm; border-top: 0.3mm solid #8a93a6; font-size: 7.3pt; line-height: 1.6; font-weight: 500; }
-  .card .addr .row { display: flex; gap: 3.2mm; }
-  .card .addr b { font-weight: 700; }
-  .card .lic { position: absolute; right: 7mm; top: 6.3mm; font-size: 6.3pt; color: var(--sub); text-align: right; line-height: 1.45; }
+  .card .addr { margin-top: auto; padding-top: 2mm; border-top: 0.3mm solid #8a93a6; font-size: 8pt; line-height: 1.5; font-weight: 500; }
+  /* 連絡先はFAXでつぶれないよう大きく太く（住所はそのまま小さめ）。色は濃紺だけ */
+  .card .tel { margin-top: 1.2mm; font-size: 11pt; font-weight: 700; line-height: 1.45; letter-spacing: .03em; color: #000; } /* 連絡先だけは真っ黒（FAXの白黒変換で網点にならない） */
+  .card .tel .row { display: flex; gap: 5mm; }
+  .card .tel b { display: inline-block; min-width: 9mm; font-size: 8.5pt; font-weight: 700; letter-spacing: 0; }
+  .card .tel .mail { font-size: 10pt; letter-spacing: .01em; }
+  .card .lic { font-size: 7.5pt; color: var(--sub); line-height: 1.4; margin-top: .3mm; }
 
   .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 7.5pt; font-weight: 500; color: var(--sub); }
   .foot .via { display: flex; align-items: center; gap: 2mm; text-align: right; }
@@ -118,7 +121,7 @@
     {% if prop.price %}
     <tr>
       <th>価格</th>
-      <td><span class="nw">{{ prop.price }}</span><span class="s nw">（募集図面に記載の価格）</span></td>
+      <td><span class="nw">{{ prop.price }}</span><span class="s nw">（販売図面に記載の価格）</span></td>
     </tr>
     {% endif %}
     {% if prop.number %}
@@ -141,9 +144,9 @@
     <div class="lbl"><span class="nw">ご案内担当</span></div>
     <div class="cardwrap">
       <div class="card">
-        {% if me.license %}<div class="lic"><span class="nw">{{ me.license }}</span></div>{% endif %}
         <div class="shop nw">{{ me.company }}</div>
         {% if me.branch %}<div class="branch nw">{{ me.branch }}</div>{% endif %}
+        {% if me.license %}<div class="lic nw">{{ me.license }}</div>{% endif %}
         <div class="mid">
           {% if me.role %}<div class="role nw">{{ me.role }}</div>{% endif %}
           <div class="name nw">{{ me.name }}</div>
@@ -151,8 +154,11 @@
         </div>
         <div class="addr">
           <div class="nw">〒{{ me.zip }}　{{ me.address }}</div>
-          <div class="row"><span class="nw"><b>TEL</b> {{ me.tel }}</span><span class="nw"><b>FAX</b> {{ me.fax }}</span>{% if me.mobile %}<span class="nw"><b>携帯</b> {{ me.mobile }}</span>{% endif %}</div>
-          {% if me.email %}<div class="nw"><b>E-mail</b> {{ me.email }}</div>{% endif %}
+        </div>
+        <div class="tel">
+          <div class="row"><span class="nw"><b>TEL</b>{{ me.tel }}</span><span class="nw"><b>FAX</b>{{ me.fax }}</span></div>
+          {% if me.mobile %}<div class="nw"><b>携帯</b>{{ me.mobile }}</div>{% endif %}
+          {% if me.email %}<div class="nw mail"><b>Mail</b>{{ me.email }}</div>{% endif %}
         </div>
       </div>
     </div>
@@ -174,7 +180,19 @@
       co.querySelectorAll('small').forEach(e => e.style.fontSize = (pt * 0.7) + 'pt');
     }
   }
-  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(fitTo);
+  // 名刺の中の行（会社名・メールなど）が枠からはみ出すときは、その行だけ文字を小さくする（元の65%まで）
+  function fitCard() {
+    const card = document.querySelector('.card');
+    if (!card) return;
+    const st = getComputedStyle(card);
+    const inner = card.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
+    card.querySelectorAll('.nw').forEach(el => {
+      const base = parseFloat(getComputedStyle(el).fontSize);
+      let f = base;
+      while (el.scrollWidth > inner + 0.5 && f > base * 0.65) { f -= 0.25; el.style.fontSize = f + 'px'; }
+    });
+  }
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => { fitTo(); fitCard(); });
 </script>
 </body>
 </html>

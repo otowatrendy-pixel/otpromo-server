@@ -4,9 +4,9 @@
 AIへの指示・受け取る型・判定・白塗りの言葉・資料の中身だけを売買用にする。
 賃貸版の core.py・prompt.py・schema.py は変えない。
 
-まだ決まっていないこと（本人の判断待ち。決まったら config で切り替える）：
-- 受ける物件種別（SALE_TYPES）
-- 賃貸版と同じLINEで振り分けるか（route_from_rental を使う）、別のLINEにするか
+決まったこと（10/31本人）：
+- 受ける物件種別は居住用の中古マンション・戸建・土地（SALE_TYPES）。収益・事業用は第2弾
+- 賃貸版とは別の専用LINE・別のサーバー窓口にする（賃貸の図面が届いたら verdict が rental を返す）
 """
 import base64
 import io
@@ -30,9 +30,8 @@ from sale_prompt import SYSTEM, USER
 import sale_schema
 from sale_schema import SaleResult
 
-# 受ける物件種別（カンマ区切り）。本人の決定（物件種別をどこまで入れるか）で絞る
-SALE_TYPES = {t.strip() for t in os.environ.get(
-    "SALE_TYPES", "区分マンション,戸建,土地,収益一棟,収益区分,事業用,その他,不明").split(",") if t.strip()}
+# 受ける物件種別（カンマ区切り）。10/31本人決定：居住用の中古マンション・戸建・土地。収益・事業用は第2弾
+SALE_TYPES = {t.strip() for t in os.environ.get("SALE_TYPES", "区分マンション,戸建,土地").split(",") if t.strip()}
 # 当社（客付）の取引態様。帯に「取引態様：媒介」と載せる（宅建業法34条・表示規約）
 OUR_TORIHIKI = os.environ.get("SALE_OUR_TORIHIKI", "媒介")
 SALE_MOCK_RESULT = os.environ.get("SALE_MOCK_RESULT")  # 見本のJSON。入っていればAIを呼ばない（動作確認用）
@@ -47,6 +46,8 @@ HIDE_EXTRA = re.compile(
     r"レインズ|REINS|R[EＥ]INS|"
     r"広告(転載|掲載)?(可|不可|否|禁止|要承諾|要相談|要確認|NG)|(ネット|チラシ|ポータル|SUUMO|ホームズ|アットホーム)(掲載)?(可|不可|NG)|"
     r"売主[^、,/]{0,24}?(TEL|Tel|tel|電話|☎|FAX|Fax|fax|E-?mail|メール)\s*[:：]?\s*[0-9０-９\-－()（）a-zA-Z@.]{6,}|"
+    r"infosheet|athome|at\s*home|物件番号\s*[:：]?\s*[0-9A-Za-z\-]*|情報公開日\s*[:：]?\s*[0-9./年月日]*|前回公開日\s*[:：]?\s*[0-9./年月日]*|"
+    r"客付(会社|業者)?(さま|様)へ|"
     r"業者様へ|業者間限り|業者限り|業者専用|一般公開不可|未公開|"
     r"専属専任媒介|専任媒介|一般媒介)")
 # 何があっても消さない行（お客様の判断に関わる大切な記載）。AIが業者向けと間違えても消さない
@@ -114,6 +115,9 @@ def analyze(data: bytes) -> dict:
         except ValueError:  # JSONの形が崩れたときは1回だけやり直す
             result, usage = call_claude(jpeg)
     tidy(result)
+    if pages > 1:
+        # 図面の束（Excelで何件分もまとめたPDFなど）。1ページ目だけで作る
+        result.スタッフへの注意.insert(0, f"PDFが{pages}ページありました。1ページ目の物件で資料を作りました。ほかのページの物件は、1件ずつ送ってください。")
     t2 = time.perf_counter()
     fix = "補正なし"
     if not pages:
@@ -155,13 +159,16 @@ def tidy(result: SaleResult) -> None:
     f.選んだ区画 = None  # 利用者が選ぶ欄。AIの答えは使わない
     if len(f.区画が複数) < 2:
         f.区画が複数 = []
+    # 「7,080万円（税込）より」「3,980万円～4,280万円」のような価格は、棟・区画で変わるので計算に使わない
+    if re.search(r"より|から|[~～〜]", unicodedata.normalize("NFKC", f.価格.記載 or "").replace("~", "～")) and not f.区画が複数:
+        f.価格.金額円 = None
     # 取引が「不明」でも、価格が読めて賃料がない図面は売買として扱う
     if f.取引 == "不明" and (f.価格.金額円 or f.価格.記載):
         f.取引 = "売買"
     # お客様の判断に関わる記載は白で消さない
     result.帯の外の業者向け情報 = protect_list(result.帯の外の業者向け情報)
     # 売主の連絡先は、AIが業者向け情報に入れ忘れても白で消す（お客様との連絡は当社が間に入る）
-    for c in f.売主_連絡先:
+    for c in list(f.売主_連絡先) + ([f.物件番号] if f.物件番号 else []):
         if c and c not in result.帯の外の業者向け情報:
             result.帯の外の業者向け情報.append(c)
     # 管理費・修繕積立金の消費税を「要確認」にしていたら直す（管理組合に払うもので課税されない）
@@ -202,6 +209,13 @@ def notes(f) -> list:
     y = built_year(f.築年月)
     if y and y <= 1981 and f.物件種別 != "土地":
         out.append("築年が1981年（昭和56年）以前です。新しい耐震基準かどうかは建築確認の日付で決まるため、確認してください。住宅ローン控除や税の軽減で、耐震の証明が要る場合があります。")
+    if f.価格.金額円 is None and f.価格.記載 and not f.区画が複数:
+        out.append(f"価格が「{f.価格.記載}」で、棟・区画によって変わります。ご案内する棟・区画の価格を元付業者に確認してから概算書を作ってください。")
+    if f.評価額_土地.金額円 or f.評価額_建物.金額円:
+        if f.評価額_年度:
+            out.append(f"固定資産税評価額は、販売図面の{f.評価額_年度}の額で計算しています（評価替えは2027年度です）。")
+        if f.物件種別 in ("区分マンション", "収益区分") and f.評価額_土地.金額円 and f.評価額_土地は持分 is not True:
+            out.append("土地の評価額が、敷地全体の額か、この部屋の持分の額かわかりません。登記費用の計算には使っていません。持分の額を元付業者に確認してください。")
     if f.区画が複数:
         out.append("区画・号棟ごとに価格が分かれています。概算書はご案内する区画を選んでから作ります。")
     if f.表面利回り:
@@ -289,6 +303,9 @@ def cost_inputs(f) -> dict:
         "shuzen_kikin": f.修繕積立基金.金額円,
         "kanri_junbikin": f.管理準備金.金額円,
         "annual_property_tax": _yen(f.固定資産税_都市計画税),
+        # 区分マンションで、土地の評価額が持分の額とはっきりしないときは使わない（敷地全体の額だと登記費用が何十倍にもなる）
+        "land_eval": f.評価額_土地.金額円 if (kind != "mansion" or f.評価額_土地は持分 is True) else None,
+        "bldg_eval": f.評価額_建物.金額円,
         "choki_yuryo": "長期優良" in certified,
         "teitanso": "低炭素" in certified,
         "kaitori_saihan": bool(f.買取再販),
@@ -343,13 +360,6 @@ def verdict(result: SaleResult) -> str:
     if f.物件種別 not in SALE_TYPES:
         return "unsupported"
     return "ok"
-
-
-def route_from_rental(rental_result) -> bool:
-    """賃貸版と同じLINEで受けるとき用：賃貸版の読み取りで「賃貸以外」となった図面を、売買版でもう一度読むか。
-    （賃貸の図面には余分なAIの呼び出しをしない。売買の図面だけ1回多く呼ぶ＝約4〜6円）"""
-    f = rental_result.事実
-    return f.資料の種類 == "マイソク" and f.取引 == "賃貸以外"
 
 
 # ---- 帯替え・白塗り・資料 -----------------------------------------------------------------
