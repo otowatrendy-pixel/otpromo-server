@@ -378,7 +378,10 @@ def page_text(data: bytes, img, pages: int) -> str:
             r = subprocess.run(["pdftotext", "-l", "1", "-layout", str(src), "-"], capture_output=True, timeout=30)
             parts.append(r.stdout.decode("utf-8", "ignore"))
         # 文字データが十分にあるPDFは、文字認識を省く（数秒かかるため）
-        if len(re.sub(r"\s", "", parts[0])) >= 300:
+        # （文字化けしたPDF＝独自の文字の割り当ての図面は、文字データを信用せず文字認識も使う）
+        body = re.sub(r"\s", "", parts[0])
+        normal = len(re.findall(r"[\u0020-\u007e\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef㎡]", body))
+        if len(body) >= 300 and normal / len(body) >= 0.9:
             return unicodedata.normalize("NFKC", parts[0])
     im = img.convert("RGB")
     if max(im.size) > 2400:
