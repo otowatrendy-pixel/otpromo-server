@@ -481,6 +481,9 @@ def on_postback(c, data):
         return c.send(texts.build("sale_fax_start"))
     if k == "lsim" and sale_bot.on(c):  # この資料だけ、住宅ローンの条件を変えて作り直す
         return sale_bot.lsim_ask(c, v.partition("doc=")[2] or c.u.get("last_job"))
+    if k == "hand" and sale_bot.on(c):  # この資料だけ、決済日（引渡日）を変えて作り直す
+        jid = v.partition("doc=")[2] or c.u.get("sale_eval_job") or c.u.get("last_job")
+        return sale_bot.hand_reset(c, jid) if v.startswith("reset") else sale_bot.hand_ask(c, jid)
     if k == "eval" and sale_bot.on(c):
         store.update_user(c.uid, {"sale_edit": "eval", "sale_eval_job": v.partition("doc=")[2] or c.u.get("last_job")})
         return c.send(texts.build("sale_eval_ask"))
@@ -517,7 +520,7 @@ def on_postback(c, data):
     if k == "cancel":
         if naiken_bot.active(c.u):
             return naiken_bot.cancel(c)
-        store.update_user(c.uid, {"pending": None})
+        store.update_user(c.uid, {"pending": None, **({"sale_edit": None, "sale_eval_job": None} if c.u.get("sale_edit") else {})})
         return c.send(line.text("かしこまりました。またいつでもお送りください。"))
 
 

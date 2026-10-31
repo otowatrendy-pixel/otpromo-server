@@ -9,11 +9,12 @@ SALE_ENABLED=0（初期値・本番）のあいだは、bot.py から呼ばれ�
 
 文面は messages_sale.json（ID は sale_ で始まる）。
 """
+import inspect
 import io
 import logging
 import re
 import unicodedata
-from datetime import timedelta
+from datetime import date, timedelta
 
 import config
 import line
@@ -38,7 +39,7 @@ try:
     from sale_estimate import LOAN_DEFAULTS as DEFAULT_LOAN
 except ImportError:  # 概算書のモジュールが無い環境（テスト用の最小構成など）
     DEFAULT_LOAN = {"use": True, "show": True, "type": "hendo", "rates": {"hendo": 1.2, "kotei_kikan": 3.7, "zenki_kotei": 3.6},
-                    "kotei_years": 10, "years": 35, "amount_mode": "ratio", "ratio": 1.0, "amount": None, "compare": False}
+                    "kotei_years": 10, "years": 35, "amount_mode": "ratio", "ratio": 0.9, "amount": None, "compare": False}
 FEE_NAMES = {"max": "上限どおり（価格×3%＋6万円・税別）", "half": "上限の半額", "free": "無料", "custom": "定額"}
 
 
@@ -339,7 +340,7 @@ def resume_after_setup(c):
 FONT_DIR = str(__import__("pathlib").Path(__file__).parent / "fonts" / "noto-sans-jp-ttf")
 
 
-def estimate_html(company, evals=None, loan_override=None, calib=None):
+def estimate_html(company, evals=None, loan_override=None, calib=None, handover=None, drawing_day=None):
     """購入諸費用の概算書（A4 1枚のHTML）を作る関数を返す。sale_core.render_documents の estimate_html に渡す。
     evals はスタッフが送った評価額 {"land_eval", "bldg_eval", ...}（なければ価格から推計）。
     スタッフ向けの確認事項は、返した関数の .notes に入る（お客様向けPDFには出さず、社内向けの注意へ）。"""
@@ -361,9 +362,14 @@ def estimate_html(company, evals=None, loan_override=None, calib=None):
         facts = sale_core.cost_inputs(f)
         if facts and facts.get("address"):
             facts["land_calib"] = (calib or calib_factor)(facts["address"])
+        # 決済日（引渡日）：スタッフが8桁で送った日があればそれ（確定）。なければ図面を送った日の翌々月1日（仮）
+        kw = {"handover_day": handover} if handover else {}
+        params = inspect.signature(sale_estimate.make_estimate).parameters
+        if not handover and "drawing_day" in params:  # 仮の決済日の決め方は計算側が持つ（図面を送った日を渡すだけ）
+            kw["drawing_day"] = drawing_day or today_jst()
         out = sale_estimate.make_estimate(co, facts, evals, customer=co.get("宛名") or "",
                                           property_name=name, band=band, font_dir=FONT_DIR,
-                                          loan_override=loan_override or None)
+                                          loan_override=loan_override or None, **kw)
         build.notes[:] = list(out.get("staff_notes") or [])
         return out["html"]
     build.notes = []
@@ -557,8 +563,8 @@ def loan_postback(c, v):
     if v == "amount":
         c.send(texts.build("sale_loan_amount"))
         return True
-    if v in ("full", "plus_costs"):
-        _save_loan(c, amount_mode="price_plus_costs" if v == "plus_costs" else "ratio", ratio=1.0)
+    if v in ("full", "plus_costs", "r90"):
+        _save_loan(c, amount_mode="price_plus_costs" if v == "plus_costs" else "ratio", ratio=0.9 if v == "r90" else 1.0)
         return loan_menu(c, texts.build("sale_edit_done", 項目="借入額の決め方"))
     return False
 
@@ -646,6 +652,8 @@ def edit_text(c, t):
         return loan_settings_text(c, s)
     elif mode == "lsim":
         return lsim_text(c, s)
+    elif mode == "hand":
+        return hand_text(c, s)
     store.update_user(c.uid, {"sale_edit": None})
     c.send(texts.build("sale_edit_done", 項目="司法書士報酬の目安"))
     return True
@@ -673,7 +681,7 @@ def parse_evals(s):
     return out
 
 
-def rerender(c, jid, evals=None, loan_override=None):
+def rerender(c, jid, evals=None, loan_override=None, handover=None):
     """預かっている図面と読み取り結果で、概算書を作り直す（AIは使わない・件数に数えない）。
     これまでに送られた評価額・ローンの条件は残し、新しく送られた方で上書きする。お客様向けPDFのURLを返す（できなければ None）。"""
     import bot
@@ -689,7 +697,9 @@ def rerender(c, jid, evals=None, loan_override=None):
     if (job.get("loan") or {}).get("use") is False and loan_override and "use" not in loan_override \
             and set(loan_override) - {"show", "compare"}:
         lo["use"] = True  # 「ローンなし」の後に条件を送られたら、ローンを使う前提に戻す
-    est = estimate_html(c.u.get("company") or {}, ev or None, lo)
+    hd = handover if handover is not None else job.get("handover")  # "" は仮に戻す
+    hd = date.fromisoformat(hd) if hd else None
+    est = estimate_html(c.u.get("company") or {}, ev or None, lo, handover=hd, drawing_day=job_day(job))
     if est is None:
         return None
     company = {**bot.company_for_render(c.uid, c.u), "宛名": job.get("宛名") or ""}
@@ -697,7 +707,7 @@ def rerender(c, jid, evals=None, loan_override=None):
     out = sale_core.render_documents(company, Image.open(io.BytesIO(page)).convert("RGB"), r,
                                      job.get("pages") or 0, job.get("log") or {}, estimate_html=est)
     store.save_files(jid, out)
-    store.update_job(jid, {"evals": ev, "loan": lo})
+    store.update_job(jid, {"evals": ev, "loan": lo, "handover": hd.isoformat() if hd else None})
     if evals and evals.get("land_eval"):
         record_calibration(jid, r, int(evals["land_eval"]))
     return store.pdf_urls(jid, store.get_job(jid))[0]
@@ -740,4 +750,75 @@ def lsim_text(c, s):
         c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
         return True
     c.send(texts.build("sale_lsim_done", お客様向けリンク=url))
+    return True
+
+
+# ---------- 決済日（引渡日）：この資料だけ変えて作り直す ----------------------------------------
+
+def today_jst():
+    return store.now().astimezone(store.JST).date()
+
+
+def job_day(job):
+    """図面を送った日（日本時間）。"""
+    t = (job or {}).get("created_at")
+    return t.astimezone(store.JST).date() if hasattr(t, "astimezone") else today_jst()
+
+
+def tentative_handover(d):
+    """図面を送った日の翌々月1日（仮の決済日）。11月→1月、12月→2月。"""
+    return date(d.year + (d.month + 1) // 12, (d.month + 1) % 12 + 1, 1)
+
+
+def parse_day(s, today=None):
+    """「20270301」「2027/3/1」「2027年3月1日」を日付に。今日より前・2年より先は受け付けない。"""
+    s = unicodedata.normalize("NFKC", s or "")
+    m = re.search(r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)", s) or \
+        re.search(r"(20\d{2})\s*[年/.\-]\s*(\d{1,2})\s*[月/.\-]\s*(\d{1,2})", s)
+    if not m:
+        return None
+    try:
+        d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+    today = today or today_jst()
+    return d if today <= d <= today + timedelta(days=730) else None
+
+
+def day_label(d):
+    return f"{d.year}年{d.month}月{d.day}日（{'月火水木金土日'[d.weekday()]}）"
+
+
+def hand_ask(c, jid):
+    store.update_user(c.uid, {"sale_edit": "hand", "sale_eval_job": jid})
+    job = store.get_job(jid) or {}
+    now = day_label(date.fromisoformat(job["handover"])) if job.get("handover") else \
+        day_label(tentative_handover(job_day(job))) + "（仮：図面を送った日の翌々月1日）"
+    return c.send(texts.build("sale_hand_ask", 今の決済日=now, drop=() if job.get("handover") else ("postback hand=reset",)))
+
+
+def hand_text(c, s):
+    d = parse_day(s)
+    if not d:
+        if re.search(r"\d{6,}|年|/", s):
+            c.send(texts.build("sale_hand_bad"))
+            return True
+        return False
+    return _hand_rerender(c, d.isoformat(), day_label(d))
+
+
+def hand_reset(c, jid):
+    store.update_user(c.uid, {"sale_eval_job": jid})
+    job = store.get_job(jid) or {}
+    return _hand_rerender(c, "", day_label(tentative_handover(job_day(job))) + "（仮）")
+
+
+def _hand_rerender(c, iso, label):
+    jid = c.u.get("sale_eval_job")
+    store.update_user(c.uid, {"sale_edit": None, "sale_eval_job": None})
+    url = rerender(c, jid, handover=iso)
+    if not url:
+        c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、募集図面から送ってください。"))
+        return True
+    c.send(texts.build("sale_hand_done", 決済日=label, お客様向けリンク=url))
     return True

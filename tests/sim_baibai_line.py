@@ -196,6 +196,10 @@ assert s["shihoshoshi_transfer"] == 77000 and s["shihoshoshi_mortgage"] == 50000
 out = pb(A, "edit=loan")
 assert "変動金利：1.2%" in out and "固定期間選択（10年）：3.7%" in out and "全期間固定：3.6%" in out and "付けない" in out, out
 assert "3タイプを並べる" in out and "1つだけ載せる" not in out
+out = pb(A, "loan=amount")
+assert "物件価格の90%" in out
+out = pb(A, "loan=r90")
+assert u_of(A)["company"]["売買ローン目安"]["ratio"] == 0.9 and "物件価格の90%" in out, out
 out = pb(A, "loan=cmp_on")
 assert u_of(A)["company"]["売買ローン目安"]["compare"] is True and "1つだけ載せる" in out
 pb(A, "loan=type")
@@ -283,6 +287,33 @@ out = pb(B, f"lsim=ask&doc={jidB}")
 assert "使わない前提" in out, out
 text(B, "変動 1.0%")  # 条件を送り直したら、ローンを使う前提に戻る
 assert store.get_job(jidB)["loan"]["use"] is True and store.get_job(jidB)["loan"]["type"] == "hendo"
+
+# 決済日（引渡日）：初めは図面を送った日の翌々月1日（仮）。8桁で送るとこの資料だけ作り直す
+from datetime import date as _d
+assert sale_bot.tentative_handover(_d(2026, 10, 31)) == _d(2026, 12, 1)
+assert sale_bot.tentative_handover(_d(2026, 11, 5)) == _d(2027, 1, 1)
+assert sale_bot.tentative_handover(_d(2026, 12, 31)) == _d(2027, 2, 1)
+assert sale_bot.parse_day("２０２７０３０１", today=_d(2026, 10, 31)) == _d(2027, 3, 1)
+assert sale_bot.parse_day("2027年3月1日", today=_d(2026, 10, 31)) == _d(2027, 3, 1)
+assert sale_bot.parse_day("20260101", today=_d(2026, 10, 31)) is None and sale_bot.parse_day("20270230", today=_d(2026, 10, 31)) is None
+out = pb(B, f"hand=ask&doc={jidB}")
+assert "（仮：図面を送った日の翌々月1日）" in out and "仮の日に戻す" not in out, out
+out = text(B, "20200101")
+assert "読み取れませんでした" in out, out
+d8 = sale_bot.today_jst() + __import__("datetime").timedelta(days=100)
+out = text(B, d8.strftime("%Y%m%d"))
+assert "作り直しました" in out and f"{d8.month}月{d8.day}日" in out, out
+assert store.get_job(jidB)["handover"] == d8.isoformat()
+t4 = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jidB}/okyaku.pdf"))).pages))
+assert f"{d8.month}月{d8.day}日" in t4 or d8.strftime("%Y/%m/%d") in t4 or f"{d8.year}年{d8.month}月{d8.day}日" in t4, [l for l in t4.splitlines() if "日" in l][:20]
+out = pb(B, f"hand=ask&doc={jidB}")
+assert "仮の日に戻す" in out
+out = pb(B, "hand=reset")
+assert "（仮）" in out and store.get_job(jidB)["handover"] is None, out
+pb(B, f"hand=ask&doc={jidB}")
+pb(B, "cancel")
+assert not u_of(B).get("sale_edit")
+assert store.quota(u_of(B))["remaining"] == before
 
 # 実際の評価額を送ると、補正の記録が1件残る（土地面積が分かるときだけ）。係数は3件たまるまで1.0
 import calibration
