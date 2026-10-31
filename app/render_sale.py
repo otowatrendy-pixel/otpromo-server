@@ -129,8 +129,10 @@ ul.notes {{ margin: 2.6mm 0 0; padding-left: 4.5mm; font-size: 7.8pt; color: #3c
 ul.notes li {{ margin: .3mm 0; }}
 .band {{ position: absolute; left: 0; right: 0; bottom: 0; background: var(--blue); color: #fff; padding: 3mm 13mm; display: flex; justify-content: space-between; align-items: center; }}
 .band .co {{ font-size: 12pt; font-weight: 700; }}
+.nw {{ white-space: nowrap; display: inline-block; }}
 .band .meta {{ font-size: 7.8pt; line-height: 1.55; }}
-.band .tan {{ text-align: right; font-size: 9pt; line-height: 1.5; }}
+.band > div:first-child {{ min-width: 0; flex: 1 1 auto; padding-right: 5mm; }}
+.band .tan {{ text-align: right; font-size: 9pt; line-height: 1.5; white-space: nowrap; flex: 0 0 auto; }}
 .band .tan b {{ font-size: 11pt; }}
 </style></head>
 <body><div class="page">
@@ -167,8 +169,8 @@ ul.notes li {{ margin: .3mm 0; }}
   <ul class="notes">{"".join(f"<li>{html.escape(n)}</li>" for n in notes)}</ul>
 
   <div class="band">
-    <div><div class="co">{html.escape(company["name"])}</div>
-      <div class="meta">{html.escape(company["license"])}<br>{html.escape(company["address"])}　TEL {html.escape(company["tel"])}</div></div>
-    <div class="tan">担当 <b>{html.escape(company["staff"])}</b><br>携帯 {html.escape(company["mobile"])}</div>
+    <div><div class="co">{html.escape(company.get("name", ""))}</div>
+      <div class="meta">{"　".join(f'<span class="nw">{html.escape(x)}</span>' for x in company.get("license", "").split("　") if x)}<br>{html.escape(company.get("address", ""))}　TEL {html.escape(company.get("tel", ""))}</div></div>
+    <div class="tan">担当 <b>{html.escape(company.get("staff", ""))}</b>{("<br>携帯 " + html.escape(company["mobile"])) if company.get("mobile") else ""}</div>
   </div>
 </div></body></html>"""
