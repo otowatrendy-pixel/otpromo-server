@@ -129,6 +129,9 @@ def analyze(data: bytes) -> dict:
     t3 = time.perf_counter()
     log = {"種類": "売買", "秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "秒_写真補正": round(t3 - t2, 2),
            "写真の補正": fix, "モデル": config.MODEL, **usage}
+    if "原価_円" in usage:  # 日報の「1件あたりのAI原価」（平均・最大）。20円を超えたら知らせる
+        import usage as _usage
+        _usage.note_doc_cost(usage["原価_円"])
     return {"img": img, "pages": pages, "result": result, "log": log}
 
 

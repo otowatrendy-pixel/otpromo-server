@@ -55,6 +55,43 @@ def count(kind, n=1):
         log.exception("通数を数えられませんでした %s", kind)
 
 
+# 売買版：1件あたりのAI原価（10/31本人OK）。料金の試算は1件15円、使い放題は1件約34円を超えると赤字
+DOC_COST_WARN_YEN = float(config.env("DOC_COST_WARN_YEN", "20"))
+
+
+def note_doc_cost(yen):
+    """読み取り1件ぶんのAI原価（円）を、日ごと・月ごとの件数・合計・最大に足す。失敗しても資料づくりは止めない。"""
+    try:
+        yen = float(yen)
+        for doc in ("usage_d_" + _day(), "usage_m_" + _month()):
+            store.db().incr("meta", doc, {"doc_ai_n": 1, "doc_ai_yen": round(yen, 2)})
+            if yen > _get(doc).get("doc_ai_max", 0):
+                store.db().set("meta", doc, {"doc_ai_max": round(yen, 2)}, merge=True)
+    except Exception:
+        log.exception("1件あたりのAI原価を数えられませんでした")
+
+
+def doc_cost(d):
+    """{"n", "avg", "max"}（件数が0なら avg・max は None）。"""
+    n = d.get("doc_ai_n", 0)
+    return {"n": n, "avg": round(d.get("doc_ai_yen", 0) / n, 1) if n else None,
+            "max": round(d.get("doc_ai_max", 0), 1) if n else None}
+
+
+def _doc_cost_lines():
+    """日報の行（売買版だけ）。昨日の平均か最大が DOC_COST_WARN_YEN を超えたら、別に【至急】で知らせる。"""
+    y = doc_cost(_get("usage_d_" + _day(store.now() - timedelta(days=1))))
+    m = doc_cost(_get("usage_m_" + _month()))
+    fmt = lambda c: f"平均{c['avg']:.1f}円・最大{c['max']:.1f}円（{c['n']}件）" if c["n"] else "読み取りなし"
+    text = f"■1件あたりのAI原価（目安{DOC_COST_WARN_YEN:g}円まで）\n昨日：{fmt(y)}\n今月：{fmt(m)}\n"
+    over = [f"{k}{v:.1f}円" for k, v in (("平均", y["avg"]), ("最大", y["max"])) if v is not None and v > DOC_COST_WARN_YEN]
+    if over:
+        alert_once("doc_cost", f"1件あたりのAI原価が{DOC_COST_WARN_YEN:g}円を超えました",
+                   f"昨日の読み取り{y['n']}件のうち、{'・'.join(over)}でした（目安{DOC_COST_WARN_YEN:g}円）。\n"
+                   f"料金の試算は1件15円です。使い放題プランは、1件約34円を超えると赤字になります。\n今月：{fmt(m)}")
+    return text
+
+
 def _get(doc):
     return store.db().get("meta", doc) or {}
 
@@ -275,10 +312,11 @@ def daily_report():
             f"使い放題 月払い{us['paid']['unlimited_month']}・年払い{us['paid']['unlimited_year']}）\n"
             f"お試し中：{us['trial']}人\n今月の新規登録：{us['new_this_month']}人\n今月の解約：{us['ended_this_month']}人\n\n"
             f"{_growth_lines()}\n\n"
+            + (_doc_cost_lines() + "\n" if config.APP_MODE == "sale" else "") +
             f"■上限で送れずにためているLINEのお知らせ：{p['held_now'] if p['held_now'] is not None else '－'}件\n"
             f"■メールが送れずLINEで代わりに届けた件数：昨日{ml['fallback_to_line_yesterday']}件（今月{ml['fallback_to_line_month']}件）\n")
     import delivery
-    delivery.send_notice(ADMIN_MAIL, "【1分資料 日報】", text)
+    delivery.send_notice(ADMIN_MAIL, "【1分資料 売買版 日報】" if config.APP_MODE == "sale" else "【1分資料 日報】", text)
     return s
 
 

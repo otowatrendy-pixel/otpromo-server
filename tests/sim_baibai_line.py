@@ -512,6 +512,23 @@ _rq.post = _post
 assert _sent["messages"][0]["text"] == "販売図面を送ってください", _sent
 assert "x=募集図面" in _json.dumps(_sent, ensure_ascii=False)  # postback の data は変えない
 check_stripe_split("sale")
+# 日報の「1件あたりのAI原価」：平均・最大を出し、20円を超えたら【至急】で知らせる
+import usage
+from datetime import timedelta as _td
+yday = "usage_d_" + usage._day(store.now() - _td(days=1))
+store.db().set("meta", yday, {"doc_ai_n": 4, "doc_ai_yen": 60.0, "doc_ai_max": 22.5})
+before_n = usage._get("usage_m_" + usage._month()).get("doc_ai_n", 0)
+usage.note_doc_cost(12.34); usage.note_doc_cost(18.0)
+mm = usage._get("usage_m_" + usage._month())
+assert mm["doc_ai_n"] == before_n + 2 and mm["doc_ai_max"] >= 18.0
+alerts = []
+_na = usage.notify_admin
+usage.notify_admin = lambda subj, body: alerts.append((subj, body))
+lines = usage._doc_cost_lines()
+usage.notify_admin = _na
+assert "昨日：平均15.0円・最大22.5円（4件）" in lines, lines
+assert len(alerts) == 1 and "20円を超えました" in alerts[0][0] and "最大22.5円" in alerts[0][1] and "平均" not in alerts[0][1].split("でした")[0], alerts
+print(lines)
 import texts
 import json as _j; ps = _j.dumps(texts.build("plan_show", urls={}), ensure_ascii=False)
 assert "月額2,480円" in ps and "年額24,800円" in ps and "月額4,280円" in ps and "年額42,800円" in ps and "1,480" not in ps, ps
