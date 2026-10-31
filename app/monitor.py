@@ -97,7 +97,7 @@ def card_url(uid):
 def card_checkout(uid):
     s = billing._stripe()
     u = store.get_user(uid)
-    sess = s.checkout.Session.create(
+    sess = billing.create_checkout(s, 
         mode="setup", customer=u["stripe_customer"], currency="jpy", payment_method_types=["card"],
         client_reference_id=uid, metadata={"uid": uid, "purpose": "monitor_card"}, locale="ja",
         success_url=f"{config.BASE_URL}/paid?t={billing.sign(uid)}", cancel_url=f"{config.BASE_URL}/canceled")

@@ -122,6 +122,42 @@ def u_of(line_uid):
     return store.user_by_line(line_uid)[1]
 
 
+
+def check_stripe_split(mode):
+    """同じStripeアカウント・同じuidでも、もう一方（賃貸版／売買版）の通知でプランを上書きしない（11/1 セット割スレッドの指摘）。"""
+    import billing
+    uid = "Lsplit"
+    store.db().set("users", uid, {"plan": "light", "plan_source": "stripe", "stripe_customer": "cus_mine"})
+    other = "sale" if mode == "rent" else "rent"
+    def sub(app, cus):
+        md = {"uid": uid, **({"app": "sale"} if app == "sale" else {})}
+        return {"id": "sub_x", "customer": cus, "status": "canceled", "metadata": md,
+                "items": {"data": [{"price": {"id": "price_x"}}]}}
+    # もう一方の契約（解約）が届いても、こちらは light のまま
+    assert billing.sync_subscription(sub(other, "cus_other")) == (None, None, None)
+    assert store.get_user(uid)["plan"] == "light" and store.get_user(uid)["stripe_customer"] == "cus_mine"
+    # Webhook の入口でも捨てる
+    ev = {"id": "evt_split_" + mode, "type": "customer.subscription.deleted", "data": {"object": sub(other, "cus_other")}}
+    _s = billing._stripe
+    billing._stripe = lambda: SimpleNamespace(Webhook=SimpleNamespace(construct_event=lambda *a: ev))
+    try:
+        assert billing.handle_webhook(b"{}", "sig") == []
+    finally:
+        billing._stripe = _s
+    assert store.get_user(uid)["plan"] == "light"
+    # 自分の分は今までどおり反映（解約で free）
+    assert billing.sync_subscription(sub(mode, "cus_mine"))[0] == uid and store.get_user(uid)["plan"] == "free"
+    # Checkout：売買版だけ app=sale を付ける。賃貸版は何も変えない
+    got = {}
+    fake = SimpleNamespace(checkout=SimpleNamespace(Session=SimpleNamespace(create=lambda **kw: got.update(kw) or {"url": "u"})))
+    billing.create_checkout(fake, mode="subscription", metadata={"uid": uid}, subscription_data={"metadata": {"uid": uid}})
+    if mode == "sale":
+        assert got["metadata"] == {"uid": uid, "app": "sale"} and got["subscription_data"]["metadata"] == {"uid": uid, "app": "sale"}
+    else:
+        assert got["metadata"] == {"uid": uid} and got["subscription_data"] == {"metadata": {"uid": uid}}
+    print(f"Stripeの通知の見分け（{mode}）OK")
+
+
 if OFF:
     # 5) SALE_ENABLED=0：賃貸版と同じ。登録の最初は会社名、売買の図面は断る
     U = "Uoff"
@@ -133,6 +169,7 @@ if OFF:
     out = image(U)
     assert "賃貸物件専門" in out, out
     assert AI_CALLS["sale"] == 0
+    check_stripe_split("rent")
     print("\nOFF: 賃貸版のまま OK")
     sys.exit(0)
 
@@ -444,6 +481,7 @@ _REAL_REPLY("tok", [line.text("募集図面を送ってください", quick=[lin
 _rq.post = _post
 assert _sent["messages"][0]["text"] == "販売図面を送ってください", _sent
 assert "x=募集図面" in _json.dumps(_sent, ensure_ascii=False)  # postback の data は変えない
+check_stripe_split("sale")
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})
 assert r.returncode == 0

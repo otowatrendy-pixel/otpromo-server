@@ -241,7 +241,7 @@ def checkout_url(uid):
         params["customer"] = u["stripe_customer"]
     elif (u.get("delivery") or {}).get("email"):
         params["customer_email"] = u["delivery"]["email"]
-    return billing.plain(s.checkout.Session.create(**params))["url"]
+    return billing.plain(billing.create_checkout(s, **params))["url"]
 
 
 def on_paid(obj):

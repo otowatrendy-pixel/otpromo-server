@@ -16,6 +16,33 @@ log = logging.getLogger("billing")
 PLAN_NAMES = {"free": "無料お試し", "light": "ライトプラン", "unlimited": "使い放題プラン"}
 
 
+
+# ---------- 賃貸版と売買版の見分け（同じStripeアカウント・同じLINEプロバイダーで動かすため） ----------
+# 売買版（APP_MODE=sale）が作る Checkout・契約には metadata.app="sale" を付ける。賃貸版は何も付けない（今までと同じ）。
+# 通知（Webhook）は両方のサーバーに届くので、それぞれ自分の分だけを扱う。付いていないものは賃貸版の分とみなす。
+APP = "sale" if config.APP_MODE == "sale" else "rent"
+APP_TAG = {"app": "sale"} if APP == "sale" else {}
+
+
+def app_of(obj):
+    return ((obj or {}).get("metadata") or {}).get("app") or "rent"
+
+
+def mine(obj):
+    """この通知・契約が、このサーバー（賃貸版／売買版）の分か。"""
+    return app_of(obj) == APP
+
+
+def create_checkout(s, **params):
+    """Checkout を作る。売買版では metadata と契約の metadata に app="sale" を足す（賃貸版は何も変えない）。"""
+    if APP_TAG:
+        params["metadata"] = {**(params.get("metadata") or {}), **APP_TAG}
+        if params.get("mode") == "subscription":
+            sd = dict(params.get("subscription_data") or {})
+            sd["metadata"] = {**(sd.get("metadata") or {}), **APP_TAG}
+            params["subscription_data"] = sd
+    return s.checkout.Session.create(**params)
+
 def plan_name(u):
     """表示用のプラン名。年払いは「ライトプラン（年払い）」。"""
     n = PLAN_NAMES[u.get("plan") or "free"]
@@ -192,7 +219,7 @@ def fax_pack_checkout(uid):
                   success_url=f"{config.BASE_URL}/paid?t={sign(uid)}", cancel_url=f"{config.BASE_URL}/canceled")
     if u.get("stripe_customer"):
         params["customer"] = u["stripe_customer"]
-    return plain(s.checkout.Session.create(**_invoice_for_payment(params)))["url"]
+    return plain(create_checkout(s, **_invoice_for_payment(params)))["url"]
 
 
 def faxrecv_pack_price():
@@ -221,7 +248,7 @@ def faxrecv_pack_checkout(uid):
                   success_url=f"{config.BASE_URL}/paid?t={sign(uid)}", cancel_url=f"{config.BASE_URL}/canceled")
     if u.get("stripe_customer"):
         params["customer"] = u["stripe_customer"]
-    return plain(s.checkout.Session.create(**_invoice_for_payment(params)))["url"]
+    return plain(create_checkout(s, **_invoice_for_payment(params)))["url"]
 
 
 def pay_url(uid, plan):
@@ -354,7 +381,7 @@ def checkout(uid, plan, yearly=False):
         # 新人さん応援：最初の月だけ半額（1回だけ50%引き）
         params["discounts"] = [{"coupon": newbie_coupon()}]
         params["metadata"]["newbie"] = "1"
-    sess = s.checkout.Session.create(**params)
+    sess = create_checkout(s, **params)
     log.info("checkout %s %s %s %s", uid, plan, "year" if yearly else "month", company)
     return sess.url
 
@@ -511,6 +538,8 @@ def just_canceled(sub, prev):
 def sync_subscription(sub):
     """Stripeの契約内容から、利用者のプラン・期間・FAXオプションを決める。戻り値は (uid, 変更前のプラン, 変更後)。"""
     sub = plain(sub)
+    if not mine(sub):  # もう一方（賃貸版／売買版）の契約。同じ uid でも、こちらのプランを上書きしない
+        return None, None, None
     if (sub.get("metadata") or {}).get("purpose") == "group":
         import campaign
         uid = campaign.sync_group(sub)
@@ -684,6 +713,8 @@ def handle_webhook(payload: bytes, sig: str):
     if not store.first_event("stripe-" + ev["id"]):
         return []
     t, obj = ev["type"], ev["data"]["object"]
+    if t.startswith(("checkout.session.", "customer.subscription.")) and not mine(obj):
+        return []  # もう一方（賃貸版／売買版）の申し込み・契約の通知
     notices = []
     md = obj.get("metadata") or {}
     if t == "checkout.session.completed" and md.get("purpose") == "group":
