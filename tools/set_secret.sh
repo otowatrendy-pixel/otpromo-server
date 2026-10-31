@@ -12,7 +12,11 @@ for name in "${names[@]}"; do
     v=$(printf %s "$v" | tr -d '[:space:]')
     [ -z "$v" ] && continue
     # 何回か貼ってしまったときに気づけるよう、先頭と文字数だけ見せて確かめる
-    read -r -p "  先頭「${v:0:7}…」全${#v}文字。これで登録しますか？（y=はい / n=やり直す）: " ok
+    case "$name" in
+      *PASSWORD*) head="（パスワードは表示しません）" ;;
+      *) head="先頭「${v:0:7}…」" ;;
+    esac
+    read -r -p "  ${head}全${#v}文字。これで登録しますか？（y=はい / n=やり直す）: " ok
     [ "$ok" = y ] && break
   done
   # まだない名前なら、入れ物を作ってサーバーが読めるようにする
