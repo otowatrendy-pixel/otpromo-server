@@ -423,13 +423,13 @@ LAND_LOAN_STAFF = ("土地はローン関連の費用（つなぎ融資・抵当
 def estimate_building_tax(f: SaleFacts, evi) -> tuple[int, float, str]:
     """業者売主で「うち消費税」が分からないときの建物の消費税の推計。(消費税, 建物の割合, 根拠の言い方)
     評価額が分かれば（推計でも）時価に直して按分：土地は評価額÷0.7、建物は評価額÷0.6（建築費の6割程度）。
-    分からなければ マンション50%・戸建て40%。建物の割合は20〜80%に収める。"""
+    分からなければ マンション50%・戸建て40%。建物の割合は10〜80%に収める（古い木造は建物の割合が小さい）。"""
     if evi.land and evi.bldg:
         lm, bm = evi.land / 0.7, evi.bldg / 0.6
         share, how = bm / (lm + bm), "評価額から"
     else:
         share, how = (0.5 if f.property_type == "mansion" else 0.4), "一般的な目安で"
-    share = min(0.8, max(0.2, share))
+    share = min(0.8, max(0.1, share))
     return int(f.price * share * 10 / 110), share, how
 
 
