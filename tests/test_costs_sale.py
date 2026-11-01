@@ -216,3 +216,45 @@ def _t8():
 
 
 _t8()
+
+
+def _t9():
+    """評価額の出し方を選ぶ（①路線価図／②地価公示）・路線価の返信・リンク（2026-11-01）"""
+    import json
+    HERE = os.path.dirname(os.path.abspath(__file__))
+    import evaluation as ev
+    from sale_estimate import eval_question
+    from datetime import date as D
+    p = ev.parse_rosenka_reply
+    assert p("320") == 320_000 and p("320D") == 320_000 and p("３２０Ｃ") == 320_000 and p("路線価 320") == 320_000
+    assert p("32万") == 320_000 and p("320000") == 320_000 and p("320,000円") == 320_000
+    assert p("abc") is None and p("1") is None and p("99999999") is None
+    idx = json.load(open(os.path.join(HERE, "fixtures", "shohiyou", "rosenka_index.json"), encoding="utf-8"))
+    m = ev.rosenka_maps("東京都練馬区貫井2丁目6-8", idx)
+    assert m["found"] and [x["no"] for x in m["maps"]] == ["48063", "48073"]
+    assert m["maps"][0]["pdf"] == "https://www.rosenka.nta.go.jp/main_r08/tokyo/tokyo/prices/pdf/48063.pdf"
+    assert m["town"] == "貫井2丁目"
+    assert ev.rosenka_maps("練馬区貫井二丁目", idx)["found"]
+    m = ev.rosenka_maps("練馬区貫井", idx)          # 丁目なし → 全丁目の図
+    assert m["found"] and len(m["maps"]) == 6
+    m = ev.rosenka_maps("練馬区高野台1丁目", idx)   # 索引にない町 → 一覧ページだけ
+    assert not m["found"] and m["index_page"].endswith("d25401fr.htm")
+    assert ev.rosenka_maps("神奈川県愛甲郡愛川町中津123", idx)["found"]
+    assert not ev.rosenka_maps("大阪市北区梅田1丁目", idx)["found"]
+    # 聞くのは戸建て・土地で評価額がないときだけ
+    land = dict(property_type="land", price=30_000_000, seller_is_business=False, land_area=100.0, address="東京都練馬区貫井2丁目")
+    assert eval_question({}, land) is not None
+    assert eval_question({}, {**land, "land_eval": 20_000_000}) is None
+    assert eval_question({}, land, {"rosenka_per_m2": 320_000}) is None
+    assert eval_question({"売買設定": {"eval_ask": "kouji"}}, land) is None
+    assert eval_question({}, {**land, "property_type": "mansion"}) is None
+    # 路線価を使ったときと地価公示のときで、お客様向けの注意書きが変わる
+    T = D(2026, 11, 1)
+    r = compute(SaleFacts(**land, rosenka_per_m2=320_000), CompanySaleSettings(), today=T)
+    assert any("路線価から推計" in n and "多少ずれる" in n for n in r.notes), r.notes
+    r = compute(SaleFacts(**land), CompanySaleSettings(), today=T)
+    assert any("数割" in n for n in r.notes) or any("物件価格からの推計" in n for n in r.notes), r.notes
+    print("ALL OK 9")
+
+
+_t9()

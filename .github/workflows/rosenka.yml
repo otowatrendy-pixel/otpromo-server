@@ -1,0 +1,35 @@
+# 路線価図の図番の表（町丁目 → 図番）を年1回作り、このブランチに commit する。
+# 国税庁の索引ページの文字（町丁名・図番）だけを使い、地図は取らない。7月の路線価公表後に --year を変えて動かす。
+# 動かし方：.github/rosenka-run.txt を書き換えて push。
+name: rosenka
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/baibai-line]
+    paths: [".github/rosenka-run.txt"]
+permissions:
+  contents: write
+concurrency:
+  group: rosenka
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: build
+        run: cd app && python3 build_rosenka_index.py --year r08 --prefs tokyo/tokyo tokyo/kanagawa kanto/saitama tokyo/chiba --wait 1.0
+      - name: size
+        run: ls -la app/rosenka_index.json
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add app/rosenka_index.json
+          git diff --cached --quiet && { echo "変更なし"; exit 0; }
+          git commit -m "路線価図の図番の表を更新（出典：国税庁ホームページ 財産評価基準書を加工して作成）"
+          git push origin HEAD:${GITHUB_REF_NAME}

@@ -91,6 +91,22 @@ def simulate(amount: int, c: dict) -> list[dict]:
     return out
 
 
+def eval_question(company: dict, facts: dict, evals: Optional[dict] = None) -> Optional[dict]:
+    """図面を読んだ直後に「土地の評価額をどちらで出しますか？」を聞くか。聞かないなら None。
+    聞くのは戸建て・土地で、販売図面にもLINEにも評価額・路線価がなく、会社設定が eval_ask="ask" のとき。
+    マンションは敷地持分が小さく税金への影響がわずかなので聞かない（地価公示から自動で推計）。
+    戻り値 {"rosenka": rosenka_maps(...)}：①を押されたときに送るリンク。found=False なら①は出さない
+    （路線価のない地域）か、index_page（町丁名の一覧）を案内する。"""
+    import evaluation as ev
+    s = settings_from_company(company)
+    if s.eval_ask != "ask" or facts.get("property_type") not in ("house", "land") or facts.get("shakuchi"):
+        return None
+    have = {**facts, **(evals or {})}
+    if any(have.get(k) for k in ("land_eval", "rosenka_per_m2", "kotei_rosenka_per_m2")):
+        return None
+    return {"rosenka": ev.rosenka_maps(facts.get("address"))}
+
+
 def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, customer: str = "",
                   property_name: str = "", band: Optional[dict] = None, contract_day: Optional[date] = None,
                   handover_day: Optional[date] = None, loan_amount: Optional[int] = None,

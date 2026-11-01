@@ -260,3 +260,91 @@ def mansion_land_share(floor_area: float, youseki_pct: Optional[int]) -> Optiona
     if not floor_area or not youseki_pct:
         return None
     return floor_area * MANSION_COMMON_FACTOR / (youseki_pct / 100)
+
+
+# ---------------------------------------------------------------------------
+# 路線価図への案内（2026-11-01 本人OK）
+#   戸建て・土地で評価額が図面にないとき、LINEで「①路線価図で調べる／②近くの地価公示から推計」を聞く。
+#   ①なら物件の町丁目の路線価図（国税庁）へのリンクを送り、スタッフが図の数字（例 320）を返信する。
+#   当社は地図（背景はゼンリンの地図が元）をコピー・保存・配布しない。リンクは国税庁が「自由に設定してよい」としている。
+#   rosenka_index.json は build_rosenka_index.py で年1回（7月の路線価の公表後）作る。
+# ---------------------------------------------------------------------------
+ROSENKA_BASE = "https://www.rosenka.nta.go.jp"
+_ROSENKA_INDEX = None
+
+
+def rosenka_index(path: str = None) -> Optional[dict]:
+    global _ROSENKA_INDEX
+    if path is None and _ROSENKA_INDEX is not None:
+        return _ROSENKA_INDEX
+    p = path or os.path.join(HERE, "rosenka_index.json")
+    idx = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else None
+    if path is None:
+        _ROSENKA_INDEX = idx
+    return idx
+
+
+def _find_city(cities: dict, city: str) -> Optional[dict]:
+    if city in cities:
+        return cities[city]
+    # 郡の町村（「愛甲郡愛川町」→ 索引は「愛川町」）
+    for name, c in cities.items():
+        if city.endswith(name.split("@")[0]) and len(name) >= 2:
+            return c
+    return None
+
+
+def rosenka_maps(address: Optional[str], index: Optional[dict] = None) -> dict:
+    """物件の住所 → 路線価図の案内。
+    {"found": True/False, "maps": [{"no": "48063", "pdf": URL, "page": URL}], "index_page": 町丁名索引のURL,
+     "town": "貫井2丁目", "year": "r08"}
+    町丁目が索引にない（倍率地域など）ときは found=False。index_page は市区町村が分かれば入れる。"""
+    idx = index if index is not None else rosenka_index()
+    out = {"found": False, "maps": [], "index_page": None, "town": None, "year": (idx or {}).get("year")}
+    if not idx or not address:
+        return out
+    city, town, chome = split_address(address)
+    town = re.sub(r"^(大字|字)", "", town or "")
+    c = _find_city(idx["cities"], city)
+    if not c:
+        return out
+    root = f"{ROSENKA_BASE}/main_{idx['year']}/{c['pref']}/prices/"
+    out["index_page"] = root + c["page"]
+    nums = c["towns"].get(f"{town}|{chome}" if chome else f"{town}|")
+    if nums is None and chome is None:
+        # 丁目が分からない → その町の全丁目の図をまとめる
+        nums = []
+        for k, v in c["towns"].items():
+            if k.split("|")[0] == town:
+                nums += [n for n in v if n not in nums]
+        nums = nums or None
+    if nums is None and chome is not None:
+        nums = c["towns"].get(f"{town}|")
+    if not nums:
+        return out
+    out.update(found=True, town=town + (f"{chome}丁目" if chome else ""),
+               maps=[{"no": n, "pdf": f"{root}pdf/{n}.pdf", "page": f"{root}html/{n}f.htm"} for n in nums])
+    return out
+
+
+def parse_rosenka_reply(text: str) -> Optional[int]:
+    """スタッフの返信 → 相続税路線価（円/㎡）。
+    「320」「320D」「３２０Ｃ」「路線価 320」→ 320,000円（路線価図は千円/㎡）。
+    「32万」→ 320,000円。「320000」「320,000円」のように10万以上なら円とみなす。
+    後ろのアルファベット（A〜G）は借地権割合なので使わない。おかしな値は None。"""
+    t = unicodedata.normalize("NFKC", text or "").replace(",", "").replace(" ", "")
+    m = re.search(r"(\d+(?:\.\d+)?)(万)?", t)
+    if not m:
+        return None
+    v = float(m.group(1))
+    if m.group(2):
+        yen = v * 10_000
+    elif v >= 100_000:
+        yen = v
+    else:
+        yen = v * 1_000
+    yen = int(round(yen))
+    # 路線価の最高は銀座で約4,000万円/㎡（2026年）。5千円未満・6,000万円超は打ち間違いとみなす
+    if yen < 5_000 or yen > 60_000_000:
+        return None
+    return yen
