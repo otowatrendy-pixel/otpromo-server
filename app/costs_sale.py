@@ -238,6 +238,7 @@ class CompanySaleSettings:
     fee_rate: Optional[float] = None             # 割合（税抜の物件価格に対する率。2%なら0.02）。消費税を足し、上限額を超えない
     teiren_tokurei: bool = False                 # 800万円以下の物件で低廉な空家等の特例（上限33万円）を使う
     estimate_eval: bool = True                   # 評価額が分からないとき、価格から推計する（False なら要確認）
+    eval_ask: Literal["ask", "kouji"] = "ask"    # 戸建て・土地で評価額が図面にないとき、LINEで「①路線価図で調べる／②地価公示から推計」を聞く。kouji＝いつも②（11/1本人OK）
     shihoshoshi_transfer: int = 77_000           # 司法書士報酬の目安（税込）：所有権移転（立会い・登記原因証明情報込み）。日司連2024アンケート平均＋立会料（本人回答「ネット相場で仮」10/31）
     shihoshoshi_preserve: int = 33_000           # 所有権保存（新築）
     shihoshoshi_mortgage: int = 49_500           # 抵当権設定
@@ -354,6 +355,7 @@ class EvalInfo:
     price_based: bool          # 物件価格からの粗い推計を使った（地価データがなかった）
     labels: list[str]          # スタッフ向けの説明
     land_unit_est: Optional[int] = None   # 推計した土地の1㎡単価（実績との比較・補正の記録に使う）
+    land_method: Optional[str] = None     # 'kotei_rosenka' / 'rosenka' / 'kouji_*' / 'price' / None（評価額が分かっている）
 
 
 def estimate_evals(f: SaleFacts, on: date, data: Optional[ev.LandData] = None) -> EvalInfo:
@@ -401,7 +403,8 @@ def estimate_evals(f: SaleFacts, on: date, data: Optional[ev.LandData] = None) -
             est, price_based = True, True
             labels.append(f"土地 約{land // 10000:,}万円（近くの地価データが使えないため、物件価格からの粗い推計）")
     unit_est = le.unit if (le is not None and not price_based) else None
-    return EvalInfo(land, bldg if f.property_type != "land" else None, est, price_based, labels, unit_est)
+    method = "price" if price_based else (le.method if le is not None else None)
+    return EvalInfo(land, bldg if f.property_type != "land" else None, est, price_based, labels, unit_est, method)
 
 
 def jutaku_reg_ok(f: SaleFacts, staff: list[str]) -> Optional[bool]:
@@ -612,8 +615,12 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
     if estimated:
         if evi.price_based:
             notes.append("固定資産税評価額が分からないため、登記費用・税金は物件価格からの推計です。実際の評価額で変わります。")
+        elif evi.land_method in ("rosenka", "kotei_rosenka"):
+            notes.append("土地の評価額は路線価から推計しています。土地の形・奥行き・角地などの補正は入れていないため、"
+                         "実際の評価額と多少ずれることがあります。")
         else:
-            notes.append("固定資産税評価額が分からないため、登記費用・税金は近くの地価公示や建物の築年数などからの推計です。実際の評価額で変わります。")
+            notes.append("固定資産税評価額が分からないため、登記費用・税金は近くの地価公示の地点や建物の築年数などからの推計です。"
+                         "地点との場所の違いで、実際の評価額と数割ずれることがあります。正確な額は固定資産税の評価証明書でご確認ください。")
         staff.append("評価額は推計です。" + " ".join(evi.labels) +
                      " 評価証明書や納税通知書の「価格」欄の数字、または路線価をLINEで送っていただければ、その値で作り直します（件数に数えません）。")
     if jutaku is None and f.property_type != "land":
