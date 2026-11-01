@@ -96,7 +96,7 @@ def parse_city_list(html: str) -> list[tuple[str, str]]:
     for row in rows_of(html):
         cells = [(norm(t), l) for t, l in row]
         head = cells[0][0] if cells and not cells[0][1] else ""
-        linked = [(t, l[0]) for t, l in cells if l and re.match(r"^[a-z]\d{5}fr\.htm$", l[0])]
+        linked = [(t, l[0]) for t, l in cells if l and re.match(r"^[a-z][0-9a-z]{5}fr\.htm$", l[0])]
         if not linked:
             only = [t for t, _ in cells if t]
             if len(only) == 1 and only[0].endswith("市"):
@@ -116,7 +116,7 @@ def parse_town_index(html: str) -> dict[str, list[str]]:
     for row in rows_of(html):
         nums, name = [], ""
         for t, links in row:
-            got = [m.group(1) for h in links for m in [re.search(r"html/(\d+)f\.htm$", h)] if m]
+            got = [m.group(1) for h in links for m in [re.search(r"html/([0-9a-z]+)f\.htm$", h)] if m]
             if got:
                 nums += got
             elif norm(t) and not nums:
