@@ -184,7 +184,7 @@
               "action": "postback reg=edit"
             }
           ],
-          "note": "{賃貸の手数料行} は「賃貸の仲介手数料：賃料の1ヶ月分（税別）\\n」か空。売買だけの方には賃貸の行を出さない。取引態様は初期値「媒介」（客付の立場。変更は「登録内容の変更」から）。"
+          "note": "{賃貸の手数料行} は「賃貸の仲介手数料：賃料の1ヶ月分（税別）\\n」か空。売買だけの方には賃貸の行を出さない。取引態様はいつも「媒介」（賃貸版と同じ。2026-11-01本人指示で変更の入口はなし）。"
         },
         {
           "id": "sale_reg_done",
@@ -349,6 +349,10 @@
               "action": "postback hand=ask&doc={資料ID}"
             },
             {
+              "label": "手数料を変える",
+              "action": "postback tq=ask&doc={資料ID}"
+            },
+            {
               "label": "メールにも送る",
               "action": "postback send=mail"
             },
@@ -380,6 +384,10 @@
             {
               "label": "決済日を変える",
               "action": "postback hand=ask&doc={資料ID}"
+            },
+            {
+              "label": "手数料を変える",
+              "action": "postback tq=ask&doc={資料ID}"
             }
           ]
         },
@@ -437,6 +445,69 @@
           "when": "決済日を受け取って、概算書を作り直したとき",
           "send": "reply",
           "text": "決済日を{決済日}にして、購入諸費用の概算書を作り直しました（件数には数えていません）。\n\n▼お客様向け（帯替え図面・住宅ローンシミュレーションと購入諸費用の概算書）\n{お客様向けリンク}"
+        },
+        {
+          "id": "sale_teiren_q",
+          "when": "読み取った価格（税抜）が800万円以下のとき（ローンの質問のあと）／届いた資料の「手数料を変える」",
+          "send": "reply",
+          "text": "この物件は800万円以下のため、仲介手数料の特例（上限33万円・税込）が使えます。概算書の仲介手数料はどうしますか？\n{判定の補足}\n※特例を使うときは、媒介契約の前にお客様への説明と合意が必要です。",
+          "buttons": [
+            {
+              "label": "通常の上限で計算",
+              "action": "postback tq=normal"
+            },
+            {
+              "label": "特例（上限33万円）で計算",
+              "action": "postback tq=tokurei"
+            },
+            {
+              "label": "金額を入力する",
+              "action": "postback tq=amount"
+            },
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
+          ],
+          "note": "会社設定（800万円以下の手数料）が「毎回聞く」のときだけ。図面の直後は「やめる」を出さない（drop）。{判定の補足} は税込表示で消費税が分からないとき「税抜の本体価格が800万円以下かどうか、売主にご確認ください」、届いた資料からは「今の計算：…」も入る。答えは job.teiren。作り直しは件数に数えない。"
+        },
+        {
+          "id": "sale_teiren_amount_ask",
+          "when": "「金額を入力する」を押したとき",
+          "send": "reply",
+          "text": "概算書に載せる仲介手数料（税込）を送ってください。33万円まで入れられます。\n（例：330000 または 30万）",
+          "buttons": [
+            {
+              "label": "通常の上限で計算",
+              "action": "postback tq=normal"
+            },
+            {
+              "label": "特例（上限33万円）で計算",
+              "action": "postback tq=tokurei"
+            }
+          ]
+        },
+        {
+          "id": "sale_teiren_amount_over",
+          "when": "33万円を超える金額が送られたとき",
+          "send": "reply",
+          "text": "{送られた金額}円は、特例の上限（33万円・税込）を超えています。\n33万円までの金額を、もう一度送ってください。\n（例：330000 または 30万）",
+          "buttons": [
+            {
+              "label": "特例（上限33万円）で計算",
+              "action": "postback tq=tokurei"
+            },
+            {
+              "label": "通常の上限で計算",
+              "action": "postback tq=normal"
+            }
+          ]
+        },
+        {
+          "id": "sale_teiren_done",
+          "when": "届いた資料の「手数料を変える」から作り直したとき",
+          "send": "reply",
+          "text": "仲介手数料を「{手数料の扱い}」にして、購入諸費用の概算書を作り直しました（件数には数えていません）。\n\n▼お客様向け（帯替え図面・住宅ローンシミュレーションと購入諸費用の概算書）\n{お客様向けリンク}\n\n※特例を使うときは、媒介契約の前にお客様への説明と合意が必要です。"
         },
         {
           "id": "sale_err_unsupported",
@@ -532,11 +603,7 @@
               "action": "postback edit=assoc"
             },
             {
-              "label": "売買の取引態様",
-              "action": "postback edit=torihiki"
-            },
-            {
-              "label": "800万円以下の特例",
+              "label": "800万円以下の手数料",
               "action": "postback edit=tokurei"
             },
             {
@@ -553,23 +620,6 @@
             }
           ],
           "note": "賃貸版の reg_edit はボタンが上限（13）に近いので、売買版の公開後は reg_edit の「仲介手数料」を「賃貸・売買の設定」（postback edit=deal）に置き換え、この一覧を出す。"
-        },
-        {
-          "id": "sale_edit_torihiki",
-          "when": "「売買の取引態様」を押したとき",
-          "send": "reply",
-          "text": "帯に載せる、御社の取引態様を選んでください。\nお客様（買主様）の側で仲介する場合は「媒介」です。",
-          "buttons": [
-            {
-              "label": "媒介（仲介）",
-              "action": "postback torihiki=媒介"
-            },
-            {
-              "label": "代理",
-              "action": "postback torihiki=代理"
-            }
-          ],
-          "note": "「売主」は選べないようにする（自社が売主の物件は、このサービスの帯替えの対象外）。表示規約では「媒介」と「仲介」は同じ意味の言葉として使える。"
         },
         {
           "id": "sale_edit_nqr",
@@ -590,20 +640,24 @@
         },
         {
           "id": "sale_edit_tokurei",
-          "when": "「800万円以下の特例」を押したとき",
+          "when": "「800万円以下の手数料」を押したとき",
           "send": "reply",
-          "text": "価格が800万円以下の空き家などでは、あらかじめお客様にご説明して合意をいただければ、仲介手数料を最大33万円（税込）まで受け取れる特例があります（2024年7月から）。\n\n概算書で、この特例の金額を使いますか？\n今の設定：{今の設定}",
+          "text": "価格（税抜）が800万円以下の物件では、あらかじめお客様にご説明して合意をいただければ、仲介手数料を最大33万円（税込）まで受け取れる特例があります。\n\n800万円以下の物件の販売図面が届いたとき、概算書の仲介手数料をどうしますか？\n今の設定：{今の設定}\n\n※「毎回聞く」では、図面ごとにLINEでお聞きします。お答えがないまま作るときは、通常の上限で計算します。",
           "buttons": [
             {
-              "label": "使う",
-              "action": "postback tokurei=on"
+              "label": "毎回聞く",
+              "action": "postback tokurei=ask"
             },
             {
-              "label": "使わない",
+              "label": "いつも通常の上限",
               "action": "postback tokurei=off"
+            },
+            {
+              "label": "いつも特例で計算",
+              "action": "postback tokurei=on"
             }
           ],
-          "note": "使うにしても、概算書には「特例の適用にはお客様への事前のご説明と合意が必要です」の注記を入れる（costs_sale.py 側）。"
+          "note": "teiren_ask＝ask（初期値）/normal/tokurei。teiren_tokurei は聞かなかったときの値（tokurei のときだけ True）。特例を使うときは、概算書のスタッフ向け確認事項に「媒介契約の前に、お客様への説明と合意が必要です」が入る（costs_sale.py 側）。"
         },
         {
           "id": "sale_edit_shiho",

@@ -179,3 +179,40 @@ def _t7():
 
 
 _t7()
+
+
+# ---- 8. 800万円以下の特例を物件ごとに指定
+def _t8():
+    from datetime import date as D
+    from costs_sale import SaleFacts, CompanySaleSettings, compute
+    from sale_estimate import make_estimate
+    T = D(2026, 11, 1)
+    land = dict(property_type="land", price=6_000_000, seller_is_business=False, land_area=80.0, land_eval=3_000_000)
+    r = compute(SaleFacts(**land), CompanySaleSettings(), today=T)
+    assert r.teiren_judge == "yes" and r.lines[0].amount == 264_000 and not r.teiren_applied
+    r = compute(SaleFacts(**land), CompanySaleSettings(), today=T, teiren={"mode": "tokurei"})
+    assert r.lines[0].amount == 330_000 and r.teiren_applied and any("合意" in x for x in r.staff_notes)
+    r = compute(SaleFacts(**land), CompanySaleSettings(), today=T, teiren={"mode": "amount", "yen": 300_000})
+    assert r.lines[0].amount == 300_000 and r.teiren_applied
+    r = compute(SaleFacts(**land), CompanySaleSettings(), today=T, teiren={"mode": "amount", "yen": 500_000})
+    assert r.lines[0].amount == 330_000                       # 33万円まで
+    r = compute(SaleFacts(**land), CompanySaleSettings(teiren_tokurei=True), today=T, teiren={"mode": "normal"})
+    assert r.lines[0].amount == 264_000 and not r.teiren_applied   # 物件ごとの指定が会社設定より優先
+    # 税抜で800万円超 → 指定があっても通常
+    big = {**land, "price": 9_000_000}
+    r = compute(SaleFacts(**big), CompanySaleSettings(), today=T, teiren={"mode": "tokurei"})
+    assert r.teiren_judge == "no" and r.lines[0].amount == int(9_000_000 * 0.033 + 66_000) and not r.teiren_applied
+    # 業者売主・消費税不明・税込850万円 → unknown
+    h = dict(property_type="house", price=8_500_000, seller_is_business=True, land_area=60.0, floor_area=60.0,
+             built=D(1995, 1, 1), structure="wood", land_eval=4_000_000, bldg_eval=1_000_000)
+    r = compute(SaleFacts(**h), CompanySaleSettings(), today=T, teiren={"mode": "tokurei"})
+    assert r.teiren_judge == "unknown" and r.teiren_applied and any("確定していません" in x for x in r.staff_notes)
+    # 消費税額が書いてあれば確定
+    r = compute(SaleFacts(**h, price_tax=600_000), CompanySaleSettings(), today=T)
+    assert r.teiren_judge == "yes"
+    o = make_estimate({}, land, today=T, teiren={"mode": "tokurei"})
+    assert o["teiren_judge"] == "yes" and o["teiren_applied"] and "特例" in o["html"]
+    print("ALL OK 8")
+
+
+_t8()

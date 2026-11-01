@@ -271,6 +271,8 @@ class Result:
     total_must: int
     total_loan: int
     total_later_known: int
+    teiren_judge: str = "no"      # 800万円以下（税抜）か：yes / no / unknown（業者売主で消費税が分からず判定できない）
+    teiren_applied: bool = False  # 特例の額で計算したか
 
 
 def with_evals(f: SaleFacts, land_eval: Optional[int] = None, bldg_eval: Optional[int] = None,
@@ -288,15 +290,30 @@ def with_evals(f: SaleFacts, land_eval: Optional[int] = None, bldg_eval: Optiona
 # 計算本体
 # ---------------------------------------------------------------------------
 
-def brokerage_fee(price_ex_tax: int, s: CompanySaleSettings) -> tuple[Optional[int], str]:
-    """仲介手数料（税込）。報酬告示：200万円以下5.5%、200〜400万円4.4%、400万円超3.3%。"""
+TEIREN_NOTE = "800万円以下の物件の特例による額（事前にご説明・ご同意のうえ）"
+TEIREN_MAX = 330_000
+
+
+def brokerage_fee(price_ex_tax: int, s: CompanySaleSettings, teiren: Optional[dict] = None) -> tuple[Optional[int], str]:
+    """仲介手数料（税込）。報酬告示：200万円以下5.5%、200〜400万円4.4%、400万円超3.3%。
+    teiren … 物件ごとの低廉特例の指定 {mode: normal/tokurei/amount, yen}。あれば会社設定 teiren_tokurei より優先。"""
     p = price_ex_tax
     mx = min(p, 2_000_000) * 0.055 + max(0, min(p, 4_000_000) - 2_000_000) * 0.044 + max(0, p - 4_000_000) * 0.033
     mx = int(mx)
     note = ""   # 上限額などの文言は出さない（会社設定で額が変わるため。2026-10-31 本人指示）
+    if teiren and teiren.get("mode") in ("normal", "tokurei", "amount"):
+        mode = teiren["mode"]
+        if mode == "tokurei":
+            return max(mx, TEIREN_MAX), TEIREN_NOTE
+        if mode == "amount":
+            yen = teiren.get("yen")
+            if yen is None:
+                return None, "金額は担当者にご確認ください"
+            return min(int(yen), max(mx, TEIREN_MAX)), TEIREN_NOTE
+        s = CompanySaleSettings(**{**s.__dict__, "teiren_tokurei": False})   # normal：会社設定の特例も使わない
     if s.teiren_tokurei and p <= 8_000_000:
         mx = max(mx, 330_000)
-        note = "800万円以下の物件の特例による額（事前にご説明・ご同意のうえ）"
+        note = TEIREN_NOTE
     if s.fee_mode == "max":
         return mx, note
     if s.fee_mode == "half":
@@ -420,6 +437,18 @@ LAND_LOAN_STAFF = ("土地はローン関連の費用（つなぎ融資・抵当
                    "正確なお見積りはお借入れ先と建築会社からお出しいただくようお願いしています」とご案内ください。")
 
 
+def teiren_judge(f: SaleFacts, ex: int, tax_estimated: bool) -> str:
+    """税抜の本体価格が800万円以下か。yes / no / unknown。
+    業者売主で消費税額が分からないとき（または売主の区分が不明なとき）は、建物の割合を最大80%とみた下限と比べる。"""
+    if f.price <= 8_000_000:
+        return "yes"
+    uncertain = f.property_type != "land" and (tax_estimated or (f.seller_is_business is None and f.price_tax is None))
+    if not uncertain:
+        return "yes" if ex <= 8_000_000 else "no"
+    ex_min = f.price - int(f.price * 0.8 * 10 / 110)
+    return "no" if ex_min > 8_000_000 else "unknown"
+
+
 def estimate_building_tax(f: SaleFacts, evi) -> tuple[int, float, str]:
     """業者売主で「うち消費税」が分からないときの建物の消費税の推計。(消費税, 建物の割合, 根拠の言い方)
     評価額が分かれば（推計でも）時価に直して按分：土地は評価額÷0.7、建物は評価額÷0.6（建築費の6割程度）。
@@ -469,7 +498,8 @@ def fire_estimate(f: SaleFacts, s: CompanySaleSettings, staff: list[str]) -> tup
 
 def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = None,
             contract_day: Optional[date] = None, handover_day: Optional[date] = None,
-            today: Optional[date] = None, land_data_override: Optional[ev.LandData] = None) -> Result:
+            today: Optional[date] = None, land_data_override: Optional[ev.LandData] = None,
+            teiren: Optional[dict] = None) -> Result:
     today = today or date.today()
     contract_day = contract_day or today
     handover_day = handover_day or tentative_handover(today)
@@ -495,10 +525,18 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
     if f.seller_is_business is None:
         staff.append("売主が個人か業者か図面から読み取れません（建物の消費税・契約不適合責任に関係します）。")
 
-    # 1. 仲介手数料
-    fee, fee_note = brokerage_fee(ex, s)
-    if s.teiren_tokurei and ex <= 8_000_000 and fee is not None and fee > 0:
+    # 1. 仲介手数料（800万円以下の特例の判定は税抜の本体価格）
+    judge = teiren_judge(f, ex, tax_estimated)
+    want = (teiren or {}).get("mode") in ("tokurei", "amount") or (not teiren and s.teiren_tokurei)
+    use_teiren = teiren if judge != "no" else None
+    if judge == "no" and teiren and teiren.get("mode") in ("tokurei", "amount"):
+        staff.append("800万円以下の特例の指定がありましたが、税抜の価格が800万円を超えるため、通常の計算にしています。")
+    fee, fee_note = brokerage_fee(ex, s, use_teiren) if judge != "no" else brokerage_fee(ex, s, {"mode": "normal"})
+    applied = bool(want and judge != "no" and fee_note == TEIREN_NOTE)
+    if applied:
         staff.append("仲介手数料は800万円以下の物件の特例（上限33万円）で計算しています。媒介契約の前に、お客様への説明と合意が必要です。")
+        if judge == "unknown":
+            staff.append("売主が業者で消費税額が分からないため、税抜で800万円以下かどうか確定していません。売主に確認してください。")
     if fee is not None and tax_estimated:
         fee_note = (fee_note + "。" if fee_note else "") + "消費税を除いた価格（推計）で計算"
     lines.append(Line("must", "仲介手数料", fee, ("estimate" if tax_estimated else "exact") if fee is not None else "check", fee_note))
@@ -682,7 +720,7 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
     total_loan = sum(l.amount or 0 for l in lines if l.group == "loan")
     total_later = sum(l.amount or 0 for l in lines if l.group == "later")
     return Result(lines, notes, staff, {"land": land_eval, "bldg": bldg_eval, "estimated": estimated},
-                  total_must, total_loan, total_later)
+                  total_must, total_loan, total_later, judge, applied)
 
 
 def acquisition_tax(f: SaleFacts, land_eval: Optional[int], bldg_eval: Optional[int], on: date,

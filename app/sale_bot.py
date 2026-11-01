@@ -33,6 +33,8 @@ ALLOW = {x.strip() for x in config.env("SALE_ALLOW_UIDS").split(",") if x.strip(
 
 # 売買の設定の初期値（costs_sale.CompanySaleSettings と同じ名前）。会社ごとに company["売買設定"] で上書き
 DEFAULT_SETTINGS = {"fee_mode": "max", "fee_custom": None, "fee_rate": None, "teiren_tokurei": False, "estimate_eval": True,
+                    # 800万円以下の物件の手数料：ask＝図面ごとに聞く（初期値）／normal＝いつも通常／tokurei＝いつも特例
+                    "teiren_ask": "ask",
                     # 司法書士報酬・実費の初期値は概算書の計算側（costs_sale.CompanySaleSettings）を唯一の元にする
                     **{k: getattr(costs_sale.CompanySaleSettings(), k) for k in
                        ("shihoshoshi_transfer", "shihoshoshi_preserve", "shihoshoshi_mortgage", "touki_jippi")}}
@@ -247,7 +249,7 @@ def confirm_fields(u):
     kind = u.get("use_kind") or "both"
     rent = "" if kind == "sale" else f"賃貸の仲介手数料：賃料の{co.get('賃貸_仲介手数料_ヶ月', 1.0):g}ヶ月分（税別）\n"
     return {"所属団体": co.get("所属団体") or "なし", "賃貸の手数料行": rent, "売買手数料": fee_label(co),
-            "取引態様": co.get("取引態様") or "媒介"}
+            "取引態様": "媒介"}  # 帯の取引態様は賃貸版と同じく、いつも「媒介」（2026-11-01 本人指示）
 
 
 # ---------- 売買の図面が届いたとき ----------------------------------------------------------
@@ -271,7 +273,7 @@ def handle_sale(c, data, jid, rental_a=None):
     if needs_setup(c.u):
         hold_for_setup(c, jid, a)
         return
-    if ask_loan(c, jid, a):
+    if ask_loan(c, jid, a) or ask_teiren(c, jid, a):
         return
     return finish(c, jid, a)
 
@@ -327,7 +329,7 @@ def after_atena(c, jid, job, atena, after=()):
         c.refresh()
         return c.send(texts.build("sale_need_setup"), texts.build("sale_reg_assoc"))
     a = _load_analyzed(jid, job)
-    if not after and ask_loan(c, jid, a, atena, saved=True):  # 何枚か続けて送られたときは聞かず、会社設定のまま作る
+    if not after and (ask_loan(c, jid, a, atena, saved=True) or ask_teiren(c, jid, a, atena, saved=True)):  # 何枚か続けて送られたときは聞かず、会社設定のまま作る
         return
     return finish(c, jid, a, atena, after)
 
@@ -351,7 +353,7 @@ def resume_after_setup(c):
     if not job or job.get("status") != "analyzed" or (at and at < store.now() - timedelta(hours=24)):
         return c.send(line.text("売買の設定ができました。お預かりしていた販売図面の期限が切れたため、もう一度送ってください。"))
     a = _load_analyzed(jid, job)
-    if ask_loan(c, jid, a, job.get("宛名") or "", saved=True):
+    if ask_loan(c, jid, a, job.get("宛名") or "", saved=True) or ask_teiren(c, jid, a, job.get("宛名") or "", saved=True):
         return
     line.loading(c.line_uid, 60)
     return finish(c, jid, a, job.get("宛名") or "")
@@ -360,7 +362,7 @@ def resume_after_setup(c):
 FONT_DIR = str(__import__("pathlib").Path(__file__).parent / "fonts" / "noto-sans-jp-ttf")
 
 
-def estimate_html(company, evals=None, loan_override=None, calib=None, handover=None, drawing_day=None):
+def estimate_html(company, evals=None, loan_override=None, calib=None, handover=None, drawing_day=None, teiren=None):
     """購入諸費用の概算書（A4 1枚のHTML）を作る関数を返す。sale_core.render_documents の estimate_html に渡す。
     evals はスタッフが送った評価額 {"land_eval", "bldg_eval", ...}（なければ価格から推計）。
     スタッフ向けの確認事項は、返した関数の .notes に入る（お客様向けPDFには出さず、社内向けの注意へ）。"""
@@ -371,6 +373,12 @@ def estimate_html(company, evals=None, loan_override=None, calib=None, handover=
     import sale_core
 
     def build(result, co):
+        params = inspect.signature(sale_estimate.make_estimate).parameters
+        kw = {}
+        if "teiren" in params:  # この物件だけの仲介手数料の扱い（800万円以下の特例）は計算側が受ける
+            kw["teiren"] = teiren or None
+        else:
+            co = apply_teiren(co, teiren)
         f = result.事実
         # co は sale_core.render_documents の中で band_company 済み（免許の行に所属団体が入っている）
         band = {"name": co.get("会社名", ""), "license": co.get("免許", ""),
@@ -383,16 +391,18 @@ def estimate_html(company, evals=None, loan_override=None, calib=None, handover=
         if facts and facts.get("address"):
             facts["land_calib"] = (calib or calib_factor)(facts["address"])
         # 決済日（引渡日）：スタッフが8桁で送った日があればそれ（確定）。なければ図面を送った日の翌々月1日（仮）
-        kw = {"handover_day": handover} if handover else {}
-        params = inspect.signature(sale_estimate.make_estimate).parameters
+        if handover:
+            kw["handover_day"] = handover
         if not handover and "drawing_day" in params:  # 仮の決済日の決め方は計算側が持つ（図面を送った日を渡すだけ）
             kw["drawing_day"] = drawing_day or today_jst()
         out = sale_estimate.make_estimate(co, facts, evals, customer=co.get("宛名") or "",
                                           property_name=name, band=band, font_dir=FONT_DIR,
                                           loan_override=loan_override or None, **kw)
         build.notes[:] = list(out.get("staff_notes") or [])
+        build.teiren_judge = out.get("teiren_judge")
         return out["html"]
     build.notes = []
+    build.teiren_judge = None
     return build
 
 
@@ -487,8 +497,11 @@ def _lq_finish(c, jid, job, lo):
     store.update_job(jid, {"loan": lo})
     store.update_user(c.uid, {"sale_lq": None})
     c.refresh()
+    a = _load_analyzed(jid, store.get_job(jid))
+    if ask_teiren(c, jid, a, job.get("宛名") or "", saved=True):  # 800万円以下なら、手数料の扱いをもう1問だけ
+        return
     line.loading(c.line_uid, 60)
-    return finish(c, jid, _load_analyzed(jid, store.get_job(jid)), job.get("宛名") or "")
+    return finish(c, jid, a, job.get("宛名") or "")
 
 
 def lq_postback(c, k, v):
@@ -543,7 +556,9 @@ def finish(c, jid, a, atena="", after=()):
         consumed = True
         company = {**bot.company_for_render(c.uid, c.u), "宛名": atena}
         job0 = store.get_job(jid) or {}
-        est = estimate_html(company, loan_override=job0.get("loan"))  # 図面の直後に聞いたローンの答え（なければ会社設定）
+        # 図面の直後に聞いたローン・800万円以下の手数料の答え（なければ会社設定）
+        te = job0.get("teiren") or ({"mode": "tokurei"} if teiren_setting(company) == "tokurei" else None)  # 「いつも特例」は上限33万円で
+        est = estimate_html(company, loan_override=job0.get("loan"), teiren=te)
         if is_land(a["result"]):
             after = (texts.build("sale_land_loan_note", スタッフ向けの案内例=_land_staff()),) + tuple(after)
         out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"], estimate_html=est)
@@ -552,7 +567,7 @@ def finish(c, jid, a, atena="", after=()):
         store.save_files(jid, out)
         store.update_job(jid, {"status": "done", "kind": "sale", "title": out["title"], "texts": out["texts"],
                                "log": out["log"], "pages": out["pages"], "result": out["result"], "宛名": atena,
-                               "verdict": "sale"})
+                               "verdict": "sale", "teiren_check": _judge(est, a["result"])})
         recent = [{"id": jid, "title": out["title"], "at": store.now(), "kind": "sale"}] + \
                  [r for r in (c.u.get("recent_jobs") or []) if r["id"] != jid]
         store.update_user(c.uid, {"last_job": jid, "pending": None, "recent_jobs": recent[:12]})
@@ -597,6 +612,8 @@ def deliver(c, jid, after=()):
     url_okyaku, url_shanai = store.pdf_urls(jid, job)
     img = line.image(store.file_url(jid, job, "obikae.jpg"), store.file_url(jid, job, "preview.jpg"))
     drop = () if ((job.get("texts") or {}).get("motozuke") or {}).get("fax") else ("postback bfax=from_last&doc={資料ID}",)
+    if not job.get("teiren_check"):  # 「手数料を変える」は800万円以下（かもしれない）物件だけ
+        drop += ("postback tq=ask&doc={資料ID}",)
     o_note, o_msg = osusume_message(job)
     common = dict(物件名=job["title"], のこり枚数の案内=bot.remain_note(c.u), 資料ID=jid, 注意の要点=key_notes(job),
                   おすすめの案内=o_note, drop=drop)
@@ -692,19 +709,14 @@ def edit_postback(c, k, v):
         set_company(c, 内見依頼書のQR=v == "on")
         c.send(texts.build("sale_edit_done", 項目="内見依頼書のQRコード"))
         return True
-    if k == "edit" and v == "torihiki":
-        c.send(texts.build("sale_edit_torihiki"))
-        return True
-    if k == "torihiki" and v in ("媒介", "代理"):
-        set_company(c, 取引態様=v)
-        c.send(texts.build("sale_edit_done", 項目="売買の取引態様"))
-        return True
     if k == "edit" and v == "tokurei":
-        c.send(texts.build("sale_edit_tokurei", 今の設定="使う" if settings(co)["teiren_tokurei"] else "使わない"))
+        c.send(texts.build("sale_edit_tokurei", 今の設定=TEIREN_SETTING_NAMES[teiren_setting(co)]))
         return True
-    if k == "tokurei" and v in ("on", "off"):
-        set_settings(c, teiren_tokurei=v == "on")
-        c.send(texts.build("sale_edit_done", 項目="800万円以下の特例"))
+    if k == "tokurei" and v in ("ask", "on", "off"):
+        m = {"ask": "ask", "on": "tokurei", "off": "normal"}[v]
+        # 聞かなかったとき（答えがない・続けて送られた）に使う値も合わせる。「毎回聞く」は通常で作る
+        set_settings(c, teiren_ask=m, teiren_tokurei=m == "tokurei")
+        c.send(texts.build("sale_edit_done", 項目=f"800万円以下の物件の手数料（{TEIREN_SETTING_NAMES[m]}）"))
         return True
     if k == "edit" and v == "shiho":
         s = settings(co)
@@ -889,7 +901,7 @@ def parse_evals(s):
     return out
 
 
-def rerender(c, jid, evals=None, loan_override=None, handover=None):
+def rerender(c, jid, evals=None, loan_override=None, handover=None, teiren=None):
     """預かっている図面と読み取り結果で、概算書を作り直す（AIは使わない・件数に数えない）。
     これまでに送られた評価額・ローンの条件は残し、新しく送られた方で上書きする。お客様向けPDFのURLを返す（できなければ None）。"""
     import bot
@@ -907,7 +919,9 @@ def rerender(c, jid, evals=None, loan_override=None, handover=None):
         lo["use"] = True  # 「ローンなし」の後に条件を送られたら、ローンを使う前提に戻す
     hd = handover if handover is not None else job.get("handover")  # "" は仮に戻す
     hd = date.fromisoformat(hd) if hd else None
-    est = estimate_html(c.u.get("company") or {}, ev or None, lo, handover=hd, drawing_day=job_day(job))
+    te = teiren if teiren is not None else job.get("teiren") or \
+        ({"mode": "tokurei"} if teiren_setting(c.u.get("company") or {}) == "tokurei" else None)
+    est = estimate_html(c.u.get("company") or {}, ev or None, lo, handover=hd, drawing_day=job_day(job), teiren=te)
     if est is None:
         return None
     company = {**bot.company_for_render(c.uid, c.u), "宛名": job.get("宛名") or ""}
@@ -915,7 +929,7 @@ def rerender(c, jid, evals=None, loan_override=None, handover=None):
     out = sale_core.render_documents(company, Image.open(io.BytesIO(page)).convert("RGB"), r,
                                      job.get("pages") or 0, job.get("log") or {}, estimate_html=est)
     store.save_files(jid, out)
-    store.update_job(jid, {"evals": ev, "loan": lo, "handover": hd.isoformat() if hd else None})
+    store.update_job(jid, {"evals": ev, "loan": lo, "handover": hd.isoformat() if hd else None, "teiren": te})
     if evals and evals.get("land_eval"):
         record_calibration(jid, r, int(evals["land_eval"]))
     return store.pdf_urls(jid, store.get_job(jid))[0]
@@ -1034,6 +1048,168 @@ def _hand_rerender(c, iso, label):
         return True
     c.send(texts.build("sale_hand_done", 決済日=label, お客様向けリンク=url))
     return True
+
+
+# ---------- 800万円以下の物件の仲介手数料（低廉な空家等の特例・上限33万円） ---------------------------
+# 図面の価格（税抜の本体価格）が800万円以下なら、ローンの質問のあとに1問だけ聞く（会社設定で「毎回聞く」のとき）。
+# 答えは job.teiren = {"mode": "normal"|"tokurei"|"amount", "yen": 金額（amount のとき）}。
+# 作り直し（届いた資料の「手数料を変える」）は件数に数えない。
+
+TEIREN_LIMIT = 8_000_000
+TEIREN_MAX = 330_000  # 税込
+TEIREN_SETTING_NAMES = {"ask": "毎回聞く", "normal": "いつも通常の上限で計算", "tokurei": "いつも特例（上限33万円）で計算"}
+
+
+def teiren_setting(co):
+    raw = (co or {}).get("売買設定") or {}
+    if raw.get("teiren_ask") in TEIREN_SETTING_NAMES:
+        return raw["teiren_ask"]
+    return "tokurei" if raw.get("teiren_tokurei") else "ask"  # 以前の「使う」の設定は「いつも特例」として読む
+
+
+def teiren_check(result):
+    """"yes"＝税抜の本体価格が800万円以下、"maybe"＝税込の表示で建物の消費税が分からず800万円前後、None＝対象外。"""
+    import sale_core
+    try:
+        fx = sale_core.cost_inputs(result.事実)
+    except Exception:
+        log.exception("800万円以下の判定に失敗")
+        return None
+    if not fx or not fx.get("price"):
+        return None
+    price, tax = int(fx["price"]), fx.get("price_tax")
+    if price - int(tax or 0) <= TEIREN_LIMIT:
+        return "yes"
+    if not tax and fx.get("property_type") != "land" and fx.get("seller_is_business") is not False \
+            and price <= TEIREN_LIMIT * 1.1:
+        return "maybe"
+    return None
+
+
+def apply_teiren(co, t):
+    """この物件だけの手数料の扱いを、概算書に渡す会社設定（売買設定）に重ねる。"""
+    if not t or t.get("mode") not in ("normal", "tokurei", "amount"):
+        return co
+    s = dict((co or {}).get("売買設定") or {})
+    if t["mode"] == "normal":
+        s["teiren_tokurei"] = False
+    elif t["mode"] == "tokurei":
+        s.update(teiren_tokurei=True, fee_mode="max")
+    else:
+        s.update(teiren_tokurei=True, fee_mode="custom", fee_custom=min(int(t.get("yen") or 0), TEIREN_MAX))
+    return {**(co or {}), "売買設定": s}
+
+
+def teiren_label(t):
+    if not t:
+        return "会社の設定どおり"
+    if t.get("mode") == "tokurei":
+        return "特例（上限33万円・税込）で計算"
+    if t.get("mode") == "amount":
+        return f"{int(t.get('yen') or 0):,}円（税込）"
+    return "通常の上限で計算"
+
+
+def _teiren_extra(chk):
+    return "\n※価格が税込の表示で、建物の消費税が分かりません。税抜の本体価格が800万円以下かどうか、売主にご確認ください。\n" \
+        if chk == "maybe" else ""
+
+
+def _judge(est, result):
+    """届いた資料に「手数料を変える」を出すか。計算側の判定（teiren_judge）があればそれ、なければ図面の価格から。"""
+    j = getattr(est, "teiren_judge", None)
+    if j in ("yes", "unknown", "no"):
+        return {"yes": "yes", "unknown": "maybe"}.get(j)
+    return teiren_check(result)
+
+
+def ask_teiren(c, jid, a, atena="", saved=False):
+    """800万円以下の物件で、会社設定が「毎回聞く」なら聞いて True（答えが届いたら finish）。"""
+    chk = teiren_check(a["result"])
+    if not chk or teiren_setting(c.u.get("company") or {}) != "ask":
+        return False
+    if not saved:
+        _save_analyzed(jid, a)
+    store.update_job(jid, {"宛名": atena, "teiren": None})
+    store.update_user(c.uid, {"sale_tq": {"jid": jid, "step": "q", "at": store.now()}})
+    c.refresh()
+    c.send(texts.build("sale_teiren_q", 判定の補足=_teiren_extra(chk), drop=("postback cancel",)))
+    return True
+
+
+def tq_ask(c, jid):
+    """届いた資料の「手数料を変える」。この資料だけ作り直す（件数に数えない）。"""
+    job = store.get_job(jid) if jid else None
+    if not job or job.get("user_id") != c.uid or job.get("kind") != "sale" or job.get("status") != "done":
+        return c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、販売図面から送ってください。"))
+    store.update_user(c.uid, {"sale_tq": {"jid": jid, "step": "q", "at": store.now(), "redo": True}})
+    c.refresh()
+    return c.send(texts.build("sale_teiren_q", 判定の補足=_teiren_extra(job.get("teiren_check")) +
+                              f"\n今の計算：{teiren_label(job.get('teiren'))}\n"))
+
+
+def _tq_job(c):
+    q = c.u.get("sale_tq") or {}
+    jid = q.get("jid")
+    job = store.get_job(jid) if jid else None
+    want = "done" if q.get("redo") else "analyzed"
+    if not job or job.get("status") != want or job.get("user_id") != c.uid or \
+            (q.get("at") and q["at"] < store.now() - timedelta(hours=24)):
+        return None, None
+    return jid, job
+
+
+def tq_postback(c, v):
+    """tq=normal/tokurei/amount（答え）、tq=ask&doc=（届いた資料から）。"""
+    if v.startswith("ask"):
+        return tq_ask(c, v.partition("doc=")[2] or c.u.get("last_job"))
+    jid, job = _tq_job(c)
+    if not jid:
+        store.update_user(c.uid, {"sale_tq": None})
+        return c.send(line.text("お預かりしていた販売図面が見つかりませんでした。お手数ですが、もう一度送ってください。"))
+    if v == "amount":
+        store.update_user(c.uid, {"sale_tq": {**c.u["sale_tq"], "step": "amount"}})
+        return c.send(texts.build("sale_teiren_amount_ask"))
+    if v in ("normal", "tokurei"):
+        return _tq_apply(c, jid, job, {"mode": v})
+    return c.send(texts.build("sale_teiren_q", 判定の補足=""))
+
+
+def tq_text(c, t):
+    """手数料の金額の入力（「30万」「300000」など）。扱ったら True。"""
+    q = c.u.get("sale_tq") or {}
+    if q.get("step") != "amount":
+        return False
+    s = unicodedata.normalize("NFKC", t or "").replace(",", "").replace("円", "")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(万)?", s)
+    yen = int(round(float(m.group(1)) * (10_000 if m.group(2) else 1))) if m else 0
+    if m and not m.group(2) and 0 < yen < 100:  # 「33」は万円とみなす
+        yen *= 10_000
+    if yen > TEIREN_MAX:
+        c.send(texts.build("sale_teiren_amount_over", 送られた金額=f"{yen:,}"))
+        return True
+    if yen <= 0:
+        c.send(texts.build("sale_teiren_amount_ask"))
+        return True
+    jid, job = _tq_job(c)
+    if not jid:
+        store.update_user(c.uid, {"sale_tq": None})
+        return False
+    return _tq_apply(c, jid, job, {"mode": "amount", "yen": yen}) or True
+
+
+def _tq_apply(c, jid, job, t):
+    redo = (c.u.get("sale_tq") or {}).get("redo")
+    store.update_user(c.uid, {"sale_tq": None})
+    c.refresh()
+    if redo:
+        url = rerender(c, jid, teiren=t)
+        if not url:
+            return c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、販売図面から送ってください。"))
+        return c.send(texts.build("sale_teiren_done", 手数料の扱い=teiren_label(t), お客様向けリンク=url))
+    store.update_job(jid, {"teiren": t})
+    line.loading(c.line_uid, 60)
+    return finish(c, jid, _load_analyzed(jid, store.get_job(jid)), job.get("宛名") or "")
 
 
 # ---------- お試しの期限のお知らせ（毎朝9時の定期実行から） ------------------------------------

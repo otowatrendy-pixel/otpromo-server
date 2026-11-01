@@ -253,10 +253,14 @@ def _sale_fields(co, u):
     if vals["所属団体"] is not None:  # 手で直した表記が優先
         out["所属団体"] = vals["所属団体"][:80]
         out.setdefault("所属団体_種類", "other")
-    if vals["取引態様"] in ("媒介", "代理"):
-        out["取引態様"] = vals["取引態様"]
+    if vals["取引態様"] is not None:  # 帯の取引態様は賃貸版と同じく、いつも「媒介」（2026-11-01 本人指示）。送られても変えない
+        out["取引態様"] = "媒介"
     if vals["売買設定"] is not None:
         ok = {k: v for k, v in vals["売買設定"].items() if k in sale_bot.DEFAULT_SETTINGS}
+        if ok.get("teiren_ask") not in (None, "ask", "normal", "tokurei"):
+            raise HTTPException(422, {"code": "sale_teiren", "message": "800万円以下の物件の手数料の選び方が正しくありません。"})
+        if "teiren_ask" in ok:  # 聞かなかったときに使う値も合わせる
+            ok["teiren_tokurei"] = ok["teiren_ask"] == "tokurei"
         if ok.get("fee_mode") not in (None, "max", "half", "free", "custom", "rate"):
             raise HTTPException(422, {"code": "sale_fee", "message": "売買の仲介手数料の選び方が正しくありません。"})
         out["売買設定"] = {**(old.get("売買設定") or {}), **ok}

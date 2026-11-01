@@ -498,6 +498,8 @@ def on_postback(c, data):
         return sale_bot.lsim_ask(c, v.partition("doc=")[2] or c.u.get("last_job"))
     if k in ("lq", "lq2") and sale_bot.on(c):  # 図面の直後のローンの質問
         return sale_bot.lq_postback(c, k, v)
+    if k == "tq" and sale_bot.on(c):  # 800万円以下の物件の仲介手数料（図面の直後・届いた資料の「手数料を変える」）
+        return sale_bot.tq_postback(c, v)
     if k == "hand" and sale_bot.on(c):  # この資料だけ、決済日（引渡日）を変えて作り直す
         jid = v.partition("doc=")[2] or c.u.get("sale_eval_job") or c.u.get("last_job")
         return sale_bot.hand_reset(c, jid) if v.startswith("reset") else sale_bot.hand_ask(c, jid)
@@ -537,7 +539,8 @@ def on_postback(c, data):
     if k == "cancel":
         if naiken_bot.active(c.u):
             return naiken_bot.cancel(c)
-        store.update_user(c.uid, {"pending": None, **({"sale_edit": None, "sale_eval_job": None} if c.u.get("sale_edit") else {})})
+        store.update_user(c.uid, {"pending": None, **({"sale_edit": None, "sale_eval_job": None} if c.u.get("sale_edit") else {}),
+                                  **({"sale_tq": None} if (c.u.get("sale_tq") or {}).get("redo") else {})})
         return c.send(line.text("かしこまりました。またいつでもお送りください。"))
 
 
@@ -611,6 +614,8 @@ def on_text(c, t):
     if step:
         return reg_text(c, step, t)
     if sale_bot.on(c) and (c.u.get("sale_lq") or {}).get("step") == "amount" and sale_bot.lq_text(c, t):
+        return
+    if sale_bot.on(c) and (c.u.get("sale_tq") or {}).get("step") == "amount" and sale_bot.tq_text(c, t):
         return
     if sale_bot.on(c) and c.u.get("sale_edit") and sale_bot.edit_text(c, t):
         return

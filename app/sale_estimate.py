@@ -13,6 +13,8 @@ loan_override            … 物件ごとの指定 {amount, type, rate, years, k
 evals                    … スタッフがLINEで送った値 {"land_eval","bldg_eval","annual_property_tax",
                              "rosenka_per_m2","kotei_rosenka_per_m2"}（あるものだけ）
 drawing_day              … 図面を送った日（日本時間）。
+teiren                   … 物件ごとの800万円以下の特例 {"mode": "normal"/"tokurei"/"amount", "yen": 金額}（会社設定より優先）。
+                             戻り値 teiren_judge＝yes/no/unknown（税抜800万円以下か。unknown は業者売主で消費税が不明）
 契約日が None なら作成日、決済日（引渡日）が None なら drawing_day（なければ作成日）の翌々月1日で仮置き
 （概算書に「（仮）」と出る）。スタッフが8桁で送った日は handover_day に入れる（確定扱い）。
 """
@@ -93,7 +95,8 @@ def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, c
                   property_name: str = "", band: Optional[dict] = None, contract_day: Optional[date] = None,
                   handover_day: Optional[date] = None, loan_amount: Optional[int] = None,
                   loan_override: Optional[dict] = None, today: Optional[date] = None,
-                  font_dir: Optional[str] = None, drawing_day: Optional[date] = None) -> dict:
+                  font_dir: Optional[str] = None, drawing_day: Optional[date] = None,
+                  teiren: Optional[dict] = None) -> dict:
     today = today or date.today()
     f = SaleFacts(**facts)
     if evals:
@@ -115,16 +118,17 @@ def make_estimate(company: dict, facts: dict, evals: Optional[dict] = None, *, c
         elif c["amount_mode"] == "price_plus_costs":
             amt = f.price
             for _ in range(3):   # ローン関連費用が借入額で変わるので数回まわして落ち着かせる
-                r0 = compute(f, s, LoanPlan(amt), cd, hd, today=today)   # noqa
+                r0 = compute(f, s, LoanPlan(amt), cd, hd, today=today, teiren=teiren)   # noqa
                 amt = floor100k(f.price + r0.total_must + r0.total_loan)
         else:
             amt = floor100k(f.price * float(c["ratio"]))
         if amt > 0:
             loan = LoanPlan(amt, flat35=(c["type"] == "zenki_kotei" or (c.get("compare") and c["show"])))
-    r = compute(f, s, loan, cd, hd, today=today)
+    r = compute(f, s, loan, cd, hd, today=today, teiren=teiren)
     sim = simulate(loan.amount, c) if (loan and c["show"]) else None
     html = build_html(r, f, loan, customer=customer, property_name=property_name, address=f.address or "",
                       made=today, contract_day=cd, handover_day=hd, company=band or {},
                       font_dir=font_dir or os.path.join(HERE, "fonts"), sim=sim,
                       dates_tentative=(contract_day is None, handover_day is None))
-    return {"html": html, "staff_notes": r.staff_notes, "result": r, "simulation": sim, "loan_conditions": c}
+    return {"html": html, "staff_notes": r.staff_notes, "result": r, "simulation": sim, "loan_conditions": c,
+            "teiren_judge": r.teiren_judge, "teiren_applied": r.teiren_applied}

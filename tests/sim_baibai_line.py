@@ -302,9 +302,10 @@ assert sale_bot.loan(u_of(A)["company"])["amount_mode"] == "price_plus_costs"
 out = pb(A, "loan=off")
 assert sale_bot.loan(u_of(A)["company"])["show"] is False and "付ける" in out
 pb(A, "loan=on")
-pb(A, "edit=torihiki")
-pb(A, "torihiki=代理")
-assert sale_core.band_company(u_of(A)["company"])["帯_3行目"] == "取引態様：代理"
+# 取引態様はいつも「媒介」（賃貸版と同じ）。変更の入口はない
+out = pb(A, "edit=deal")
+assert "取引態様" not in out and "800万円以下の手数料" in out, out
+assert sale_core.band_company(u_of(A)["company"])["帯_3行目"] == "取引態様：媒介"
 
 # ---- 3) 賃貸版に登録済みの方：会社情報を引き継ぐ ----
 B = "Urent"
@@ -470,6 +471,67 @@ out = image(B); out = text(B, "見本 四郎")
 sale_core.SALE_MOCK_RESULT = _old_mock
 assert store.get_job(u_of(B)["last_job"])["result"]["事実"]["物件種別"] == "土地"
 assert "住宅ローンのご利用予定" not in out and "つなぎ融資" in out and "売買の資料ができました" in out, out
+
+# ---- 800万円以下の物件：ローンの質問のあとに、仲介手数料の扱いを1問だけ聞く ----
+_cheap = _json.loads(open(os.environ["SALE_MOCK_RESULT"], encoding="utf-8").read())
+_cheap["事実"]["価格"] = {"記載": "750万円", "金額円": 7_500_000}
+CHEAP_JSON = os.path.join(os.environ["LOCAL_DIR"], "cheap.json")
+open(CHEAP_JSON, "w", encoding="utf-8").write(_json.dumps(_cheap, ensure_ascii=False))
+sale_core.SALE_MOCK_RESULT = CHEAP_JSON
+q0 = store.quota(u_of(B))
+out = image(B); text(B, "見本 五郎")
+out = pb(B, "lq=no")
+assert "800万円以下のため" in out and "特例（上限33万円）で計算" in out and "売買の資料ができました" not in out, out
+assert "やめる" not in out  # 図面の直後は「やめる」を出さない
+out = pb(B, "tq=amount")
+assert "33万円まで" in out
+out = text(B, "40万")
+assert "上限（33万円・税込）を超えています" in out, out
+out = text(B, "30万")
+assert "売買の資料ができました" in out and "手数料を変える" in out, out
+jidC = u_of(B)["last_job"]
+assert store.get_job(jidC)["teiren"] == {"mode": "amount", "yen": 300_000}
+tc = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jidC}/okyaku.pdf"))).pages))
+assert "300,000" in tc, [l for l in tc.splitlines() if "仲介" in l]
+q1 = store.quota(u_of(B))
+# 届いた資料の「手数料を変える」：この資料だけ作り直す（件数に数えない）
+out = pb(B, f"tq=ask&doc={jidC}")
+assert "今の計算：300,000円（税込）" in out and "やめる" in out, out
+out = pb(B, "tq=tokurei")
+assert "作り直しました" in out and "特例（上限33万円・税込）" in out, out
+tc = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jidC}/okyaku.pdf"))).pages))
+assert "330,000" in tc, [l for l in tc.splitlines() if "仲介" in l]
+out = pb(B, f"tq=ask&doc={jidC}"); out = pb(B, "tq=normal")
+tc = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jidC}/okyaku.pdf"))).pages))
+assert "330,000" not in tc and store.get_job(jidC)["teiren"] == {"mode": "normal"}
+pb(B, f"tq=ask&doc={jidC}"); pb(B, "cancel")
+assert not u_of(B).get("sale_tq")
+assert store.quota(u_of(B)) == q1, (store.quota(u_of(B)), q1)
+# 会社設定「いつも特例」なら聞かずに特例で作る
+out = pb(B, "edit=tokurei")
+assert "今の設定：毎回聞く" in out and "いつも特例で計算" in out, out
+pb(B, "tokurei=on")
+assert u_of(B)["company"]["売買設定"]["teiren_ask"] == "tokurei" and u_of(B)["company"]["売買設定"]["teiren_tokurei"] is True
+out = image(B); text(B, "見本 六郎"); out = pb(B, "lq=no")
+assert "800万円以下のため" not in out and "売買の資料ができました" in out, out
+tc = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{u_of(B)['last_job']}/okyaku.pdf"))).pages))
+assert "330,000" in tc
+pb(B, "edit=tokurei"); pb(B, "tokurei=ask")
+# 税込表示で消費税が分からず、800万円前後（業者売主かもしれない建物）のときも聞く
+_cheap["事実"]["価格"] = {"記載": "850万円", "金額円": 8_500_000}
+_cheap["事実"]["取引態様"] = "売主"
+open(CHEAP_JSON, "w", encoding="utf-8").write(_json.dumps(_cheap, ensure_ascii=False))
+out = image(B); text(B, "見本 七郎"); out = pb(B, "lq=no")
+assert "800万円以下のため" in out and "売主にご確認ください" in out, out
+out = pb(B, "tq=normal")
+assert "売買の資料ができました" in out, out
+# 800万円を超える物件は聞かず、「手数料を変える」も出さない
+_cheap["事実"]["価格"] = {"記載": "1,200万円", "金額円": 12_000_000}
+open(CHEAP_JSON, "w", encoding="utf-8").write(_json.dumps(_cheap, ensure_ascii=False))
+out = image(B); text(B, "見本 八郎"); out = pb(B, "lq=no")
+assert "800万円以下のため" not in out and "売買の資料ができました" in out and "手数料を変える" not in out, out
+sale_core.SALE_MOCK_RESULT = _old_mock
+print("800万円以下の手数料の質問 OK")
 
 before = store.quota(u_of(B))["remaining"]  # ここから先（評価額の作り直し）は件数に数えない
 jidB = u_of(B)["last_job"]
