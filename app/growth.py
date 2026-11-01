@@ -121,6 +121,11 @@ def on_cancel_reason(uid, key):
         return None
     store.update_user(uid, {"cancel_reason": key, "cancel_reason_at": store.now(), "ask_cancel_reason": False})
     usage.count("cancel_" + key)
+    try:  # ご要望・不具合と同じ記録（requests）にも入れる。運営へのすぐの通知はしない（週報で見る）
+        import youbou
+        youbou.record(uid, store.get_user(uid), "kaiyaku", CANCEL_REASONS[key], notify_now=False)
+    except Exception:
+        log.exception("解約理由を requests に記録できませんでした")
     return _msg("cancel_reason_thanks", "お答えいただき、ありがとうございました。\nまたお役に立てる機会がありましたら、いつでもお待ちしております。")
 
 
@@ -224,5 +229,10 @@ def weekly_report():
             f"→ 5件使った {f['five_docs']}人\n→ 有料 {f['paid']}人\n→ 翌月も継続 {f['continued']}人\n\n"
             f"■目標との差（有料の方）\n{goal_line}\n"
             "目標：11月末10人・12月末23人・1月末38人・2月末57人（2月末に30人未満なら見直し）\n")
+    try:
+        import youbou
+        text += "\n" + youbou.weekly_lines()
+    except Exception:
+        log.exception("週報：ご要望の一覧")
     delivery.send_notice(usage.ADMIN_MAIL, "【1分資料 週報】", text)
     return {"funnel": f, "paid_now": paid_now, "goal": goal}

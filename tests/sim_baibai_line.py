@@ -533,6 +533,49 @@ assert "800万円以下のため" not in out and "売買の資料ができまし
 sale_core.SALE_MOCK_RESULT = _old_mock
 print("800万円以下の手数料の質問 OK")
 
+# ---- ご要望・不具合のご連絡：記録・運営へ通知・週報 ----
+import json, usage, youbou, growth, delivery as _dl
+_admin, _mails = [], []
+_al, _sn = usage.admin_line, _dl.send_notice
+usage.admin_line = lambda t: _admin.append(t)
+_dl.send_notice = lambda to, subj, body, *a, **k: _mails.append((subj, body)) or True
+pb(B, "help=menu")
+assert "req=menu" in json.dumps(ALL[-1], ensure_ascii=False)
+out = pb(B, "req=menu")
+assert "使い方の質問" in out and "不具合のご連絡" in out and "要望" not in out, out
+out = pb(B, "req=fuguai")
+assert "スクリーンショット" in out
+jobs_before = store.get_user(store.user_by_line(B)[0]).get("last_job")
+out = text(B, "概算書の印紙税が違う気がします")
+assert "担当が確認し、必要に応じてご連絡します" in out and "送り終わり" in out, out
+out = image(B)  # 受付中の画像は図面として扱わない
+assert "追加でお受けしました" in out and "売買の資料ができました" not in out, out
+assert u_of(B).get("last_job") == jobs_before
+reqs = [d for _, d in store.db().all("requests")]
+assert len(reqs) == 1 and reqs[0]["種類"] == "不具合" and reqs[0]["本文"] == "概算書の印紙税が違う気がします" \
+    and len(reqs[0]["画像"]) == 1 and reqs[0]["対応状況"] == "未対応" and reqs[0]["会社名"] == "見本住宅株式会社", reqs
+assert len(_admin) == 1 and "不具合が届きました" in _admin[0] and "印紙税" in _admin[0], _admin
+out = pb(B, "req=done")
+assert "ありがとうございました" in out and not u_of(B).get("req_wait")
+out = text(B, "こんにちは")
+assert "担当が確認" not in out  # 受付が終わったら記録しない
+pb(B, "req=menu"); pb(B, "req=sonota"); out = pb(B, "cancel")
+assert not u_of(B).get("req_wait")
+# 解約理由も同じ記録に（運営へのすぐの通知はしない）
+growth.on_cancel_reason(store.user_by_line(B)[0], "price")
+reqs = sorted((d for _, d in store.db().all("requests")), key=lambda d: d["日時"])
+assert len(reqs) == 2 and reqs[-1]["種類"] == "解約理由" and reqs[-1]["本文"] == "料金が高い" and len(_admin) == 1
+growth.weekly_report()
+wk = [b for sj, b in _mails if "週報" in sj][-1]
+assert "使い方の質問 0件・不具合 1件・その他 0件・解約理由 1件（うち要望に分類 0件。未対応の合計 2件）" in wk and "印紙税" in wk, wk
+usage.admin_line, _dl.send_notice = _al, _sn
+# 利用者に見える文面に「要望」は出さない
+_shown = json.dumps([m for sec in json.load(open(ROOT / "app" / "messages_sale.json", encoding="utf-8"))["sections"]
+                     for m in sec.get("messages", []) if m["id"].startswith("req_") or m["id"] == "sale_help_menu"], ensure_ascii=False)
+assert all("要望" not in json.dumps({k: m.get(k) for k in ("text", "buttons")}, ensure_ascii=False)
+           for m in json.loads(_shown)), "利用者向けに「要望」が出ている"
+print("お問い合わせ・不具合の窓口 OK")
+
 before = store.quota(u_of(B))["remaining"]  # ここから先（評価額の作り直し）は件数に数えない
 jidB = u_of(B)["last_job"]
 

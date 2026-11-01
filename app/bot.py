@@ -151,6 +151,9 @@ def handle(ev):
     if m["type"] == "text":
         return on_text(c, m["text"])
     if m["type"] == "image":
+        import youbou
+        if youbou.on_image(c, m["id"]):  # ご要望・不具合の受付中に届いた画像（図面としては扱わない）
+            return
         return on_file(c, m["id"], is_image=True)
     if m["type"] == "file":
         if (m.get("fileName") or "").lower().endswith(".pdf"):
@@ -517,6 +520,9 @@ def on_postback(c, data):
     if k == "referral":
         import referral
         return c.send(*referral.menu_messages(c.uid))
+    if k == "req":  # ご要望・不具合のご連絡（youbou.py）
+        import youbou
+        return youbou.on_postback(c, v)
     if k == "cancel_reason":
         return c.send(growth.on_cancel_reason(c.uid, v) or line.text("ありがとうございます。"))
     if k == "choice":
@@ -539,7 +545,7 @@ def on_postback(c, data):
     if k == "cancel":
         if naiken_bot.active(c.u):
             return naiken_bot.cancel(c)
-        store.update_user(c.uid, {"pending": None, **({"sale_edit": None, "sale_eval_job": None} if c.u.get("sale_edit") else {}),
+        store.update_user(c.uid, {"pending": None, "req_wait": None, **({"sale_edit": None, "sale_eval_job": None} if c.u.get("sale_edit") else {}),
                                   **({"sale_tq": None} if (c.u.get("sale_tq") or {}).get("redo") else {})})
         return c.send(line.text("かしこまりました。またいつでもお送りください。"))
 
@@ -605,6 +611,9 @@ def plan_status(c):
 # ---------- 文字 ----------
 
 def on_text(c, t):
+    import youbou
+    if youbou.on_text(c, t):  # ご要望・不具合の受付中
+        return
     if campaign.on_text(c, t):
         return
     import referral

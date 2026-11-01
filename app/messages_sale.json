@@ -804,8 +804,8 @@
               "action": "postback help=sale"
             },
             {
-              "label": "お問い合わせ",
-              "action": "postback help=contact"
+              "label": "お問い合わせ・不具合のご連絡",
+              "action": "postback req=menu"
             },
             {
               "label": "よくある質問",
@@ -816,7 +816,7 @@
               "action": "postback referral=menu"
             }
           ],
-          "note": "よくある質問のURLは、最後に見た資料が売買なら売買ページ、賃貸なら /ippun.html#faq にする。"
+          "note": "よくある質問のURLは、最後に見た資料が売買なら売買ページ、賃貸なら /ippun.html#faq にする。 「お問い合わせ」は窓口（youbou.py、req=menu）へ。利用者に見える表示に「要望」は出さない（11/1本人）。"
         },
         {
           "id": "sale_help_usage",
@@ -1079,6 +1079,125 @@
             }
           ],
           "note": "10/31本人決定（お試しは登録から14日、3日前にお知らせ）。1人1回（trial_notice_sent）。"
+        }
+      ]
+    },
+    {
+      "title": "S7. お問い合わせ・不具合のご連絡（youbou.py、2026-11-01）",
+      "messages": [
+        {
+          "id": "req_menu",
+          "when": "「お問い合わせ・不具合のご連絡」を押したとき",
+          "send": "reply",
+          "text": "お問い合わせ・不具合のご連絡をお受けします。\n内容を選んでください。",
+          "buttons": [
+            {
+              "label": "使い方の質問",
+              "action": "postback req=shitsumon"
+            },
+            {
+              "label": "不具合のご連絡",
+              "action": "postback req=fuguai"
+            },
+            {
+              "label": "その他",
+              "action": "postback req=sonota"
+            },
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
+          ],
+          "note": "利用者に「要望」という言葉は見せない（11/1本人）。機能の追加にあたるものは、運営が requests の「分類」を「要望」にする。記録は Firestore の requests、運営専用LINEとメールへすぐ通知、月曜の週報に件数と一覧。"
+        },
+        {
+          "id": "req_ask_shitsumon",
+          "when": "「使い方の質問」",
+          "send": "reply",
+          "text": "ご質問の内容を、このトークにそのまま送ってください。\n画面の写真やスクリーンショットを添えていただいても大丈夫です。\n\n受付時間　10:00〜18:00（土曜は17:00まで）\n定休日　水曜・日曜・祝日・当社指定休業日\n2営業日以内に、順にお返事いたします。",
+          "buttons": [
+            {
+              "label": "よくある質問",
+              "action": "uri https://otpromo.com/ippun-baibai.html#faq"
+            },
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
+          ]
+        },
+        {
+          "id": "req_ask_sonota",
+          "when": "「その他」",
+          "send": "reply",
+          "text": "お問い合わせの内容を、このトークにそのまま送ってください。\n画像を添えていただいても大丈夫です。",
+          "buttons": [
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
+          ]
+        },
+        {
+          "id": "req_ask_fuguai",
+          "when": "「不具合を知らせる」",
+          "send": "reply",
+          "text": "どのような不具合か、このトークにそのまま送ってください。\n（例：〇月〇日に送った図面の、〇〇が違っていた、など）\n\n画面の写真やスクリーンショットを添えていただけると、確認が早くなります。",
+          "buttons": [
+            {
+              "label": "やめる",
+              "action": "postback cancel"
+            }
+          ]
+        },
+        {
+          "id": "req_received",
+          "when": "受付中に、最初の文か画像が届いたとき",
+          "send": "reply",
+          "text": "ご連絡ありがとうございます。いただいた内容は担当が確認し、必要に応じてご連絡します。\n\n続けて文や画像を送ると、同じご連絡に追加します。送り終わったら「送り終わり」を押してください。",
+          "buttons": [
+            {
+              "label": "送り終わり",
+              "action": "postback req=done"
+            }
+          ],
+          "note": "対応や実装の約束はしない文面（設計スレッド指示）。受付は種類を選んでから30分。"
+        },
+        {
+          "id": "req_more",
+          "when": "受付中に、2通目以降が届いたとき",
+          "send": "reply",
+          "text": "追加でお受けしました。送り終わったら「送り終わり」を押してください。",
+          "buttons": [
+            {
+              "label": "送り終わり",
+              "action": "postback req=done"
+            }
+          ]
+        },
+        {
+          "id": "req_thanks",
+          "when": "「送り終わり」を押したとき",
+          "send": "reply",
+          "text": "ありがとうございました。いただいた内容は担当が確認いたします。\n販売図面は、いつもどおりこのトークに送ってください。"
+        },
+        {
+          "id": "req_image_full",
+          "when": "画像が1件に4枚を超えたとき",
+          "send": "reply",
+          "text": "画像は1件につき4枚までお受けしています。続きは、いったん「送り終わり」を押してから、もう一度お送りください。",
+          "buttons": [
+            {
+              "label": "送り終わり",
+              "action": "postback req=done"
+            }
+          ]
+        },
+        {
+          "id": "req_image_err",
+          "when": "画像を受け取れなかったとき",
+          "send": "reply",
+          "text": "申し訳ありません。画像を受け取れませんでした。お手数ですが、もう一度送ってください。"
         }
       ]
     }
