@@ -1,0 +1,35 @@
+# 地価データ（地価公示・位置参照情報）を年1回作り、このブランチに commit する。
+# 動かし方：.github/landprice-run.txt を書き換えて push（作業ブランチでも動く）。
+# workflow_dispatch は、このファイルが既定ブランチ（main）に入ってから使えるようになる。
+name: landprice
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/baibai-line]
+    paths: [".github/landprice-run.txt"]
+permissions:
+  contents: write
+concurrency:
+  group: landprice
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: build
+        run: cd app && python3 build_landprice.py --years 2023 2026 --prefs 13 14 11 12
+      - name: size
+        run: ls -la app/landprice_points.json app/chome_points.json
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add app/landprice_points.json app/chome_points.json
+          git diff --cached --quiet && { echo "変更なし"; exit 0; }
+          git commit -m "地価データを更新（地価公示・位置参照情報、出典は各JSONのcredit）"
+          git push origin HEAD:${GITHUB_REF_NAME}
