@@ -32,6 +32,8 @@ for w in ("物件確認", "広告", "おとり"):  # 案内用の図面なので
 assert r.想定QA[0].要確認 is False and "かかりません" in r.想定QA[0].参考回答
 # 5) 帯に取引態様・所属団体
 assert sale_core.band_company(company)["帯_3行目"] == "取引態様：媒介"
+assert sale_core.band_company({**company, "取引態様": "売主"})["帯_3行目"] == "取引態様：媒介"  # 会社設定に何があっても「媒介」
+assert sale_core.band_company({k: v for k, v in company.items() if k != "所属団体"})["帯_3行目"] == "取引態様：媒介"
 # 6) 和暦
 assert sale_core.built_year("昭和56年5月") == 1981 and sale_core.built_year("平成元年") == 1989 and sale_core.built_year("築年不詳") is None
 # 6b) 「より」の価格は計算に使わない

@@ -32,7 +32,7 @@ from sale_schema import SaleResult
 # 受ける物件種別（カンマ区切り）。10/31本人決定：居住用の中古マンション・戸建・土地。収益・事業用は第2弾
 SALE_TYPES = {t.strip() for t in os.environ.get("SALE_TYPES", "区分マンション,戸建,土地").split(",") if t.strip()}
 # 当社（客付）の取引態様。帯に「取引態様：媒介」と載せる（宅建業法34条・表示規約）
-OUR_TORIHIKI = os.environ.get("SALE_OUR_TORIHIKI", "媒介")
+OUR_TORIHIKI = "媒介"  # 帯の取引態様はいつも「媒介」（賃貸版と同じ。会社設定や図面では変えない。11/1本人）
 SALE_MOCK_RESULT = os.environ.get("SALE_MOCK_RESULT")
 # 思考の深さ（low / medium / high）。文字データのあるPDFと、画像だけ（写真・スキャン・FAX）で分ける
 EFFORT_TEXT = os.environ.get("SALE_EFFORT_TEXT", "low")
@@ -519,7 +519,7 @@ def band_company(company: dict) -> dict:
     """帯に載せる会社情報。免許番号の行に所属団体を足し、3行目に当社の取引態様（媒介）を載せる。"""
     c = {**core.DEFAULT_COMPANY, **(company or {})}
     c["免許"] = "　".join(p for p in (c.get("免許", ""), c.get("所属団体", "")) if p)
-    c["帯_3行目"] = f"取引態様：{c.get('取引態様') or OUR_TORIHIKI}"
+    c["帯_3行目"] = f"取引態様：{OUR_TORIHIKI}"
     return c
 
 
