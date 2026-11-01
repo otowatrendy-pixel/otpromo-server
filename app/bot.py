@@ -501,6 +501,8 @@ def on_postback(c, data):
         return sale_bot.lsim_ask(c, v.partition("doc=")[2] or c.u.get("last_job"))
     if k in ("lq", "lq2") and sale_bot.on(c):  # 図面の直後のローンの質問
         return sale_bot.lq_postback(c, k, v)
+    if k == "eq" and sale_bot.on(c):  # 戸建て・土地：土地の評価額の出し方（①路線価図／②地価公示）
+        return sale_bot.eq_postback(c, v)
     if k == "tq" and sale_bot.on(c):  # 800万円以下の物件の仲介手数料（図面の直後・届いた資料の「手数料を変える」）
         return sale_bot.tq_postback(c, v)
     if k == "hand" and sale_bot.on(c):  # この資料だけ、決済日（引渡日）を変えて作り直す
@@ -625,6 +627,8 @@ def on_text(c, t):
     if sale_bot.on(c) and (c.u.get("sale_lq") or {}).get("step") == "amount" and sale_bot.lq_text(c, t):
         return
     if sale_bot.on(c) and (c.u.get("sale_tq") or {}).get("step") == "amount" and sale_bot.tq_text(c, t):
+        return
+    if sale_bot.on(c) and (c.u.get("sale_eq") or {}).get("step") == "wait" and sale_bot.eq_text(c, t):
         return
     if sale_bot.on(c) and c.u.get("sale_edit") and sale_bot.edit_text(c, t):
         return

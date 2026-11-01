@@ -26,6 +26,7 @@ os.environ.setdefault("SALE_MOCK_RESULT", str(ROOT / "tests" / "fixtures" / "mih
 OFF = len(sys.argv) > 1 and sys.argv[1] == "off"
 os.environ["APP_MODE"] = "rent" if OFF else "sale"
 import shutil  # noqa: E402
+import json
 import pypdf  # noqa: E402
 import unicodedata  # noqa: E402
 shutil.rmtree(os.environ["LOCAL_DIR"], ignore_errors=True)
@@ -533,8 +534,54 @@ assert "800万円以下のため" not in out and "売買の資料ができまし
 sale_core.SALE_MOCK_RESULT = _old_mock
 print("800万円以下の手数料の質問 OK")
 
+# ---- 戸建て：土地の評価額をどちらで出すか（①路線価図／②地価公示） ----
+_house = _json.loads(open(os.environ["SALE_MOCK_RESULT"], encoding="utf-8").read())
+_house["事実"].update({"物件種別": "戸建", "所在地": "東京都杉並区高円寺南3丁目", "土地面積": "100.00㎡（公簿）",
+                      "建物面積": "90.00㎡", "構造": "木造2階建", "築年月": "2015年3月", "専有面積": None})
+HOUSE_JSON = os.path.join(os.environ["LOCAL_DIR"], "house.json")
+open(HOUSE_JSON, "w", encoding="utf-8").write(_json.dumps(_house, ensure_ascii=False))
+sale_core.SALE_MOCK_RESULT = HOUSE_JSON
+qh = store.quota(u_of(B))
+out = image(B); text(B, "見本 九郎"); out = pb(B, "lq=no")
+assert "土地の評価額" in out and "路線価図で調べる" in out and "高円寺南3丁目" in out and "売買の資料ができました" not in out, out
+out = pb(B, "eq=rosenka")
+assert "rosenka.nta.go.jp" in out and "図1" in out and "道路の数字" in out, out
+out = text(B, "わからない")
+assert "読み取れませんでした" in out, out
+out = text(B, "320D")
+assert "売買の資料ができました" in out, out
+jh = u_of(B)["last_job"]
+assert store.get_job(jh)["evals"] == {"rosenka_per_m2": 320_000}, store.get_job(jh)["evals"]
+assert not u_of(B).get("sale_eq") and not u_of(B).get("sale_eq_wait")
+th = unicodedata.normalize("NFKC", "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(store.db().get_file(f"jobs/{jh}/okyaku.pdf"))).pages))
+assert "路線価" in th, [l for l in th.splitlines() if "評価" in l or "推計" in l][:10]
+# ②はそのまま作る
+out = image(B); text(B, "見本 十郎"); pb(B, "lq=no"); out = pb(B, "eq=kouji")
+assert "売買の資料ができました" in out, out
+# ①を押したまま30分返事がない → 地価公示で作ってお届け（cron/often）
+out = image(B); text(B, "見本 十一郎"); pb(B, "lq=no"); pb(B, "eq=rosenka")
+uidB = store.user_by_line(B)[0]
+assert sale_bot.eval_timeouts() == 0  # まだ30分たっていない
+store.update_user(uidB, {"sale_eq": {**u_of(B)["sale_eq"], "at": store.now() - __import__("datetime").timedelta(minutes=31)}})
+SENT.clear()
+assert sale_bot.eval_timeouts() == 1
+pushed = json.dumps([m for _, ms in SENT for m in ms], ensure_ascii=False)
+assert "お返事がなかったため" in pushed and "売買の資料ができました" in pushed, pushed[:300]
+assert not u_of(B).get("sale_eq") and u_of(B).get("sale_eq_wait") is False
+assert store.quota(u_of(B))["used"] - qh["used"] == 3 if "used" in qh else True  # 3件作って3件分だけ
+# 会社設定「いつも地価公示から」なら聞かない
+pb(B, "edit=evalask"); pb(B, "evalask=kouji")
+out = image(B); text(B, "見本 十二郎"); out = pb(B, "lq=no")
+assert "土地の評価額" not in out and "売買の資料ができました" in out, out
+pb(B, "edit=evalask"); pb(B, "evalask=ask")
+assert sale_bot.parse_evals("路線価 320D") == {"rosenka_per_m2": 320_000}
+sale_core.SALE_MOCK_RESULT = _old_mock
+out = image(B); text(B, "見本 十三郎"); out = pb(B, "lq=no")  # このあとの確認は、最後の資料がマンションの前提
+assert "売買の資料ができました" in out, out
+print("評価額の出し方の質問 OK")
+
 # ---- ご要望・不具合のご連絡：記録・運営へ通知・週報 ----
-import json, usage, youbou, growth, delivery as _dl
+import usage, youbou, growth, delivery as _dl
 _admin, _mails = [], []
 _al, _sn = usage.admin_line, _dl.send_notice
 usage.admin_line = lambda t: _admin.append(t)

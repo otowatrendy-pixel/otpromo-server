@@ -232,7 +232,19 @@ def cron_often(x_cron_key: str = Header("")):
     import growth
     import naiken
     return {"naiken_reserved": naiken.run_reserved(), "usage_alerts": usage.check(), "growth_sent": growth.run_due(), "fax_results": delivery.poll_faxes(), "recvfax_remind": bot.remind_recvfax(), "pending_purged": bot.purge_pending(),
-            "grace_ended": billing.end_grace()}
+            "grace_ended": billing.end_grace(), "eval_timeouts": _eval_timeouts()}
+
+
+def _eval_timeouts():
+    """売買版：路線価の返信を30分待っても届かないとき、地価公示で作ってお届けする。"""
+    import sale_bot
+    if not sale_bot.SALE_ONLY:
+        return 0
+    try:
+        return sale_bot.eval_timeouts()
+    except Exception:
+        log.exception("評価額の返信待ちの処理")
+        return -1
 
 
 @app.get("/admin/usage")

@@ -259,6 +259,8 @@ def _sale_fields(co, u):
         ok = {k: v for k, v in vals["売買設定"].items() if k in sale_bot.DEFAULT_SETTINGS}
         if ok.get("teiren_ask") not in (None, "ask", "normal", "tokurei"):
             raise HTTPException(422, {"code": "sale_teiren", "message": "800万円以下の物件の手数料の選び方が正しくありません。"})
+        if ok.get("eval_ask") not in (None, "ask", "kouji"):
+            raise HTTPException(422, {"code": "sale_eval_ask", "message": "評価額の出し方の選び方が正しくありません。"})
         if "teiren_ask" in ok:  # 聞かなかったときに使う値も合わせる
             ok["teiren_tokurei"] = ok["teiren_ask"] == "tokurei"
         if ok.get("fee_mode") not in (None, "max", "half", "free", "custom", "rate"):

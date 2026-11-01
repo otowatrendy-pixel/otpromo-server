@@ -33,6 +33,7 @@ ALLOW = {x.strip() for x in config.env("SALE_ALLOW_UIDS").split(",") if x.strip(
 
 # 売買の設定の初期値（costs_sale.CompanySaleSettings と同じ名前）。会社ごとに company["売買設定"] で上書き
 DEFAULT_SETTINGS = {"fee_mode": "max", "fee_custom": None, "fee_rate": None, "teiren_tokurei": False, "estimate_eval": True,
+                    "eval_ask": "ask",  # 戸建て・土地の評価額：ask＝①路線価図／②地価公示を聞く、kouji＝いつも②
                     # 800万円以下の物件の手数料：ask＝図面ごとに聞く（初期値）／normal＝いつも通常／tokurei＝いつも特例
                     "teiren_ask": "ask",
                     # 司法書士報酬・実費の初期値は概算書の計算側（costs_sale.CompanySaleSettings）を唯一の元にする
@@ -273,7 +274,7 @@ def handle_sale(c, data, jid, rental_a=None):
     if needs_setup(c.u):
         hold_for_setup(c, jid, a)
         return
-    if ask_loan(c, jid, a) or ask_teiren(c, jid, a):
+    if ask_next(c, jid, a):
         return
     return finish(c, jid, a)
 
@@ -329,7 +330,7 @@ def after_atena(c, jid, job, atena, after=()):
         c.refresh()
         return c.send(texts.build("sale_need_setup"), texts.build("sale_reg_assoc"))
     a = _load_analyzed(jid, job)
-    if not after and (ask_loan(c, jid, a, atena, saved=True) or ask_teiren(c, jid, a, atena, saved=True)):  # 何枚か続けて送られたときは聞かず、会社設定のまま作る
+    if not after and ask_next(c, jid, a, atena, saved=True):  # 何枚か続けて送られたときは聞かず、会社設定のまま作る
         return
     return finish(c, jid, a, atena, after)
 
@@ -353,7 +354,7 @@ def resume_after_setup(c):
     if not job or job.get("status") != "analyzed" or (at and at < store.now() - timedelta(hours=24)):
         return c.send(line.text("売買の設定ができました。お預かりしていた販売図面の期限が切れたため、もう一度送ってください。"))
     a = _load_analyzed(jid, job)
-    if ask_loan(c, jid, a, job.get("宛名") or "", saved=True) or ask_teiren(c, jid, a, job.get("宛名") or "", saved=True):
+    if ask_next(c, jid, a, job.get("宛名") or "", saved=True):
         return
     line.loading(c.line_uid, 60)
     return finish(c, jid, a, job.get("宛名") or "")
@@ -498,7 +499,7 @@ def _lq_finish(c, jid, job, lo):
     store.update_user(c.uid, {"sale_lq": None})
     c.refresh()
     a = _load_analyzed(jid, store.get_job(jid))
-    if ask_teiren(c, jid, a, job.get("宛名") or "", saved=True):  # 800万円以下なら、手数料の扱いをもう1問だけ
+    if ask_next(c, jid, a, job.get("宛名") or "", saved=True, after="loan"):  # 800万円以下の手数料・評価額の出し方
         return
     line.loading(c.line_uid, 60)
     return finish(c, jid, a, job.get("宛名") or "")
@@ -558,7 +559,7 @@ def finish(c, jid, a, atena="", after=()):
         job0 = store.get_job(jid) or {}
         # 図面の直後に聞いたローン・800万円以下の手数料の答え（なければ会社設定）
         te = job0.get("teiren") or ({"mode": "tokurei"} if teiren_setting(company) == "tokurei" else None)  # 「いつも特例」は上限33万円で
-        est = estimate_html(company, loan_override=job0.get("loan"), teiren=te)
+        est = estimate_html(company, job0.get("evals") or None, loan_override=job0.get("loan"), teiren=te)  # 評価額（路線価の返信など）
         if is_land(a["result"]):
             after = (texts.build("sale_land_loan_note", スタッフ向けの案内例=_land_staff()),) + tuple(after)
         out = sale_core.render_documents(company, a["img"], a["result"], a["pages"], a["log"], estimate_html=est)
@@ -717,6 +718,13 @@ def edit_postback(c, k, v):
         # 聞かなかったとき（答えがない・続けて送られた）に使う値も合わせる。「毎回聞く」は通常で作る
         set_settings(c, teiren_ask=m, teiren_tokurei=m == "tokurei")
         c.send(texts.build("sale_edit_done", 項目=f"800万円以下の物件の手数料（{TEIREN_SETTING_NAMES[m]}）"))
+        return True
+    if k == "edit" and v == "evalask":
+        c.send(texts.build("sale_edit_evalask", 今の設定=EVAL_ASK_NAMES[eval_setting(co)]))
+        return True
+    if k == "evalask" and v in EVAL_ASK_NAMES:
+        set_settings(c, eval_ask=v)
+        c.send(texts.build("sale_edit_done", 項目=f"土地の評価額の出し方（{EVAL_ASK_NAMES[v]}）"))
         return True
     if k == "edit" and v == "shiho":
         s = settings(co)
@@ -898,6 +906,16 @@ def parse_evals(s):
     m = re.search(r"(?:年税額?|固都税|税額)\D{0,6}?(\d+(?:\.\d+)?)\s*(万)?", s)
     if m:
         out["annual_property_tax"] = int(round(float(m.group(1)) * (10_000 if m.group(2) else 1)))
+    # 相続税路線価（路線価図の道路の数字。「路線価 320」「路線価320D」）
+    m = re.search(r"路線価\D{0,4}?(\d+(?:\.\d+)?\s*万?[A-GＡ-Ｇa-g]?)", s)
+    if m:
+        try:
+            import evaluation
+            v = evaluation.parse_rosenka_reply(m.group(1))
+        except ImportError:
+            v = None
+        if v:
+            out["rosenka_per_m2"] = int(v)
     return out
 
 
@@ -1208,8 +1226,141 @@ def _tq_apply(c, jid, job, t):
             return c.send(line.text("申し訳ありません。この資料は作り直せませんでした。もう一度、販売図面から送ってください。"))
         return c.send(texts.build("sale_teiren_done", 手数料の扱い=teiren_label(t), お客様向けリンク=url))
     store.update_job(jid, {"teiren": t})
+    a = _load_analyzed(jid, store.get_job(jid))
+    if ask_next(c, jid, a, job.get("宛名") or "", saved=True, after="teiren"):
+        return
+    line.loading(c.line_uid, 60)
+    return finish(c, jid, a, job.get("宛名") or "")
+
+
+# ---------- 戸建て・土地：土地の評価額をどちらで出すか（路線価図／地価公示） ------------------------
+# 聞くかどうか・案内する路線価図は計算側（sale_estimate.eval_question）が決める。路線価のない地域（found=False）は聞かずに地価公示で作る。
+# ①路線価図：図のリンクを送り、道路の数字（例 320）の返信を evaluation.parse_rosenka_reply で円/㎡にして作る。
+#   返信がないまま EVAL_WAIT_MIN 分たったら、②地価公示で作ってお知らせする（cron/often の eval_timeouts）。
+# ②地価公示：すぐ作る。どちらも作るのは1回だけで、件数は1件だけ使う。
+
+EVAL_ASK_NAMES = {"ask": "毎回聞く", "kouji": "いつも地価公示から推計"}
+EVAL_WAIT_MIN = 30
+
+
+def eval_setting(co):
+    v = ((co or {}).get("売買設定") or {}).get("eval_ask")
+    return v if v in EVAL_ASK_NAMES else "ask"
+
+
+def ask_eval(c, jid, a, atena="", saved=False):
+    try:
+        import sale_core
+        import sale_estimate
+        facts = sale_core.cost_inputs(a["result"].事実)
+        q = sale_estimate.eval_question(c.u.get("company") or {}, facts, (store.get_job(jid) or {}).get("evals")) if facts else None
+    except (ImportError, AttributeError):
+        return False
+    except Exception:
+        log.exception("評価額の質問の判定")
+        return False
+    r = (q or {}).get("rosenka") or {}
+    if not r.get("found") or not r.get("maps"):
+        return False
+    if not saved:
+        _save_analyzed(jid, a)
+    store.update_job(jid, {"宛名": atena})
+    store.update_user(c.uid, {"sale_eq": {"jid": jid, "step": "q", "at": store.now(), "maps": r["maps"][:6],
+                                          "town": r.get("town") or ""}})
+    c.refresh()
+    c.send(texts.build("sale_eval_q", 町名=r.get("town") or "この物件"))
+    return True
+
+
+def _eq_job(c):
+    q = c.u.get("sale_eq") or {}
+    jid = q.get("jid")
+    job = store.get_job(jid) if jid else None
+    if not job or job.get("status") != "analyzed" or job.get("user_id") != c.uid or \
+            (q.get("at") and q["at"] < store.now() - timedelta(hours=24)):
+        return None, None
+    return jid, job
+
+
+def _maps_text(maps):
+    if len(maps) == 1:
+        return maps[0]["pdf"]
+    return "\n".join(f"図{i + 1}　{m['pdf']}" for i, m in enumerate(maps))
+
+
+def eq_postback(c, v):
+    """eq=rosenka（①路線価図で調べる）／eq=kouji（②地価公示から推計）。"""
+    jid, job = _eq_job(c)
+    if not jid:
+        store.update_user(c.uid, {"sale_eq": None, "sale_eq_wait": False})
+        return c.send(line.text("お預かりしていた販売図面が見つかりませんでした。お手数ですが、もう一度送ってください。"))
+    if v == "rosenka":
+        q = c.u["sale_eq"]
+        store.update_user(c.uid, {"sale_eq": {**q, "step": "wait", "at": store.now()}, "sale_eq_wait": True})
+        return c.send(texts.build("sale_rosenka_ask", 路線価図=_maps_text(q.get("maps") or []),
+                                  何枚=f"（{len(q.get('maps') or [])}枚あります）" if len(q.get("maps") or []) > 1 else "",
+                                  待つ分数=str(EVAL_WAIT_MIN)))
+    return _eq_finish(c, jid, job, None)
+
+
+def eq_text(c, t):
+    """路線価の返信（「320」「320D」など）。扱ったら True。"""
+    q = c.u.get("sale_eq") or {}
+    if q.get("step") != "wait":
+        return False
+    import evaluation
+    v = evaluation.parse_rosenka_reply(t)
+    if not v:
+        c.send(texts.build("sale_rosenka_bad"))
+        return True
+    jid, job = _eq_job(c)
+    if not jid:
+        store.update_user(c.uid, {"sale_eq": None})
+        return False
+    return _eq_finish(c, jid, job, {"rosenka_per_m2": int(v)}) or True
+
+
+def _eq_finish(c, jid, job, ev):
+    store.update_user(c.uid, {"sale_eq": None, "sale_eq_wait": False})
+    if ev:
+        store.update_job(jid, {"evals": {**(job.get("evals") or {}), **ev}})
+    c.refresh()
     line.loading(c.line_uid, 60)
     return finish(c, jid, _load_analyzed(jid, store.get_job(jid)), job.get("宛名") or "")
+
+
+def eval_timeouts(users=None):
+    """①を押したまま返信がない方：EVAL_WAIT_MIN 分たったら地価公示で作ってお届けする（cron/often から）。"""
+    import bot
+    n = 0
+    cut = store.now() - timedelta(minutes=EVAL_WAIT_MIN)
+    for uid, u in users if users is not None else store.db().find_all("users", "sale_eq_wait", True):
+        q = u.get("sale_eq") or {}
+        if q.get("step") != "wait" or not q.get("at") or q["at"] > cut or not uid.startswith("L"):
+            if q.get("step") != "wait":
+                store.update_user(uid, {"sale_eq_wait": False})
+            continue
+        c = bot.Ctx({"source": {"type": "user", "userId": uid[1:]}})
+        jid, job = _eq_job(c)
+        if not jid:
+            store.update_user(uid, {"sale_eq": None, "sale_eq_wait": False})
+            continue
+        c.send(texts.build("sale_rosenka_timeout"))
+        _eq_finish(c, jid, job, None)
+        n += 1
+    return n
+
+
+QUESTIONS = (("loan", ask_loan), ("teiren", ask_teiren), ("eval", ask_eval))
+
+
+def ask_next(c, jid, a, atena="", saved=False, after=None):
+    """図面の直後の質問を順に（ローン → 800万円以下の手数料 → 土地の評価額の出し方）。聞いたら True。"""
+    names = [n for n, _ in QUESTIONS]
+    for _, f in QUESTIONS[names.index(after) + 1 if after else 0:]:
+        if f(c, jid, a, atena, saved):
+            return True
+    return False
 
 
 # ---------- お試しの期限のお知らせ（毎朝9時の定期実行から） ------------------------------------
