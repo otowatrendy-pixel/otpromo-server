@@ -71,14 +71,18 @@ def wish_label(w):
     try:
         d = datetime.strptime(w["date"], "%Y-%m-%d")
     except (KeyError, ValueError, TypeError):
-        return w.get("text") or ""
+        return ""  # 日付として読めないものは載せない（利用者の自由な文をそのままFAXに載せないため）
     s = f"{d.month}月{d.day}日（{WEEK[d.weekday()]}）"
-    if w.get("time"):
-        h, m = w["time"].split(":")[:2]
-        s += f"{int(h)}時{m}分頃"
-    elif w.get("note"):
-        s += w["note"]
+    t = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", str(w.get("time") or ""))
+    if t and int(t.group(1)) < 24 and int(t.group(2)) < 60:
+        s += f"{int(t.group(1))}時{t.group(2)}分頃"
+    elif str(w.get("note") or "").strip() in WISH_NOTES:
+        s += str(w["note"]).strip()
     return s
+
+
+# 時刻がないときに載せてよい言い方（決まった言葉だけ。自由な文はFAXに載せない）
+WISH_NOTES = {"午前", "午後", "夕方", "終日", "午前中", "午後以降", "10時〜12時", "13時〜15時", "15時〜17時"}
 
 
 # ---------- 自由な文をAIで項目に分ける ----------
