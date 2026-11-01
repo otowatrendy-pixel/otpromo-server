@@ -127,7 +127,7 @@ def stamp_tax(amount: int, reduced: bool) -> int:
 
 
 # 中古住宅の不動産取得税の控除額（新築された時期で決まる）。(新築日の始まり, 控除額)
-# 神奈川県・埼玉県・千葉県の案内と同じ表（東京都の一次資料は要確認）
+# 東京都主税局 Q&A（shitsumon/real_estate/f A13）で一致を確認済み（2026-11-01）
 USED_HOUSE_DEDUCTION = [
     (D(1997, 4, 1), 12_000_000),
     (D(1989, 4, 1), 10_000_000),
@@ -497,6 +497,8 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
 
     # 1. 仲介手数料
     fee, fee_note = brokerage_fee(ex, s)
+    if s.teiren_tokurei and ex <= 8_000_000 and fee is not None and fee > 0:
+        staff.append("仲介手数料は800万円以下の物件の特例（上限33万円）で計算しています。媒介契約の前に、お客様への説明と合意が必要です。")
     if fee is not None and tax_estimated:
         fee_note = (fee_note + "。" if fee_note else "") + "消費税を除いた価格（推計）で計算"
     lines.append(Line("must", "仲介手数料", fee, ("estimate" if tax_estimated else "exact") if fee is not None else "check", fee_note))
