@@ -20,6 +20,11 @@ APP_MODE = env("APP_MODE", "rent")
 FIRESTORE_DB = env("FIRESTORE_DB", "(default)")
 RENT_FIRESTORE_DB = env("RENT_FIRESTORE_DB", "(default)")  # 売買版から賃貸版の登録内容を読む先（読むだけ）
 RENT_LINE_URL = env("RENT_LINE_URL", "https://lin.ee/tlnsKca")  # 売買版で賃貸の図面が届いたときの案内先
+# 試験用の環境（STAGE=stg）。本番と別の Cloud Run・Firestore・LINE・Stripeテストモードで動かす（2026-11-01）
+STAGE = env("STAGE")
+# FAXを送ってよい番号（カンマ区切り）。入っていれば、ほかの番号には送らない（試験では自社のFAXだけ）
+# 区切りは「;」か「,」。試験用の環境（STAGE）で空なら、どこにも送らない
+FAX_ALLOW = {"".join(ch for ch in x if ch.isdigit()) for x in env("FAX_ALLOW").replace(";", ",").split(",") if x.strip()}
 
 # Claude
 ANTHROPIC_KEY = env("MAISOKU_API_KEY") or env("ANTHROPIC_API_KEY")
@@ -34,6 +39,8 @@ LINE_ADD_FRIEND_URL = env("LINE_ADD_FRIEND_URL", "https://lin.ee/tlnsKca")
 
 # Stripe（まずはテスト環境のキー）。売買版（APP_MODE=sale）は賃貸版の価格IDを初期値にしない（起動時に売買版の lookup_key で探す・作る）
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
+if STAGE and STRIPE_SECRET_KEY.startswith(("sk_live", "rk_live")):  # 試験用の環境で本番の決済キーは使わない
+    raise RuntimeError("試験用の環境（STAGE）に本番のStripeキーが入っています。テストモードのキー（sk_test_）にしてください。")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET")
 PRICE_LIGHT = env("PRICE_LIGHT", "" if APP_MODE == "sale" else "price_1UUsZOB542nWQrMKc0HZD2WL")
 PRICE_UNLIMITED = env("PRICE_UNLIMITED", "" if APP_MODE == "sale" else "price_1UVHfFB542nWQrMKwZKbd3uZ")

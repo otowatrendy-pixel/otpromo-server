@@ -100,7 +100,7 @@ def _get(doc):
 
 def notify_admin(subject, text, urgent=True):
     import delivery
-    subject = ("【至急】" if urgent else "") + subject
+    subject = ("【試験】" if config.STAGE else "") + ("【至急】" if urgent else "") + subject
     delivery.send_notice(ADMIN_MAIL, subject, text)
     admin_line(f"{subject}\n\n{text}")
 
@@ -109,6 +109,8 @@ def admin_line(text):
     """運営専用LINE（「1分資料 運営通知」）へ。トークンと友だちの登録があるときだけ。"""
     if not ADMIN_LINE_TOKEN:
         return
+    if config.STAGE and not text.startswith("【試験】"):
+        text = "【試験】" + text
     for uid in (_get("admin_line").get("user_ids") or []):
         try:
             requests.post(f"{line.API}/message/push", timeout=20,

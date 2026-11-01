@@ -96,7 +96,13 @@ def send_fax(number, pdf: bytes, sender: str = "", kind: str = "", ref: str = ""
     import store
     import usage
     u = store.get_user(uid) if uid else None
-    if u and u.get("review"):
+    allow_ng = bool(config.FAX_ALLOW or config.STAGE) and "".join(ch for ch in str(number) if ch.isdigit()) not in config.FAX_ALLOW
+    if allow_ng:
+        # 試験用の環境：決めた番号（自社のFAX）以外には送らない。結果は「届いた」にして流れだけ確かめる
+        import secrets
+        pid = "STG-" + secrets.token_hex(6)
+        log.warning("FAX_ALLOW にない番号のため送らない to=%s", number)
+    elif u and u.get("review"):
         # ストア審査用のアカウントは実際には送らない（知らない相手に届かないように）。結果は「届いた」にする
         import secrets
         pid = "REVIEW-" + secrets.token_hex(6)
@@ -225,7 +231,7 @@ def poll_faxes():
         if r.get("status") not in ("sending", "retrying"):
             continue
         try:
-            st, reason = ("sent", "") if pid.startswith("REVIEW-") else _fax_api_status(pid)
+            st, reason = ("sent", "") if pid.startswith(("REVIEW-", "STG-")) else _fax_api_status(pid)
         except Exception:
             log.exception("FAXの結果を取れない %s", pid)
             st, reason = r["status"], ""
