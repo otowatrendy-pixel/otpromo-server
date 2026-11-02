@@ -259,7 +259,10 @@ class BroadcastIn(BaseModel):
 
 @app.post("/admin/broadcast")
 def admin_broadcast(body: BroadcastIn, key: str = ""):
-    """障害・メンテナンスのお知らせの一斉送信（合言葉 ADMIN_OPS_KEY）。まず send=false で確かめてから送る。"""
+    """障害・メンテナンスのお知らせの一斉送信（合言葉 ADMIN_OPS_KEY）。まず send=false で確かめてから送る。
+    ops_ の文面（サービスの不具合・復旧・メンテナンスの連絡）だけに限っている。キャンペーンなど宣伝のメールを
+    ここに足す場合は、特定電子メール法により「送信者の名称・住所・配信停止の方法と受付先・問い合わせ先」を本文に入れ、
+    配信停止した人を宛先から外す仕組みを先に作ること。"""
     import threading
     import texts
     import usage
