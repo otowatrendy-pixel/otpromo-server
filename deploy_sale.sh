@@ -3,6 +3,7 @@
 #   本番：bash deploy_sale.sh            （サービス otpromo-api-sale・Firestore sale）
 #   試験：bash deploy_sale.sh stg        （サービス otpromo-api-sale-stg・Firestore sale-stg・Stripeはテストモード・FAXは自社だけ）
 #   初回の準備：bash deploy_sale.sh setup / bash deploy_sale.sh stg setup
+#   定期実行（本番だけ、起動の後に1回）：bash deploy_sale.sh schedule
 # 賃貸版（deploy.sh・otpromo-api）には一切さわらない。秘密の値は名前の頭で分ける（本番 SALE_ / 試験 STG_SALE_）。
 set -euo pipefail
 PROJECT=otpromo-maisoku
@@ -34,6 +35,36 @@ if [ "${1:-}" = "setup" ]; then
   done
   echo "準備ができました。次に秘密の値を登録してください："
   echo "  bash tools/set_secret.sh $(for s in $OWN; do printf '%s ' ${P}$s; done)"
+  exit 0
+fi
+
+# 定期実行（本番だけ。試験の環境には付けない）：bash deploy_sale.sh schedule
+#   毎日9時 /cron/daily（お試し期限の3日前のお知らせ・日報など）、5分ごと /cron/often（予約した内見FAX・路線価の返信待ち30分・FAXの結果など）、
+#   毎日3時30分 売買版のFirestore（sale）を丸ごと書き出す（賃貸版の otpromo-backup とは別。保存先は同じで30日で自動で消える）
+if [ "${1:-}" = "schedule" ]; then
+  if [ -n "$STAGE" ]; then echo "試験の環境には定期実行を付けません（必要なときは手で /cron/often を呼んでください）。"; exit 1; fi
+  gcloud services enable cloudscheduler.googleapis.com
+  URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)')
+  KEY=$(gcloud secrets versions access latest --secret=APP_SECRET)
+  job() {
+    gcloud scheduler jobs delete "$1" --location=$REGION --quiet >/dev/null 2>&1 || true
+    gcloud scheduler jobs create http "$1" --location=$REGION --schedule="$2" --time-zone=Asia/Tokyo \
+      --uri="$URL$3" --http-method=POST --headers="X-Cron-Key=$KEY" --attempt-deadline="$4" >/dev/null
+  }
+  job otpromo-sale-daily "0 9 * * *" /cron/daily 300s
+  job otpromo-sale-often "*/5 * * * *" /cron/often 120s
+  BACKUP=gs://${PROJECT}-backup
+  gcloud storage buckets create $BACKUP --location=$REGION --uniform-bucket-level-access 2>/dev/null || true
+  echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}' > /tmp/lc-backup.json
+  gcloud storage buckets update $BACKUP --lifecycle-file=/tmp/lc-backup.json >/dev/null
+  gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$SA --role=roles/datastore.importExportAdmin --condition=None >/dev/null
+  gcloud storage buckets add-iam-policy-binding $BACKUP --member=serviceAccount:$SA --role=roles/storage.objectAdmin >/dev/null
+  gcloud scheduler jobs delete otpromo-sale-backup --location=$REGION --quiet >/dev/null 2>&1 || true
+  gcloud scheduler jobs create http otpromo-sale-backup --location=$REGION --schedule="30 3 * * *" --time-zone=Asia/Tokyo \
+    --uri="https://firestore.googleapis.com/v1/projects/$PROJECT/databases/$DB:exportDocuments" \
+    --http-method=POST --headers="Content-Type=application/json" --message-body="{\"outputUriPrefix\":\"$BACKUP/sale\"}" \
+    --oauth-service-account-email=$SA --oauth-token-scope=https://www.googleapis.com/auth/datastore >/dev/null
+  echo "売買版の定期実行（毎日9時・5分ごと・毎日3時30分のバックアップ、日本時間）を設定しました。賃貸版の定期実行には触れていません。"
   exit 0
 fi
 
