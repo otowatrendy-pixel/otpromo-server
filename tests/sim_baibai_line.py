@@ -174,11 +174,18 @@ def check_stripe_split(mode):
         billing.ensure_prices()
         got = {(m["lookup_key"], m["unit_amount"], m["recurring"]["interval"]) for m in made}
         if mode == "sale":
-            assert got == {("sale_light_monthly", 2480, "month"), ("sale_unlimited_monthly", 4280, "month"),
-                           ("sale_light_yearly", 24800, "year"), ("sale_unlimited_yearly", 42800, "year")}, got
+            assert got == {("sale_light_monthly", 2680, "month"), ("sale_unlimited_monthly", 4680, "month"),
+                           ("sale_light_yearly", 26800, "year"), ("sale_unlimited_yearly", 46800, "year")}, got
             assert all(p["metadata"]["service"] == "maisoku_sale" and "売買版" in p["name"] for p in prods)
             assert billing.price_of("unlimited", True) == "price_sale_unlimited_yearly"
             assert billing.plan_of_price("price_sale_light_monthly") == ("light", False)
+            # 金額を変えたとき：古い金額の価格が lookup_key に付いていたら、新しい価格を作って lookup_key を移す
+            made.clear()
+            fake.Price.list = lambda **kw: {"data": [{"id": "price_old", "lookup_key": "sale_light_monthly", "unit_amount": 2480, "active": True}]}
+            billing.ensure_prices()
+            lm = [m for m in made if m["lookup_key"] == "sale_light_monthly"]
+            assert len(lm) == 1 and lm[0]["unit_amount"] == 2680 and lm[0].get("transfer_lookup_key") is True, lm
+            fake.Price.list = lambda **kw: {"data": []}
         else:
             assert all(not lk.startswith("sale_") for lk, *_ in got)
     finally:
@@ -762,7 +769,7 @@ for mid in ("remain_free_last", "remain_light_low", "naiken_trial", "nudge_free_
     t = _j.dumps(line.out(texts.build(mid, n=3, 更新日="12月1日", 期限="11月30日（月）", urls={})), ensure_ascii=False)
     assert "1,480" not in t and "2,980" not in t and "使い放題" not in t and "{" not in t.replace('{"', "").replace("{}", ""), (mid, t[:300])
 assert store.quota(store.get_user(uidM))["remaining"] == 100
-assert "MAX（月払い）" in ps and "使い放題" not in ps and "月額2,480円" in ps and "年額24,800円" in ps and "月額4,280円" in ps and "年額42,800円" in ps and "1,480" not in ps, ps
+assert "MAX（月払い）" in ps and "使い放題" not in ps and "月額2,680円" in ps and "年額26,800円" in ps and "月額4,680円" in ps and "年額46,800円" in ps and "1,480" not in ps, ps
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})
 assert r.returncode == 0
