@@ -156,7 +156,10 @@ def analyze(data: bytes) -> dict:
             camera = scan.is_camera(Image.open(io.BytesIO(data)))
         except Exception:
             camera = False
-        img, fix = make_page(img, result, camera)
+        # パソコンで作った画像（スクリーンショット・PNG書き出し）は補正しない。
+        # 白い背景に太い枠の表がある図面を「用紙の縁」と取り違えて、表だけを切り出して歪ませてしまうため
+        if camera or result.用紙.写真:
+            img, fix = make_page(img, result, camera)
     t3 = time.perf_counter()
     log = {"秒_準備": round(t1 - t0, 2), "秒_AI": round(t2 - t1, 2), "秒_写真補正": round(t3 - t2, 2),
            "写真の補正": fix, "モデル": config.MODEL, **usage}
