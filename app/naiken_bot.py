@@ -467,7 +467,20 @@ def answer_rest(c, v):
         return c.send(texts.build("naiken_ask_dates"))
 
 
-def edit_card(c):
+def edit_card(c, menu=True):
+    # 使い放題の方には、名刺の情報の前に「内見申込書のQRを消す／載せる」を選べるようにする（11/2本人決定）。
+    # 「変更」の一覧はクイックリプライの上限（13個）に達しているため、ここに置く
+    if menu and c.u.get("plan") == "unlimited":
+        hide = bool((c.u.get("company") or {}).get("内見FAXのQRを消す"))
+        return c.send(line.text(
+            "内見申込書の、どちらを変更しますか。\n\n"
+            "・名刺の情報（ローマ字・役職・メールなど）\n"
+            "・一番下の「1分資料」のQRとご案内の一文（使い放題プランの方は、載せないこともできます。いまは"
+            + ("載せない設定" if hide else "載せる設定") + "です）",
+            quick=[line.qr_postback("名刺の情報", "edit=card_go", "名刺の情報"),
+                   line.qr_postback("QRを載せる" if hide else "QRを載せない",
+                                    "edit=qr_show" if hide else "edit=qr_hide",
+                                    "QRを載せる" if hide else "QRを載せない")]))
     first = "card_roman" if (c.u.get("company") or {}).get("担当者名") else "card_name"
     _set(c, nk={"card_only": True}, nk_step=first)
     c.send(ask_card(first))

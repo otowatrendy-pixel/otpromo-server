@@ -460,6 +460,16 @@ def on_postback(c, data):
         return naiken_bot.card_postback(c, k)
     if k == "edit" and v == "card":
         return naiken_bot.edit_card(c)
+    if k == "edit" and v == "card_go":
+        return naiken_bot.edit_card(c, menu=False)
+    if k == "edit" and v in ("qr_hide", "qr_show") and c.u.get("registered"):
+        if v == "qr_hide" and c.u.get("plan") != "unlimited":
+            return c.send(line.text("内見申込書のQRを載せない設定は、使い放題プランの方がお使いいただけます。"))
+        set_company(c, 内見FAXのQRを消す=(v == "qr_hide"))
+        return c.send(line.text(
+            "これから作る内見申込書には、一番下のQRとご案内の一文を載せません。" if v == "qr_hide" else
+            "これから作る内見申込書に、一番下のQRとご案内の一文を載せます。"))
+
     if k == "cancel":
         if naiken_bot.active(c.u):
             return naiken_bot.cancel(c)
