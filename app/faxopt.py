@@ -83,11 +83,9 @@ def build_pdf(company, job):
     ob = Image.open(io.BytesIO(store.db().get_file(f"jobs/{job['_id']}/obikae.png")))
     result = Result.model_validate(job["result"])
     company = {**core.DEFAULT_COMPANY, **(company or {}), "テーマ色": "#222222"}
-    html_text = render.build_html(result, render.png_bytes(render.fax_image(ob)), company,
-                                  sections=render.FAX_SECTIONS, bw=True)
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "fax.pdf"
-        render.to_pdf(html_text, out)
+        render.fax_pdf(result, render.png_bytes(render.fax_image(ob)), company, out)
         return out.read_bytes()
 
 
