@@ -258,3 +258,45 @@ def _t9():
 
 
 _t9()
+
+
+def _t10():
+    """固定資産税・都市計画税の年税額の推計（200㎡超・23区の都計1/2・新築住宅の減額）2026-11-03"""
+    from datetime import date as D
+    from costs_sale import estimate_annual_property_tax as est
+    h = dict(property_type="house", price=60_000_000, seller_is_business=False, land_area=100.0, floor_area=100.0,
+             built=D(2000, 1, 10), structure="wood", address="東京都練馬区貫井2丁目")
+    f = SaleFacts(**h)
+    a, why = est(f, 30_000_000, 5_000_000, D(2027, 1, 1))
+    exp = 30_000_000 * 0.014 / 6 + 30_000_000 * 0.003 / 3 * 0.5 + 5_000_000 * 0.017
+    assert abs(a - exp) < 1, (a, exp)
+    # 23区外は都計の1/2軽減なし＋税率の注意
+    a2, why2 = est(SaleFacts(**{**h, "address": "神奈川県横浜市港北区日吉本町1丁目"}), 30_000_000, 5_000_000, D(2027, 1, 1))
+    assert abs(a2 - (exp + 30_000_000 * 0.003 / 3 * 0.5)) < 1 and any("0.3%" in w for w in why2)
+    # 土地300㎡ → 200㎡までは小規模、残り100㎡は一般
+    a3, why3 = est(SaleFacts(**{**h, "land_area": 300.0}), 30_000_000, 5_000_000, D(2027, 1, 1))
+    k = 30_000_000 * 0.014 * (2 / 3 / 6 + 1 / 3 / 3)
+    t = 30_000_000 * 2 / 3 * 0.003 / 3 * 0.5 + 30_000_000 / 3 * 0.003 * 2 / 3
+    assert abs(a3 - (k + t + 5_000_000 * 0.017)) < 1 and any("200㎡" in w for w in why3)
+    # 築浅の戸建て（2025年5月新築・100㎡）→ 2027年度は3年度分のうち2年度目で建物の固定資産税が半分
+    a4, why4 = est(SaleFacts(**{**h, "built": D(2025, 5, 1)}), 30_000_000, 5_000_000, D(2027, 6, 1))
+    assert abs(a4 - (exp - 5_000_000 * 0.014 / 2)) < 1 and any("2年度目" in w for w in why4)
+    # 4年度目は減額なし
+    a5, _ = est(SaleFacts(**{**h, "built": D(2025, 5, 1)}), 30_000_000, 5_000_000, D(2029, 6, 1))
+    assert abs(a5 - exp) < 1
+    # 150㎡は120㎡相当分だけ
+    a6, _ = est(SaleFacts(**{**h, "built": D(2025, 5, 1), "floor_area": 150.0}), 30_000_000, 5_000_000, D(2027, 6, 1))
+    assert abs(a6 - (exp - 5_000_000 * 0.014 * (120 / 150) / 2)) < 1
+    # マンションは5年度分
+    m = dict(property_type="mansion", price=50_000_000, seller_is_business=False, floor_area=60.0,
+             built=D(2022, 3, 1), structure="rc", address="東京都杉並区阿佐谷北1丁目")
+    a7, why7 = est(SaleFacts(**m), 8_000_000, 10_000_000, D(2026, 12, 1))
+    assert any("5年度分のうち4年度目" in w for w in why7), why7
+    # 土地だけ → 特例なし
+    a8, _ = est(SaleFacts(property_type="land", price=30_000_000, seller_is_business=False, land_area=100.0,
+                          address="東京都練馬区貫井2丁目"), 20_000_000, None, D(2027, 1, 1))
+    assert abs(a8 - 20_000_000 * 0.017 * 0.7) < 1
+    print("ALL OK 10")
+
+
+_t10()

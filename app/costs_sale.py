@@ -499,6 +499,53 @@ def fire_estimate(f: SaleFacts, s: CompanySaleSettings, staff: list[str]) -> tup
     return total, note
 
 
+
+def estimate_annual_property_tax(f: SaleFacts, land_eval: Optional[int], bldg_eval: Optional[int],
+                                 on: date) -> tuple[float, list[str]]:
+    """固定資産税・都市計画税の年税額の推計（販売図面・LINEに年税額がないときだけ使う）。(年税額, スタッフ向けの説明)
+    入れているもの（2026-11-03 確認）：
+      - 住宅用地の特例：住宅1戸につき200㎡までは固定1/6・都計1/3、200㎡を超える部分は固定1/3・都計2/3（土地だけの物件は特例なし）。
+        マンションの敷地持分は200㎡×戸数に収まるので全部を小規模住宅用地とみなす。
+      - 23区の小規模住宅用地の都市計画税は、税額の1/2を軽減（東京都主税局「固定資産税・都市計画税（土地・家屋）」令和8年度）。
+      - 新築住宅の減額：建物の固定資産税（都市計画税は対象外）の1/2、120㎡相当分まで。一般3年度分、
+        マンション（3階建以上の耐火・準耐火とみなす）5年度分。床面積は2026/3/31までの新築50〜280㎡、2026/4/1以後40〜240㎡。
+        2031/3/31までに新築された住宅（横浜市・千葉市・池田市の案内、2026年）。長期優良住宅（+2年）は図面で分からないため入れない。
+    入れていないもの：負担調整措置（土地の税額が本来の額より低く抑えられている場合）、市町村ごとの都市計画税率の違い
+    （0.3%で計算。市街化調整区域はかからない）、小規模非住宅用地の2割減免（23区、住宅以外）。"""
+    A = ASSUMPTIONS
+    why: list[str] = []
+    lv, bv = land_eval or 0, bldg_eval or 0
+    city = ev.split_address(f.address)[0] if f.address else ""
+    in23 = bool(city) and city.endswith("区") and "市" not in city
+    if f.property_type == "land":
+        land_k = lv * A["kotei_rate"] * 0.7     # 更地は住宅用地の特例なし（課税標準は評価額の7割が上限）
+        land_t = lv * A["toshi_rate"] * 0.7
+    else:
+        area = f.land_area if (f.property_type == "house" and f.land_area) else None
+        small = 1.0 if not area or area <= 200 else 200 / area
+        land_k = lv * A["kotei_rate"] * (small / 6 + (1 - small) / 3)
+        small_t = lv * small * A["toshi_rate"] / 3
+        if in23:
+            small_t *= 0.5
+        land_t = small_t + lv * (1 - small) * A["toshi_rate"] * 2 / 3
+        if small < 1:
+            why.append(f"土地{area:.0f}㎡のうち200㎡を超える部分は、一般住宅用地（固定資産税1/3・都市計画税2/3）で計算しています。")
+    bldg_k, bldg_t = bv * A["kotei_rate"], bv * A["toshi_rate"]
+    if f.property_type != "land" and f.built and bv and not f.is_new:
+        years = 5 if f.property_type == "mansion" else 3
+        first_fy = f.built.year + 1 if not (f.built.month == 1 and f.built.day == 1) else f.built.year
+        fy = on.year if on.month >= 4 else on.year - 1
+        lo, hi = ((50, 280) if f.built < date(2026, 4, 1) else (40, 240))
+        if f.built <= date(2031, 3, 31) and 0 <= fy - first_fy < years and f.floor_area and lo <= f.floor_area <= hi:
+            share = min(1.0, 120 / f.floor_area)
+            bldg_k -= bldg_k * share / 2
+            why.append(f"築浅のため、新築住宅の減額（建物の固定資産税1/2、{fy}年度は{years}年度分のうち{fy - first_fy + 1}年度目）を入れています。"
+                       "長期優良住宅なら期間が2年延びます。")
+    if f.property_type != "land" and not in23:
+        why.append("都市計画税は0.3%で計算しています。市町村によって税率が低い場合や、市街化調整区域でかからない場合があります。")
+    why.append("年税額は評価額からの推計です。土地は負担調整で実際の税額が低いことがあるため、納税通知書や公課証明書の額があればLINEで送ってください。")
+    return land_k + land_t + bldg_k + bldg_t, why
+
 def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = None,
             contract_day: Optional[date] = None, handover_day: Optional[date] = None,
             today: Optional[date] = None, land_data_override: Optional[ev.LandData] = None,
@@ -632,14 +679,8 @@ def compute(f: SaleFacts, s: CompanySaleSettings, loan: Optional[LoanPlan] = Non
     annual = f.annual_property_tax
     tax_est = False
     if annual is None and (land_eval is not None or bldg_eval is not None):
-        A = ASSUMPTIONS
-        lv = land_eval or 0
-        bv = bldg_eval or 0
-        if f.property_type == "land":
-            land_part = lv * (A["kotei_rate"] + A["toshi_rate"]) * 0.7   # 更地は住宅用地の特例なし（負担調整は粗く7割）
-        else:
-            land_part = lv * (A["kotei_rate"] / 6 + A["toshi_rate"] / 3)  # 小規模住宅用地
-        annual = land_part + bv * (A["kotei_rate"] + A["toshi_rate"])
+        annual, why = estimate_annual_property_tax(f, land_eval, bldg_eval, handover_day)
+        staff.extend(why)
         if f.is_new:
             annual = None  # 新築は年の途中で課税が始まるため清算しないことが多い
         tax_est = True
