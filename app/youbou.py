@@ -19,7 +19,8 @@ import texts
 
 log = logging.getLogger(__name__)
 
-KINDS = {"shitsumon": "使い方の質問", "fuguai": "不具合", "sonota": "その他", "kaiyaku": "解約理由"}
+KINDS = {"shitsumon": "使い方の質問", "fuguai": "不具合", "sonota": "その他", "kaiyaku": "解約理由",
+         "hojin": "法人プラン先行受付"}
 # 社内の分類（運営が対応のときに付ける。利用者には見せない）：要望（機能の追加）／不具合／質問／その他
 WAIT_MIN = 30          # 種類を選んでから、この分数のうちに届いた文・画像を受け付ける
 MAX_IMAGES = 4         # 1件に付けられる画像の数
@@ -153,10 +154,13 @@ def weekly_lines(days=7, limit=15):
     rows.sort(key=lambda x: x[1]["日時"])
     open_all = sum(1 for _, d in store.db().all(COL) if d.get("対応状況", "未対応") == "未対応")
     cnt = {k: sum(1 for _, d in rows if d.get("kind") == k) for k in KINDS}
+    hojin_all = sum(1 for _, d in store.db().all(COL) if d.get("kind") == "hojin")
     youbou = sum(1 for _, d in rows if d.get("分類") == "要望")
     out = ["■お問い合わせ・不具合・解約理由（この1週間）",
            f"使い方の質問 {cnt['shitsumon']}件・不具合 {cnt['fuguai']}件・その他 {cnt['sonota']}件・解約理由 {cnt['kaiyaku']}件"
            f"（うち要望に分類 {youbou}件。未対応の合計 {open_all}件）"]
+    if cnt["hojin"] or hojin_all:
+        out.append(f"法人プラン（パソコン版）の先行受付：この1週間 {cnt['hojin']}件（これまでの合計 {hojin_all}件）")
     for rid, d in rows[-limit:]:
         t = d["日時"].astimezone(store.JST)
         body = (d.get("本文") or "（画像のみ）").replace("\n", " ")
@@ -165,3 +169,32 @@ def weekly_lines(days=7, limit=15):
     if len(rows) > limit:
         out.append(f"ほか{len(rows) - limit}件")
     return "\n".join(out) + "\n"
+
+
+# ---------- 法人プラン（パソコン版）の先行受付（HPの売買ページのフォームから、2026-11-02） ----------
+# 2027/2/1 正式公開、12/3 から先行受付（本人OK 11/2）。価格は未確定のため、フォームでは希望の価格帯を聞くだけ。
+
+HOJIN_FIELDS = {"会社名": 80, "担当者名": 40, "メール": 120, "電話": 20, "人数": 10, "使いたい機能": 300,
+                "希望の価格帯": 40, "そのほか": 1000}
+
+
+def hojin_entry(form: dict, ip: str = ""):
+    """フォームの内容を requests（kind=hojin）に記録して運営へ知らせる。足りなければ (None, 理由)。"""
+    import re
+    v = {k: str(form.get(k) or "").strip()[:n] for k, n in HOJIN_FIELDS.items()}
+    if form.get("website"):  # 人には見えない欄（機械の書き込みよけ）
+        return None, "spam"
+    if not v["会社名"] or not v["担当者名"] or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v["メール"]):
+        return None, "missing"
+    # 同じ接続元から1時間に5件まで
+    hour = store.now() - timedelta(hours=1)
+    recent = [d for _, d in store.db().all(COL) if d.get("kind") == "hojin" and d.get("ip") == ip and d.get("日時") and d["日時"] >= hour]
+    if ip and len(recent) >= 5:
+        return None, "many"
+    rid = new_id()
+    body = "\n".join(f"{k}：{v[k]}" for k in HOJIN_FIELDS if v[k])
+    doc = {**_base("", {"company": {"会社名": v["会社名"], "担当者名": v["担当者名"]}}, "hojin"),
+           "本文": body, "フォーム": v, "ip": ip, "分類": "法人プラン先行受付"}
+    store.db().set(COL, rid, doc)
+    notify(doc)
+    return rid, ""

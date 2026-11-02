@@ -222,6 +222,23 @@ def cron_daily(x_cron_key: str = Header("")):
             "purged": retention.daily()}
 
 
+HOJIN_BACK = "https://otpromo.com/ippun-baibai.html"
+
+
+@app.post("/b/hojin")
+async def hojin_form(request: Request):
+    """HPの売買ページの「法人プラン（パソコン版）先行受付」フォーム。受け付けたらHPへ戻す（売買版のサーバーだけ）。"""
+    import youbou
+    if config.APP_MODE != "sale":
+        raise HTTPException(404)
+    form = await request.form()
+    data = {k: (", ".join(form.getlist(k)) if k == "使いたい機能" else form.get(k)) for k in form.keys()}
+    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")).split(",")[0].strip()
+    rid, why = youbou.hojin_entry(data, ip)
+    back = HOJIN_BACK + ("?hojin=ok#hojin" if rid or why == "spam" else f"?hojin={why}#hojin")
+    return RedirectResponse(back, status_code=303)
+
+
 @app.post("/cron/often")
 def cron_often(x_cron_key: str = Header("")):
     """Cloud Scheduler から5分ごとに呼ぶ（予約した内見FAXの送信、受取りFAXの確認のお知らせ、FAXの送信結果の問い合わせ、預かった募集図面の削除、お支払いの猶予切れ）。"""

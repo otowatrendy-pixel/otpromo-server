@@ -770,6 +770,26 @@ for mid in ("remain_free_last", "remain_light_low", "naiken_trial", "nudge_free_
     assert "1,480" not in t and "2,980" not in t and "使い放題" not in t and "{" not in t.replace('{"', "").replace("{}", ""), (mid, t[:300])
 assert store.quota(store.get_user(uidM))["remaining"] == 100
 assert "MAX（月払い）" in ps and "使い放題" not in ps and "月額2,680円" in ps and "年額26,800円" in ps and "月額4,680円" in ps and "年額46,800円" in ps and "1,480" not in ps, ps
+# 法人プラン（パソコン版）先行受付：HPのフォーム → /b/hojin → requests（kind=hojin）→ HPへ戻す
+import youbou, main as _main
+from fastapi.testclient import TestClient
+_tc = TestClient(_main.app)
+_nh = len([1 for _, d in store.db().all("requests") if d.get("kind") == "hojin"])
+r = _tc.post("/b/hojin", data={"会社名": "見本不動産", "担当者名": "見本 太郎", "メール": "taro@example.com", "人数": "4〜10人",
+                               "使いたい機能": ["販売図面の帯替え", "内見依頼FAX"], "希望の価格帯": "5,000〜9,999円", "website": ""}, follow_redirects=False)
+assert r.status_code == 303 and r.headers["location"].endswith("?hojin=ok#hojin"), (r.status_code, r.headers)
+hj = [d for _, d in store.db().all("requests") if d.get("kind") == "hojin"]
+assert len(hj) == _nh + 1 and hj[-1]["フォーム"]["使いたい機能"] == "販売図面の帯替え, 内見依頼FAX" and hj[-1]["分類"] == "法人プラン先行受付", hj[-1]
+r = _tc.post("/b/hojin", data={"会社名": "見本不動産", "担当者名": "", "メール": "taro@example.com"}, follow_redirects=False)
+assert r.headers["location"].endswith("?hojin=missing#hojin")
+r = _tc.post("/b/hojin", data={"会社名": "x", "担当者名": "y", "メール": "a@b.jp", "website": "http://spam"}, follow_redirects=False)
+assert r.headers["location"].endswith("?hojin=ok#hojin")  # 機械には成功に見せる（記録はしない）
+assert len([1 for _, d in store.db().all("requests") if d.get("kind") == "hojin"]) == _nh + 1
+for i in range(5):
+    youbou.hojin_entry({"会社名": "c", "担当者名": "d", "メール": "e@f.jp"}, "203.0.113.9")
+assert youbou.hojin_entry({"会社名": "c", "担当者名": "d", "メール": "e@f.jp"}, "203.0.113.9") == (None, "many")
+assert "法人プラン（パソコン版）の先行受付" in youbou.weekly_lines()
+print("法人プラン先行受付：OK")
 print("\nON: すべてOK")
 r = subprocess.run([sys.executable, __file__, "off"], env={**os.environ, "LOCAL_DIR": "/tmp/otpromo-sim-baibai-off"})
 assert r.returncode == 0
