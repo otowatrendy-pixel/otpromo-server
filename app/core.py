@@ -306,10 +306,9 @@ def render_fax(company: dict, img: Image.Image, result: Result) -> bytes:
     """FAX用の2ページ（帯替え図面＋初期費用概算書）を白黒で作る。"""
     company = {**DEFAULT_COMPANY, **(company or {}), "テーマ色": "#222222"}
     ob = render.fax_image(render.obikae(img, result, company))
-    html_text = render.build_html(result, render.png_bytes(ob), company, sections=render.FAX_SECTIONS, bw=True)
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "fax.pdf"
-        render.to_pdf(html_text, out)
+        render.fax_pdf(result, render.png_bytes(ob), company, out)
         return out.read_bytes()
 
 

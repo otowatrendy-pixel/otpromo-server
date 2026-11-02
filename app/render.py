@@ -349,7 +349,7 @@ h1 {{ color: var(--main); font-size: 16pt; border-bottom: 3px solid var(--main);
 h1 small {{ font-size: 9pt; color: #555; margin-left: 8px; }}
 section {{ page-break-after: always; }}
 section:last-child {{ page-break-after: auto; }}
-img {{ width: 100%; border: 1px solid #ccc; }}
+img {{ display: block; max-width: 100%; max-height: 248mm; width: auto; height: auto; margin: 0 auto; border: 1px solid #ccc; }}
 ol.pt li {{ margin-bottom: 10px; }} ol.pt p {{ margin: 2px 0; }} small {{ color: #666; }}
 table {{ width: 100%; border-collapse: collapse; }} td {{ border-bottom: 1px solid #dde; padding: 5px 4px; vertical-align: top; }}
 td.n {{ text-align: right; white-space: nowrap; width: 8em; }} tr.total td {{ font-weight: bold; border-top: 2px solid var(--main); }}
@@ -396,13 +396,28 @@ dt {{ font-weight: bold; margin-top: 8px; }} dd {{ margin: 2px 0 0 1.2em; }}
 {body}</html>"""
 
 
-def to_pdf(html_text, out: Path):
-    """HTMLをPDFにする。html_text に並びを渡すと、順にPDFにして1つにまとめる（pdfunite）。"""
+def to_pdf(html_text, out: Path, one_page=False):
+    """HTMLをPDFにする。html_text に並びを渡すと、順にPDFにして1つにまとめる（pdfunite）。
+    one_page=True なら、HTML1つにつき必ず1ページに収める（はみ出たら少しずつ縮める。FAX用）。"""
     htmls = [html_text] if isinstance(html_text, str) else list(html_text)
-    to_pdfs({out: htmls})
+    to_pdfs({out: htmls}, one_page=one_page)
 
 
-def to_pdfs(groups: dict):
+def fax_pdf(result, obikae_png: bytes, company: dict, out: Path):
+    """FAX用の2枚（帯替え図面・初期費用概算書）を白黒で、1枚ずつ必ず1ページに収めて作る。"""
+    to_pdf([build_html(result, obikae_png, company, sections=(s,), bw=True) for s in FAX_SECTIONS], out, one_page=True)
+
+
+def _pages(path):
+    import subprocess
+    out = subprocess.run(["pdfinfo", str(path)], capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        if line.startswith("Pages:"):
+            return int(line.split()[1])
+    return 1
+
+
+def to_pdfs(groups: dict, one_page=False):
     """{出力先: [HTML, …]} をまとめてPDFにする。ブラウザの起動は1回で済ませる。"""
     import shutil
     import subprocess
@@ -420,6 +435,13 @@ def to_pdfs(groups: dict):
                 page.evaluate("document.fonts.ready")
                 part = out.with_suffix(f".{i}.pdf")
                 page.pdf(path=str(part), format="A4", print_background=True)
+                for zoom in ((0.92, 0.85, 0.78, 0.7) if one_page else ()):
+                    if _pages(part) <= 1:
+                        break
+                    tmp.write_text(h.replace("</style>", f"body {{ zoom: {zoom}; }}</style>", 1), encoding="utf-8")
+                    page.goto(tmp.as_uri(), wait_until="networkidle")
+                    page.evaluate("document.fonts.ready")
+                    page.pdf(path=str(part), format="A4", print_background=True)
                 tmp.unlink()
                 parts.append(part)
             if len(parts) > 1:
