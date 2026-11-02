@@ -1,5 +1,5 @@
 """faximo のテスト送信（Cloud Shell 用・標準ライブラリだけ）。会社のFAXへ1枚送り、結果が出るまで待って表示する。
-使い方: python3 tools/fax_test.py [FAX番号]（省略時は 0335775600＝音羽トレンディの事務所FAX）
+使い方: python3 tools/fax_test.py [FAX番号] [送るPDF]（番号の省略時は 0335775600＝音羽トレンディの事務所FAX、PDFの省略時は英字1行の試験紙）
 ログインID・パスワードは Secret Manager の FAXIMO_ID・FAXIMO_PASSWORD から読む（画面には出さない）。"""
 import base64, json, secrets, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
@@ -38,7 +38,8 @@ def pdf():
     return out + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, x)
 
 
-att = [{"attachmentname": "test.pdf", "attachmentdata": base64.b64encode(pdf()).decode()}]
+data = open(sys.argv[2], "rb").read() if len(sys.argv) > 2 else pdf()  # 内見申込書の見本など、実物のPDFの写りも試せる
+att = [{"attachmentname": "test.pdf", "attachmentdata": base64.b64encode(data).decode()}]
 # 書き方を少しずつ変えて試し、最初に受け付けられた1回だけ送る（受け付けられなければ送られない＝枚数も減らない）
 tries = [
     ("日本語ヘッダー・再送回数を文字で", {"headerinfo": "株式会社音羽トレンディ（1分資料経由） @d@ @t@ P.@p@", "retrynum": "2",
