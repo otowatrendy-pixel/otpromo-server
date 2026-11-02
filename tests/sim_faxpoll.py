@@ -69,3 +69,25 @@ results["FX3"] = ("failed", "busy"); due(); delivery.poll_faxes()
 print(pushed[-1][0].get("text", "")[:60])
 assert faxopt.left(store.get_user(uid)) == left0
 print("OK")
+
+print("\n=== 内見申込書のQRを消す（使い放題だけ、11/2本人決定） ===")
+s.pb("edit=qr_hide")  # ライトでは消せない
+assert not store.get_user(uid)["company"].get("内見FAXのQRを消す")
+store.update_user(uid, {"plan": "unlimited"})
+s.pb("edit=card")     # 使い放題：名刺の情報かQRかを選ぶ
+s.pb("edit=qr_hide")
+assert store.get_user(uid)["company"]["内見FAXのQRを消す"] is True
+fid3, _ = naiken.save_preview(uid, d, store.get_user(uid)["company"])
+import subprocess, tempfile
+with tempfile.NamedTemporaryFile(suffix=".pdf") as t:
+    t.write(store.db().get_file(f"faxes/{fid3}/naiken_fax.pdf")); t.flush()
+    txt = subprocess.run(["pdftotext", t.name, "-"], capture_output=True, text=True).stdout
+assert "1分資料" not in txt, txt
+store.update_user(uid, {"plan": "light"})  # ライトに戻ればQRはまた載る
+fid4, _ = naiken.save_preview(uid, d, store.get_user(uid)["company"])
+with tempfile.NamedTemporaryFile(suffix=".pdf") as t:
+    t.write(store.db().get_file(f"faxes/{fid4}/naiken_fax.pdf")); t.flush()
+    txt = subprocess.run(["pdftotext", t.name, "-"], capture_output=True, text=True).stdout
+assert "LINEで作りました" in txt, txt
+s.pb("edit=card")
+print("OK（QR）")

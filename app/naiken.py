@@ -198,7 +198,7 @@ def me_from_company(co, guide=None):
             "email": co.get("メール", ""), "license": co.get("免許", "")}
 
 
-def build(d, company, via="line"):
+def build(d, company, via="line", plan=None):
     """下書きと会社情報から、申込書のPDF（控え・青）・プレビュー画像（PNG）・FAX送信用PDF（黒）を作る。
 
     スマホで見せる控えとプレビューは青のまま、faximo へ渡す送信用だけ文字・線・帯をすべて黒にする
@@ -212,7 +212,7 @@ def build(d, company, via="line"):
     kw = dict(wishes=[wish_label(w) for w in d.get("wishes", [])],
               to=to, me=me_from_company(company, d.get("guide")), guests=d.get("guests"),
               prop={"name": prop.get("name", ""), "room": prop.get("room"), "address": prop.get("address", "")},
-              via=via)
+              via=via, plan=plan)
     with tempfile.TemporaryDirectory() as tmp:
         pdf, fax_pdf = Path(tmp) / "naiken.pdf", Path(tmp) / "naiken_fax.pdf"
         # ブラウザの起動は1回で、控えと送信用の2つを作る
@@ -312,7 +312,7 @@ def add_pack(uid, n=PACK_SIZE):
 
 def save_preview(uid, d, company, via="line"):
     """プレビューを作って保存する。戻り値 (fax_id, rec)。via は作った経路（"line" / "app"）。"""
-    pdf, png, fax_pdf = build(d, company, via=via)
+    pdf, png, fax_pdf = build(d, company, via=via, plan=(store.get_user(uid) or {}).get("plan"))
     fid = "N" + store.now().strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(4)
     rec = {"user_id": uid, "status": "preview", "draft": d, "token": secrets.token_urlsafe(24),
            "expires_at": store.now() + timedelta(days=7), "created_at": store.now()}

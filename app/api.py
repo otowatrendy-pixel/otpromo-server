@@ -184,6 +184,7 @@ class CompanyIn(BaseModel):
     メール: str = ""
     FAX送り先: str = ""
     宛名を聞く: bool = True  # false なら初期費用概算書の宛名を聞かない（空欄で作る）
+    内見FAXのQRを消す: bool | None = None  # 使い放題プランだけ有効。true で内見申込書の下のQRと一言を載せない。送らなければ今の設定のまま
 
 
 @router.put("/me/company")
@@ -215,6 +216,8 @@ def put_company(body: CompanyIn, authorization: str = Header("")):
     delivery = {"method": co.pop("受け取り方"), "email": co.pop("メール"), "fax": co.pop("FAX送り先")}
     co["メール"] = co.pop("担当者メール")  # 名刺に載せるメール（受け取り用とは別）
     co["帯画像"] = (u.get("company") or {}).get("帯画像")
+    if co.get("内見FAXのQRを消す") is None:  # 古いアプリは送ってこないので、今の設定を残す
+        co["内見FAXのQRを消す"] = bool((u.get("company") or {}).get("内見FAXのQRを消す"))
     co["名刺済み"] = bool(co.get("担当者名"))
     store.update_user(uid, {"company": co, "delivery": delivery, "registered": True})
     return {"ok": True}

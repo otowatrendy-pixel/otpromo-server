@@ -31,12 +31,15 @@ groups = {
     out / "mihon_hikae.pdf": [h()],                                 # スマホで見る控え（青）
     out / "mihon_fax-soushin.pdf": [h(fax=True)],                   # FAX送信用（黒）
     out / "mihon_app_fax-soushin.pdf": [h(fax=True, via="app")],    # アプリから作った申込書（一言が「アプリ」）
-    out / "mihon_qr-nashi_fax-soushin.pdf": [h(company=dict(CO, 内見FAXのQR="なし"), fax=True)],
+    out / "mihon_qr-nashi_fax-soushin.pdf": [h(company=dict(CO, 内見FAXのQRを消す=True), plan="unlimited", fax=True)],
     out / "mihon_nagai-namae_fax-soushin.pdf": [h(company=LONG, to=TO_LONG, fax=True)],
 }
 # 確認：一言が入る・アプリは「LINE」と書かない・QRなしは一言も出ない・送信用だけ黒
 assert "スマホからLINEで作りました（1分資料）" in h() and "LINE" not in h(via="app").split('class="cap')[1][:80]
-assert "class=\"cap" not in h(company=dict(CO, 内見FAXのQR="なし")) and "<svg" not in h(company=dict(CO, 内見FAXのQR="なし")).split("<body>")[1]
+HIDE = dict(CO, 内見FAXのQRを消す=True)
+assert "class=\"cap" not in h(company=HIDE, plan="unlimited") and "<svg" not in h(company=HIDE, plan="unlimited").split("<body>")[1]
+# QRを消せるのは使い放題だけ（11/2本人決定）。ライト・無料お試しでは設定が残っていてもQRは載る
+assert "class=\"cap" in h(company=HIDE, plan="light") and "class=\"cap" in h(company=HIDE, plan="free")
 assert "--ink:#000" in h(fax=True) and "--ink:#000" not in h()
 assert "マイソク" not in h()
 render.to_pdfs(groups)

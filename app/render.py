@@ -455,19 +455,24 @@ NAIKEN_FAX_CSS = """
 """
 
 
-def naiken_qr_on(company: dict) -> bool:
-    """会社の設定で「内見申込書にQRを載せない」を選んでいれば False（設定の入口・料金は未定。11/11の公開後に決める）。"""
-    return (company or {}).get("内見FAXのQR") != "なし"
+def naiken_qr_on(company: dict, plan=None) -> bool:
+    """内見申込書にQRと一言を載せるか。
+
+    11/2本人決定：QRを消せるのは使い放題プラン（月払い・年払い・店舗まとめ割）の方だけ。追加料金なし。
+    設定は company["内見FAXのQRを消す"]。ライト・無料お試しに戻ったら、設定が残っていてもQRは載る。
+    """
+    return not (plan == "unlimited" and (company or {}).get("内見FAXのQRを消す"))
 
 
 def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=None, prop=None,
-                fax=False, via="line", qr_caption=None) -> str:
+                fax=False, via="line", qr_caption=None, plan=None) -> str:
     """内見申込書（FAX用）。テンプレートは内見FAX担当が作った naiken_template.html（Jinja2）。
 
     資料一式に入れるときは希望日時を空欄にし、元付業者と自社の情報だけ入れておく。
     fax : True ならFAXで送る版（文字・線・帯をすべて黒）。スマホで見る控え・プレビューは False（青のまま）
     via : 申込書を作った経路（"line" / "app"）。QRの下の一言を分ける
     qr_caption : QRの下の一言を直接決めるとき（"" で一言なし）
+    plan : 利用者のプラン（"free" / "light" / "unlimited"）。使い放題で「QRを消す」設定ならQRを載せない
     """
     from jinja2 import Template
     f = r.事実
@@ -502,7 +507,7 @@ def naiken_html(r: Result, company: dict, wishes=None, to=None, me=None, guests=
     # 会社の設定で「載せない」なら、QRも一言も出さない
     from markupsafe import Markup
     qr = HERE / "static" / "naiken-qr.svg"
-    on = naiken_qr_on(company) and qr.exists()
+    on = naiken_qr_on(company, plan) and qr.exists()
     data["qr_svg"] = Markup(qr.read_text(encoding="utf-8")) if on else ""
     data["qr_caption"] = (NAIKEN_QR_CAPTION.get(via, NAIKEN_QR_CAPTION["line"]) if qr_caption is None else qr_caption) if on else ""
     html_text = Template(tpl, autoescape=True).render(**data)
