@@ -82,7 +82,7 @@ def run_due():
             store.update_user(uid, {"nudge_at": None, "nudge_step": None})
             continue
         mid = "nudge_first_d1" if step == 1 else "nudge_first_d3"
-        text = ("ご登録ありがとうございます。\nお手元の募集図面を、まず1枚撮って送ってみてください。1分ほどで、接客に使える資料が届きます。"
+        text = ("ご登録ありがとうございます。\nお手元の募集図面を、まず1枚撮って送ってみてください。最短30秒で、接客に使える資料が届きます。"
                 if step == 1 else
                 "その後いかがでしょうか。\n募集図面を1枚送っていただくだけで、帯替え図面や初期費用の概算書がそろいます。\n"
                 "無料でお試しいただける分が、まだ残っています。")
