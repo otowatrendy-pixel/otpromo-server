@@ -188,7 +188,7 @@ def funnel(users=None):
     now = store.now()
     f = {"friends": 0, "registered": 0, "first_doc": 0, "five_docs": 0, "paid": 0, "continued": 0}
     for _, u in users:
-        if u.get("review"):
+        if not usage.counted(u):
             continue
         if u.get("line_uid") or u.get("firebase_uid"):
             f["friends"] += 1
@@ -212,7 +212,7 @@ def weekly_report():
     import delivery
     users = store.db().all("users")
     f = funnel(users)
-    paid_now = sum(1 for _, u in users if (u.get("plan") or "free") in ("light", "unlimited") and not u.get("review"))
+    paid_now = sum(1 for _, u in users if (u.get("plan") or "free") in ("light", "unlimited") and usage.counted(u))
     t = store.now().astimezone(store.JST)
     key = t.strftime("%Y%m")
     goal = TARGETS.get(key)

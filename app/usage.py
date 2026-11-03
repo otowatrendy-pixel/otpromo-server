@@ -192,6 +192,23 @@ def stats():
     }
 
 
+def counted(u):
+    """日報・週報の人数に数えるか。ストア審査用と、サービス開始日（STORE_CAMPAIGN_START）より前に作られた
+    テスト・関係者の記録は数えない（11/3 公開前の総点検：数字を0から始めるため）。"""
+    if u.get("review"):
+        return False
+    start = config.STORE_CAMPAIGN_START
+    made = u.get("created_at")
+    if start and made:
+        from datetime import datetime
+        try:
+            if made < datetime.fromisoformat(start).replace(tzinfo=store.JST):
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
+
+
 def user_stats():
     """利用者数（日報用）。有料はプランと払い方の内訳、お試し中、今月の新規登録、今月の解約。"""
     t = _jst()
@@ -199,8 +216,8 @@ def user_stats():
     paid = {"light_month": 0, "light_year": 0, "unlimited_month": 0, "unlimited_year": 0}
     trial = new = ended = blocked = 0
     for _, u in store.db().all("users"):
-        if u.get("review"):
-            continue  # ストア審査用のアカウントは数えない
+        if not counted(u):
+            continue  # ストア審査用・公開前のテストの記録は数えない
         plan = u.get("plan") or "free"
         if plan in ("light", "unlimited"):
             key = f"{plan}_{'year' if u.get('billing_interval') == 'year' else 'month'}"
