@@ -64,15 +64,15 @@ PLAN_PRICES = [  # (config の名前, lookup_key, 商品, 税込の金額, 間�
 # lookup_key も商品も賃貸版と分ける（service=maisoku_sale）。店舗まとめ割は売買版にはまだない
 SALE_PLAN_PRICES = [
     ("PRICE_LIGHT", "sale_light_monthly", "light", 2680, "month", "売買版 ライト 月額2,680円（税込）"),
-    ("PRICE_UNLIMITED", "sale_unlimited_monthly", "unlimited", 4680, "month", "売買版 MAX 月額4,680円（税込）"),
+    ("PRICE_UNLIMITED", "sale_unlimited_monthly", "unlimited", 4680, "month", "売買版 売買MAX 月額4,680円（税込）"),
     ("PRICE_LIGHT_YEAR", "sale_light_yearly", "light", 26800, "year", "売買版 ライト 年額26,800円（税込）"),
-    ("PRICE_UNLIMITED_YEAR", "sale_unlimited_yearly", "unlimited", 46800, "year", "売買版 MAX 年額46,800円（税込）"),
+    ("PRICE_UNLIMITED_YEAR", "sale_unlimited_yearly", "unlimited", 46800, "year", "売買版 売買MAX 年額46,800円（税込）"),
 ]
 SALE_PRODUCTS = {
-    "light": {"name": "1分資料 売買版 ライトプラン",
+    "light": {"name": "1分資料 売買版（ライト）",
               "description": "売買の販売図面から、帯替え図面・物件のおすすめポイント・住宅ローンシミュレーションと購入諸費用の概算書などをお作りします。件数と内見依頼FAXの回数には月ごとの上限があります（年払いでも毎月同じです）。",
               "metadata": {"service": "maisoku_sale", "plan": "light"}},
-    "unlimited": {"name": "1分資料 売買版 MAXプラン",
+    "unlimited": {"name": "1分資料 売買版（売買MAX）",
                   "description": "売買の販売図面から、ライトより多くの件数の資料をお作りします。件数と内見依頼FAXの回数には月ごとの上限があります（年払いでも毎月同じです）。",
                   "metadata": {"service": "maisoku_sale", "plan": "unlimited"}},
 }
